@@ -1,0 +1,3 @@
+[submodule "extern/klayout"]
+	path = extern/klayout
+	url = ../klayout
