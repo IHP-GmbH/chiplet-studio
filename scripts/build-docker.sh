@@ -54,14 +54,30 @@ docker run --rm \
     chiplet-studio-build \
     bash -c "
         set -e
-        echo 'Building KLayout libraries...'
-        cd /workspace/extern/klayout
-        ./build.sh -j$PARALLEL -without-qtbinding
+
+        # Try to build KLayout libraries (optional)
+        KLAYOUT_DIR=/workspace/extern/klayout/bin-release
+        if [ -f \"\$KLAYOUT_DIR/libklayout_db.so\" ]; then
+            echo 'KLayout libraries already built'
+        else
+            echo 'Attempting to build KLayout libraries...'
+            cd /workspace/extern/klayout
+            if ./build.sh -j$PARALLEL -without-qtbinding 2>&1; then
+                echo 'KLayout build successful'
+            else
+                echo 'KLayout build failed (Qt not available?) - continuing without KLayout'
+                KLAYOUT_DIR=''
+            fi
+        fi
 
         echo 'Building Chiplet Studio...'
         cd /workspace
         mkdir -p build && cd build
-        cmake .. -DKLAYOUT_BUILD_DIR=/workspace/extern/klayout/bin-release
+        if [ -n \"\$KLAYOUT_DIR\" ]; then
+            cmake .. -DKLAYOUT_BUILD_DIR=\$KLAYOUT_DIR
+        else
+            cmake ..
+        fi
         make -j$PARALLEL
     "
 

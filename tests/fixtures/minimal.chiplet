@@ -1,0 +1,6 @@
+format_version: "1.0"
+
+assembly:
+  name: "Test Assembly"
+  description: "Minimal test file"
+  units: "um"

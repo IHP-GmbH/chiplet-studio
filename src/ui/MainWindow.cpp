@@ -68,7 +68,7 @@ void MainWindow::setupPanels()
 void MainWindow::onFileNew()
 {
     m_assembly = std::make_unique<Assembly>();
-    m_assembly->setName("Untitled");
+    m_assembly->set_name("Untitled");
 }
 
 void MainWindow::onFileOpen()

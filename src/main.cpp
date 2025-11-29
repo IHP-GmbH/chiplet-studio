@@ -13,7 +13,7 @@ int main(int argc, char *argv[])
     app.setApplicationName("Chiplet Studio");
     app.setApplicationVersion("0.1.0");
 
-    MainWindow window;
+    chiplet::MainWindow window;
     window.show();
 
     return app.exec();

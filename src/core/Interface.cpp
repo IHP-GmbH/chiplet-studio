@@ -24,32 +24,32 @@ InterfaceType Interface::type() const
     return m_type;
 }
 
-void Interface::setFrom(const InterfaceEndpoint& from)
+void Interface::set_from(const endpoint_type& from)
 {
     m_from = from;
 }
 
-const InterfaceEndpoint& Interface::from() const
+const Interface::endpoint_type& Interface::from() const
 {
     return m_from;
 }
 
-void Interface::setTo(const InterfaceEndpoint& to)
+void Interface::set_to(const endpoint_type& to)
 {
     m_to = to;
 }
 
-const InterfaceEndpoint& Interface::to() const
+const Interface::endpoint_type& Interface::to() const
 {
     return m_to;
 }
 
-void Interface::setPhysical(const InterfacePhysical& physical)
+void Interface::set_physical(const physical_type& physical)
 {
     m_physical = physical;
 }
 
-const InterfacePhysical& Interface::physical() const
+const Interface::physical_type& Interface::physical() const
 {
     return m_physical;
 }

@@ -24,64 +24,95 @@ ComponentType Component::type() const
     return m_type;
 }
 
-void Component::setTechnology(const std::string& techId)
+void Component::set_technology(const string_type& techId)
 {
     m_technology = techId;
 }
 
-const std::string& Component::technology() const
+const Component::string_type& Component::technology() const
 {
     return m_technology;
 }
 
-void Component::setLayoutPath(const std::string& path)
+void Component::set_layout_path(const string_type& path)
 {
     m_layoutPath = path;
 }
 
-const std::string& Component::layoutPath() const
+const Component::string_type& Component::layout_path() const
 {
     return m_layoutPath;
 }
 
-void Component::setTopCell(const std::string& cell)
+void Component::set_top_cell(const string_type& cell)
 {
     m_topCell = cell;
 }
 
-const std::string& Component::topCell() const
+const Component::string_type& Component::top_cell() const
 {
     return m_topCell;
 }
 
-void Component::setPosition(const Position3D& pos)
+void Component::set_position(const position_type& pos)
 {
     m_position = pos;
 }
 
-const Position3D& Component::position() const
+const Component::position_type& Component::position() const
 {
     return m_position;
 }
 
-void Component::setRotation(const Rotation3D& rot)
+void Component::set_rotation(const rotation_type& rot)
 {
     m_rotation = rot;
 }
 
-const Rotation3D& Component::rotation() const
+const Component::rotation_type& Component::rotation() const
 {
     return m_rotation;
 }
 
-void Component::setDimensions(const Dimensions3D& dims)
+void Component::set_dimensions(const dimensions_type& dims)
 {
     m_dimensions = dims;
 }
 
-const Dimensions3D& Component::dimensions() const
+const Component::dimensions_type& Component::dimensions() const
 {
     return m_dimensions;
+}
+
+void Component::set_array(const array_type& array)
+{
+    m_array = array;
+}
+
+const std::optional<Component::array_type>& Component::array() const
+{
+    return m_array;
+}
+
+bool Component::is_array() const
+{
+    return m_array.has_value();
+}
+
+void Component::set_metadata(const string_type& key, const string_type& value)
+{
+    m_metadata[key] = value;
+}
+
+Component::string_type Component::metadata(const string_type& key) const
+{
+    auto it = m_metadata.find(key);
+    return (it != m_metadata.end()) ? it->second : string_type();
+}
+
+const Component::metadata_type& Component::all_metadata() const
+{
+    return m_metadata;
 }
 
 } // namespace chiplet

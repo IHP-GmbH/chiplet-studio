@@ -1,0 +1,52 @@
+format_version: "1.0"
+
+assembly:
+  name: "Test Assembly with Components"
+  description: "Full test file with components"
+  author: "Test Author"
+  created: "2024-01-15"
+  modified: "2024-01-20"
+  units: "um"
+
+technologies:
+  test_tech:
+    description: "Test technology"
+    layer_properties: "./tech/test.lyp"
+    dbu: 0.001
+
+components:
+  - id: substrate
+    type: substrate
+    technology: test_tech
+    dimensions: {width: 10000, height: 10000, thickness: 500}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: interposer
+    type: interposer
+    technology: test_tech
+    layout: "./layouts/interposer.gds"
+    top_cell: "INTERPOSER_TOP"
+    position: {x: 0, y: 0, z: 500}
+    dimensions: {width: 8000, height: 8000, thickness: 100}
+
+  - id: logic_die
+    type: die
+    technology: test_tech
+    layout: "./layouts/logic.gds"
+    top_cell: "LOGIC_TOP"
+    position: {x: 1000, y: 1000, z: 650}
+    rotation: {z: 0}
+    metadata:
+      vendor: "Test Vendor"
+      part_number: "TEST-001"
+
+  - id: hbm_stack
+    type: die_array
+    technology: test_tech
+    layout: "./layouts/hbm.gds"
+    top_cell: "HBM_TOP"
+    array:
+      pattern: "grid"
+      count: {x: 2, y: 2}
+      pitch: {x: 1500, y: 2000}
+      start_position: {x: 4000, y: 1000, z: 650}
