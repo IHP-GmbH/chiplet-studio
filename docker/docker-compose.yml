@@ -1,0 +1,42 @@
+# docker-compose.yml - Orchestration for build and runtime
+
+services:
+  # Build service - compiles KLayout and Chiplet Studio
+  build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    volumes:
+      - ..:/workspace
+      - build-cache:/workspace/build
+      - klayout-cache:/workspace/extern/klayout/build-release
+    working_dir: /workspace
+
+  # Runtime service - runs pre-built application
+  runtime:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    volumes:
+      - ../build:/app:ro
+      - ../extern/klayout/bin-release:/app/lib:ro
+      # Mount project files for opening .chiplet files
+      - ${PROJECT_DIR:-/tmp}:/project
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-xcb}
+      - LD_LIBRARY_PATH=/app/lib
+    # X11 forwarding
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    network_mode: host
+
+volumes:
+  build-cache:
+  klayout-cache:
