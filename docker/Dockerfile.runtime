@@ -1,0 +1,38 @@
+# Dockerfile.runtime - Runtime environment for Chiplet Studio
+#
+# Lightweight image for running pre-built binaries
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Qt6 runtime libraries
+RUN apt-get update && apt-get install -y \
+    libqt6core6 \
+    libqt6gui6 \
+    libqt6widgets6 \
+    libqt6opengl6 \
+    libqt6openglwidgets6 \
+    libgl1-mesa-glx \
+    libglu1-mesa \
+    libyaml-cpp0.7 \
+    && rm -rf /var/lib/apt/lists/*
+
+# X11/Wayland support for GUI
+RUN apt-get update && apt-get install -y \
+    libxcb-xinerama0 \
+    libxkbcommon-x11-0 \
+    libxcb-cursor0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g ${GID} runner && \
+    useradd -u ${UID} -g ${GID} -m runner
+
+USER runner
+WORKDIR /app
+
+# Entry point
+ENTRYPOINT ["/app/chiplet-studio"]

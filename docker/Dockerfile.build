@@ -1,0 +1,57 @@
+# Dockerfile.build - Build environment for Chiplet Studio
+#
+# Contains all dependencies to compile KLayout and Chiplet Studio
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Base build tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Qt6 development packages
+RUN apt-get update && apt-get install -y \
+    qt6-base-dev \
+    qt6-base-dev-tools \
+    libqt6opengl6-dev \
+    libqt6openglwidgets6 \
+    libgl1-mesa-dev \
+    libglu1-mesa-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# KLayout build dependencies
+RUN apt-get update && apt-get install -y \
+    ruby \
+    ruby-dev \
+    python3 \
+    python3-dev \
+    libz-dev \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# yaml-cpp for .chiplet format parsing
+RUN apt-get update && apt-get install -y \
+    libyaml-cpp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for builds
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g ${GID} builder && \
+    useradd -u ${UID} -g ${GID} -m builder
+
+WORKDIR /workspace
+
+# Default command: build everything
+CMD ["bash", "-c", "\
+    cd /workspace/extern/klayout && \
+    ./build.sh -j$(nproc) -without-qtbinding && \
+    cd /workspace && \
+    mkdir -p build && cd build && \
+    cmake .. -DKLAYOUT_BUILD_DIR=/workspace/extern/klayout/bin-release && \
+    make -j$(nproc)"]
