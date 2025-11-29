@@ -1,0 +1,18 @@
+format_version: "1.0"
+
+assembly:
+  name: "Test Assembly with Technologies"
+  description: "Test file with technology definitions"
+  author: "Test Author"
+  units: "um"
+
+technologies:
+  test_tech:
+    description: "Test technology"
+    layer_properties: "./tech/test.lyp"
+    dbu: 0.001
+
+  interposer_tech:
+    description: "Interposer technology"
+    layer_properties: "./tech/interposer.lyp"
+    dbu: 0.001

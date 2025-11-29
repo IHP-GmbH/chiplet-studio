@@ -1,0 +1,5 @@
+format_version: "1.0"
+
+assembly:
+  name: [unclosed bracket
+  description: This should be a syntax error

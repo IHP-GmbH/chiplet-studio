@@ -20,9 +20,14 @@ RUN apt-get update && apt-get install -y \
     qt6-base-dev-tools \
     libqt6opengl6-dev \
     libqt6openglwidgets6 \
+    libqt6core5compat6-dev \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Create qmake symlink for KLayout build (Qt6 names it qmake6)
+# Use -sf to force overwrite if qtchooser created a different symlink
+RUN ln -sf /usr/bin/qmake6 /usr/bin/qmake
 
 # KLayout build dependencies
 RUN apt-get update && apt-get install -y \
@@ -32,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     libz-dev \
     libcurl4-openssl-dev \
+    libgit2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # yaml-cpp for .chiplet format parsing

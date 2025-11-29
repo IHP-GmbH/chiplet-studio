@@ -61,9 +61,74 @@ Contains: metadata, technologies, components, interfaces, netlist.
 Auto-generated cache for rendering performance.
 Contains: meshes, textures, spatial index.
 
+## KLayout Integration Architecture
+
+### Conditional Compilation (HAVE_KLAYOUT)
+
+The project supports building with or without KLayout libraries:
+
+```
+CMake Detection:
+├── KLAYOUT_BUILD_DIR set?
+│   ├── Yes → Check for libklayout_db.so
+│   │   ├── Found → HAVE_KLAYOUT=ON
+│   │   └── Not found → Warning, HAVE_KLAYOUT=OFF
+│   └── No → Warning, HAVE_KLAYOUT=OFF
+```
+
+Benefits:
+- Project builds without KLayout dependencies
+- CI/CD can run without building KLayout
+- Developers can work on UI without KLayout setup
+
+### KLayoutBridge (PIMPL Pattern)
+
+```cpp
+// Header (no KLayout includes when HAVE_KLAYOUT undefined)
+class KLayoutBridge {
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+public:
+    bool load_layout(const std::string& path);
+    // ...
+};
+
+// Implementation
+#ifdef HAVE_KLAYOUT
+    struct KLayoutBridge::Impl {
+        std::unique_ptr<db::Layout> mp_layout;  // KLayout type
+    };
+    // Full implementation
+#else
+    struct KLayoutBridge::Impl { /* empty */ };
+    // Stub implementation (returns false/empty)
+#endif
+```
+
+### Validation Architecture
+
+```
+TechnologyValidation
+├── valid: bool
+├── errors: vector<string>
+└── warnings: vector<string>
+    Methods:
+    ├── add_error() → sets valid=false
+    └── add_warning() → keeps valid=true
+
+AssemblyValidation
+├── Inherits TechnologyValidation structure
+└── merge(TechnologyValidation, context)
+    → Prefixes messages with context
+```
+
+Validation checks:
+- **Technology**: ID not empty, .lyp file exists, DBU positive
+- **Assembly**: All tech refs resolve, layout files exist
+
 ## Dependencies
 
 - Qt6 (UI framework)
 - OpenGL (3D rendering)
 - yaml-cpp (YAML parsing)
-- KLayout libraries (layout operations)
+- KLayout libraries (optional - layout operations)

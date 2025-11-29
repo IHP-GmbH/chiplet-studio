@@ -42,27 +42,36 @@ struct InterfaceEndpoint {
  */
 class Interface {
 public:
-    Interface(const std::string& id, InterfaceType type);
+    // Type definitions
+    typedef std::string string_type;
+    typedef InterfaceEndpoint endpoint_type;
+    typedef InterfacePhysical physical_type;
+
+    // Constructors and destructor
+    Interface(const string_type& id, InterfaceType type);
     ~Interface();
 
-    const std::string& id() const;
+    // Getters - identity
+    const string_type& id() const;
     InterfaceType type() const;
 
-    void setFrom(const InterfaceEndpoint& from);
-    const InterfaceEndpoint& from() const;
+    // Getters/Setters - endpoints
+    void set_from(const endpoint_type& from);
+    const endpoint_type& from() const;
 
-    void setTo(const InterfaceEndpoint& to);
-    const InterfaceEndpoint& to() const;
+    void set_to(const endpoint_type& to);
+    const endpoint_type& to() const;
 
-    void setPhysical(const InterfacePhysical& physical);
-    const InterfacePhysical& physical() const;
+    // Getters/Setters - physical parameters
+    void set_physical(const physical_type& physical);
+    const physical_type& physical() const;
 
 private:
-    std::string m_id;
+    string_type m_id;
     InterfaceType m_type;
-    InterfaceEndpoint m_from;
-    InterfaceEndpoint m_to;
-    InterfacePhysical m_physical;
+    endpoint_type m_from;
+    endpoint_type m_to;
+    physical_type m_physical;
 };
 
 } // namespace chiplet

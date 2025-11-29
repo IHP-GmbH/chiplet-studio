@@ -19,14 +19,28 @@ find_package(yaml-cpp REQUIRED)
 set(KLAYOUT_SRC_DIR "${CMAKE_SOURCE_DIR}/extern/klayout/src")
 set(KLAYOUT_BUILD_DIR "" CACHE PATH "Path to KLayout build directory (e.g., extern/klayout/bin-release)")
 
-if(NOT KLAYOUT_BUILD_DIR)
-    message(WARNING "KLAYOUT_BUILD_DIR not set. KLayout integration will be limited.")
+# Check if KLayout libraries exist
+set(HAVE_KLAYOUT FALSE)
+if(KLAYOUT_BUILD_DIR)
+    if(EXISTS "${KLAYOUT_BUILD_DIR}/libklayout_db.so" OR
+       EXISTS "${KLAYOUT_BUILD_DIR}/libklayout_db.dylib" OR
+       EXISTS "${KLAYOUT_BUILD_DIR}/klayout_db.dll")
+        set(HAVE_KLAYOUT TRUE)
+        message(STATUS "KLayout libraries found at ${KLAYOUT_BUILD_DIR}")
+    else()
+        message(WARNING "KLAYOUT_BUILD_DIR set but libraries not found. Run KLayout build first.")
+    endif()
+else()
+    message(WARNING "KLAYOUT_BUILD_DIR not set. KLayout integration will be disabled.")
 endif()
 
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
     ${KLAYOUT_SRC_DIR}
+    ${KLAYOUT_SRC_DIR}/db/db
+    ${KLAYOUT_SRC_DIR}/tl/tl
+    ${KLAYOUT_SRC_DIR}/gsi/gsi
 )
 
 # Source files
@@ -74,13 +88,23 @@ target_link_libraries(chiplet-studio
     yaml-cpp
 )
 
-# Link KLayout libraries if build directory is set
-if(KLAYOUT_BUILD_DIR)
+# Link KLayout libraries if available
+if(HAVE_KLAYOUT)
+    target_compile_definitions(chiplet-studio PRIVATE HAVE_KLAYOUT)
     target_link_directories(chiplet-studio PRIVATE ${KLAYOUT_BUILD_DIR})
     target_link_libraries(chiplet-studio
         klayout_tl
+        klayout_gsi
         klayout_db
     )
+    # Set RPATH so runtime can find KLayout libraries
+    set_target_properties(chiplet-studio PROPERTIES
+        BUILD_RPATH "${KLAYOUT_BUILD_DIR}"
+        INSTALL_RPATH "${KLAYOUT_BUILD_DIR}"
+    )
+    message(STATUS "KLayout integration: ENABLED")
+else()
+    message(STATUS "KLayout integration: DISABLED (stub implementation)")
 endif()
 
 # Tests
