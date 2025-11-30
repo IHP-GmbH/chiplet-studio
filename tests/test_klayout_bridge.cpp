@@ -99,20 +99,16 @@ TEST(KLayoutBridge, MoveAssignment)
 
 TEST(KLayoutBridge, LoadValidGds)
 {
-    // This test requires a valid GDS file in the fixtures
+    // Uses sample_minimal.gds fixture (copied from KLayout testdata/arefs.gds)
     KLayoutBridge bridge;
 
-    bool result = bridge.load_layout("fixtures/sample.gds");
+    bool result = bridge.load_layout("fixtures/sample_minimal.gds");
 
-    if (result) {
-        EXPECT_TRUE(bridge.is_loaded());
-        EXPECT_EQ(bridge.path(), "fixtures/sample.gds");
-        EXPECT_FALSE(bridge.format().empty());
-        EXPECT_GT(bridge.cell_count(), 0u);
-    } else {
-        // File doesn't exist - skip test
-        GTEST_SKIP() << "sample.gds fixture not available";
-    }
+    ASSERT_TRUE(result) << "Failed to load fixtures/sample_minimal.gds";
+    EXPECT_TRUE(bridge.is_loaded());
+    EXPECT_EQ(bridge.path(), "fixtures/sample_minimal.gds");
+    EXPECT_EQ(bridge.format(), "GDS2");
+    EXPECT_GT(bridge.cell_count(), 0u);
 }
 
 TEST(KLayoutBridge, AccessLayout)

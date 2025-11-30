@@ -73,11 +73,13 @@ set(VIEW3D_SOURCES
     src/view3d/ComponentMesh.cpp
     src/view3d/MeshBuilder.cpp
     src/view3d/AssemblyView.cpp
+    src/view3d/ClipPlane.cpp
     ${VIEW3D_MATH_SOURCES}
 )
 
 set(VIEW2D_SOURCES
     src/view2d/KLayoutBridge.cpp
+    src/view2d/LayerProperties.cpp
 )
 
 set(UI_SOURCES
@@ -121,16 +123,23 @@ target_link_libraries(chiplet-studio
 # Link KLayout libraries if available
 if(HAVE_KLAYOUT)
     target_compile_definitions(chiplet-studio PRIVATE HAVE_KLAYOUT)
-    target_link_directories(chiplet-studio PRIVATE ${KLAYOUT_BUILD_DIR})
+    target_link_directories(chiplet-studio PRIVATE
+        ${KLAYOUT_BUILD_DIR}
+        ${KLAYOUT_BUILD_DIR}/db_plugins
+    )
+    # Force loading of format plugins (they register via static constructors)
     target_link_libraries(chiplet-studio
         klayout_tl
         klayout_gsi
         klayout_db
+        -Wl,--no-as-needed  # Prevent linker from dropping unused libraries
+        gds2  # Format plugin for GDS files
+        -Wl,--as-needed
     )
-    # Set RPATH so runtime can find KLayout libraries
+    # Set RPATH so runtime can find KLayout libraries and plugins
     set_target_properties(chiplet-studio PROPERTIES
-        BUILD_RPATH "${KLAYOUT_BUILD_DIR}"
-        INSTALL_RPATH "${KLAYOUT_BUILD_DIR}"
+        BUILD_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
+        INSTALL_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
     )
     message(STATUS "KLayout integration: ENABLED")
 else()

@@ -22,16 +22,24 @@ add_executable(chiplet_tests
     test_chiplet_format.cpp
     test_validation.cpp
     test_klayout_bridge.cpp
+    test_gds_loading.cpp
+    test_layer_properties.cpp
+    test_clip_plane.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
+# Find Qt6 (needed for LayerProperties XML parsing and ClipPlane vectors)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+
 # Base libraries
 target_link_libraries(chiplet_tests
     GTest::gtest_main
     yaml-cpp
+    Qt6::Core
+    Qt6::Gui
 )
 
 # Link core sources (we need them for testing)
@@ -42,6 +50,8 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/Technology.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ChipletFormat.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayoutBridge.cpp
+    ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/ClipPlane.cpp
 )
 
 # KLayout integration for tests (if available)
@@ -53,16 +63,23 @@ if(HAVE_KLAYOUT)
         ${KLAYOUT_SRC_DIR}/tl/tl
         ${KLAYOUT_SRC_DIR}/gsi/gsi
     )
-    target_link_directories(chiplet_tests PRIVATE ${KLAYOUT_BUILD_DIR})
+    target_link_directories(chiplet_tests PRIVATE
+        ${KLAYOUT_BUILD_DIR}
+        ${KLAYOUT_BUILD_DIR}/db_plugins
+    )
+    # Force loading of format plugins (they register via static constructors)
     target_link_libraries(chiplet_tests
         klayout_tl
         klayout_gsi
         klayout_db
+        -Wl,--no-as-needed  # Prevent linker from dropping unused libraries
+        gds2  # Format plugin for GDS files
+        -Wl,--as-needed
     )
-    # Set RPATH so runtime can find KLayout libraries
+    # Set RPATH so runtime can find KLayout libraries and plugins
     set_target_properties(chiplet_tests PROPERTIES
-        BUILD_RPATH "${KLAYOUT_BUILD_DIR}"
-        INSTALL_RPATH "${KLAYOUT_BUILD_DIR}"
+        BUILD_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
+        INSTALL_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
     )
 endif()
 
