@@ -16,11 +16,14 @@ class QCheckBox;
 class QPushButton;
 class QButtonGroup;
 
+class QDockWidget;
+
 namespace chiplet {
 
 class HierarchyPanel;
 class PropertiesPanel;
 class AssemblyView;
+class KLayout2DView;
 
 /**
  * MainWindow is the main application window.
@@ -44,6 +47,9 @@ private slots:
     void onClipFlip();
     void updateClipPositionLabel();
 
+    // 2D drill-down
+    void onComponentDrillDown(const QString& componentId);
+
 private:
     void setupMenus();
     void setupPanels();
@@ -53,6 +59,11 @@ private:
     HierarchyPanel* m_hierarchyPanel = nullptr;
     PropertiesPanel* m_propertiesPanel = nullptr;
     AssemblyView* m_assemblyView = nullptr;
+
+    // 2D view dock
+    KLayout2DView* m_klayout2DView = nullptr;
+    QDockWidget* m_klayout2DDock = nullptr;
+    QDockWidget* m_propertiesDock = nullptr;
 
     // Clip plane toolbar widgets
     QToolBar* m_clipToolbar = nullptr;

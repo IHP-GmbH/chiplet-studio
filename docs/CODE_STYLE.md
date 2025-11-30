@@ -4,6 +4,114 @@ This document defines the coding patterns for chiplet-studio, based on KLayout's
 
 **Reference:** Study `extern/klayout/src/` for examples of these patterns.
 
+---
+
+## CRITICAL: Robustness and Stability Requirements
+
+**This application is designed for complex system design. Robustness and stability are non-negotiable requirements.**
+
+### Zero Tolerance for Crashes
+
+Segmentation faults, null pointer dereferences, and unhandled exceptions are **absolutely unacceptable**. A crash in a design tool can result in hours of lost work and destroys user trust.
+
+**Mandatory practices:**
+
+1. **Defensive initialization** - Never assume resources are available
+   ```cpp
+   // WRONG: Assumes display is available
+   KLayout2DView::KLayout2DView() {
+       m_viewWidget = new lay::LayoutViewWidget(...);  // May crash headless
+   }
+
+   // CORRECT: Lazy initialization with environment checking
+   bool KLayout2DView::ensureViewWidget() {
+       if (m_initAttempted && !m_viewAvailable) return false;
+       m_initAttempted = true;
+       if (!isDisplayAvailable()) {
+           qWarning("No display available");
+           return false;
+       }
+       try {
+           m_viewWidget = new lay::LayoutViewWidget(...);
+           m_viewAvailable = true;
+           return true;
+       } catch (...) {
+           m_viewAvailable = false;
+           return false;
+       }
+   }
+   ```
+
+2. **Null pointer checks** - Always verify pointers before use
+   ```cpp
+   // WRONG
+   void process(Component* comp) {
+       return comp->name();  // Crash if null
+   }
+
+   // CORRECT
+   void process(Component* comp) {
+       if (!comp) return;
+       return comp->name();
+   }
+   ```
+
+3. **Safe method calls** - Methods must be safe to call in any state
+   ```cpp
+   // All public methods must be safe even without initialization
+   void KLayout2DView::zoomFit() {
+       if (m_viewWidget && m_viewWidget->view()) {
+           m_viewWidget->view()->zoom_fit();
+       }
+       // No crash if widget not initialized
+   }
+   ```
+
+4. **Graceful degradation** - Features should degrade, not crash
+   ```cpp
+   // If KLayout not available, return safe defaults
+   bool KLayout2DView::hasLayout() const {
+   #ifdef HAVE_KLAYOUT
+       if (m_viewWidget && m_viewWidget->view()) {
+           return m_viewWidget->view()->cellviews() > 0;
+       }
+   #endif
+       return false;  // Safe default
+   }
+   ```
+
+5. **Exception safety** - Wrap external library calls in try/catch
+   ```cpp
+   try {
+       externalLibrary->riskyOperation();
+   } catch (const std::exception& e) {
+       qWarning("Operation failed: %s", e.what());
+       // Recover to safe state
+   } catch (...) {
+       qWarning("Unknown error in operation");
+       // Recover to safe state
+   }
+   ```
+
+### Testing Requirements
+
+- **All code paths must be tested**, including error cases
+- **Tests must pass in all environments**: with display, headless, with/without KLayout
+- **No test should crash** - even tests for error conditions must pass gracefully
+- **Use GTEST_SKIP() for environment-dependent tests**, not disabled tests
+
+### Code Review Checklist for Robustness
+
+Before merging any code, verify:
+- [ ] No raw pointer dereferences without null checks
+- [ ] All external library calls wrapped in try/catch
+- [ ] All public methods safe to call in any object state
+- [ ] Tests pass in headless mode (QT_QPA_PLATFORM=offscreen)
+- [ ] No crashes when resources unavailable (display, files, libraries)
+- [ ] Graceful error messages instead of silent failures
+
+---
+
 ## Member Variable Naming
 
 ```cpp

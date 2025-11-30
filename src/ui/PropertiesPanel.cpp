@@ -3,11 +3,21 @@
  */
 
 #include "PropertiesPanel.h"
-#include <QFormLayout>
-#include <QLineEdit>
-#include <QDoubleSpinBox>
-#include <QLabel>
+#include "UnitConverter.h"
+#include "core/Assembly.h"
+#include <QScrollArea>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QLabel>
+#include <QComboBox>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QHeaderView>
+#include <QPixmap>
+#include <QIcon>
+#include <QFileInfo>
 
 namespace chiplet {
 
@@ -21,49 +31,377 @@ PropertiesPanel::~PropertiesPanel() = default;
 
 void PropertiesPanel::setupUI()
 {
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(8, 8, 8, 8);
+    QVBoxLayout* rootLayout = new QVBoxLayout(this);
+    rootLayout->setContentsMargins(4, 4, 4, 4);
+    rootLayout->setSpacing(4);
 
-    m_form = new QFormLayout();
-    mainLayout->addLayout(m_form);
-    mainLayout->addStretch();
+    createUnitSelector();
+    rootLayout->addLayout(static_cast<QLayout*>(m_unitCombo->parentWidget()->layout()));
+
+    // Scroll area for content
+    m_scrollArea = new QScrollArea(this);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
+
+    m_contentWidget = new QWidget();
+    m_mainLayout = new QVBoxLayout(m_contentWidget);
+    m_mainLayout->setContentsMargins(0, 0, 0, 0);
+    m_mainLayout->setSpacing(2);
+
+    createGroupBoxes();
+    m_mainLayout->addStretch();
+
+    m_scrollArea->setWidget(m_contentWidget);
+    rootLayout->addWidget(m_scrollArea);
+}
+
+void PropertiesPanel::createUnitSelector()
+{
+    QWidget* unitWidget = new QWidget(this);
+    QHBoxLayout* unitLayout = new QHBoxLayout(unitWidget);
+    unitLayout->setContentsMargins(0, 0, 0, 4);
+
+    QLabel* unitLabel = new QLabel("Unit:", unitWidget);
+    m_unitCombo = new QComboBox(unitWidget);
+    m_unitCombo->addItems(UnitConverter::availableUnits());
+    m_unitCombo->setCurrentIndex(UnitConverter::indexFromUnit(
+        UnitConverter::instance().currentUnit()));
+    m_unitCombo->setFixedWidth(60);
+
+    connect(m_unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PropertiesPanel::onUnitChanged);
+
+    unitLayout->addWidget(unitLabel);
+    unitLayout->addWidget(m_unitCombo);
+    unitLayout->addStretch();
+}
+
+QGroupBox* PropertiesPanel::createCollapsibleGroup(const QString& title)
+{
+    QGroupBox* group = new QGroupBox(title);
+    group->setCheckable(true);
+    group->setChecked(true);
+    connect(group, &QGroupBox::toggled, this, &PropertiesPanel::onGroupToggled);
+    return group;
+}
+
+void PropertiesPanel::createGroupBoxes()
+{
+    // Component Group
+    m_componentGroup = createCollapsibleGroup("Component");
+    QFormLayout* compLayout = new QFormLayout(m_componentGroup);
+    compLayout->setContentsMargins(8, 8, 8, 8);
+    compLayout->setSpacing(4);
+    addPropertyRow(compLayout, "ID:", m_idLabel);
+    addPropertyRow(compLayout, "Type:", m_typeLabel);
+    addPropertyRow(compLayout, "Technology:", m_techLabel);
+    m_mainLayout->addWidget(m_componentGroup);
+
+    // Position Group
+    m_positionGroup = createCollapsibleGroup("Position");
+    QFormLayout* posLayout = new QFormLayout(m_positionGroup);
+    posLayout->setContentsMargins(8, 8, 8, 8);
+    posLayout->setSpacing(4);
+    addPropertyRow(posLayout, "X:", m_posXLabel);
+    addPropertyRow(posLayout, "Y:", m_posYLabel);
+    addPropertyRow(posLayout, "Z:", m_posZLabel);
+    addPropertyRow(posLayout, "Rotation Z:", m_rotZLabel);
+    m_mainLayout->addWidget(m_positionGroup);
+
+    // Dimensions Group
+    m_dimensionsGroup = createCollapsibleGroup("Dimensions");
+    QFormLayout* dimLayout = new QFormLayout(m_dimensionsGroup);
+    dimLayout->setContentsMargins(8, 8, 8, 8);
+    dimLayout->setSpacing(4);
+    addPropertyRow(dimLayout, "Width:", m_widthLabel);
+    addPropertyRow(dimLayout, "Height:", m_heightLabel);
+    addPropertyRow(dimLayout, "Thickness:", m_thicknessLabel);
+    m_mainLayout->addWidget(m_dimensionsGroup);
+
+    // Layout Group
+    m_layoutGroup = createCollapsibleGroup("Layout");
+    QFormLayout* layoutLayout = new QFormLayout(m_layoutGroup);
+    layoutLayout->setContentsMargins(8, 8, 8, 8);
+    layoutLayout->setSpacing(4);
+    addPropertyRow(layoutLayout, "File:", m_layoutPathLabel);
+    addPropertyRow(layoutLayout, "Top Cell:", m_topCellLabel);
+    m_mainLayout->addWidget(m_layoutGroup);
+
+    // Layers Group
+    m_layersGroup = createCollapsibleGroup("Layers (0)");
+    QVBoxLayout* layersLayout = new QVBoxLayout(m_layersGroup);
+    layersLayout->setContentsMargins(8, 8, 8, 8);
+    m_layerTree = new QTreeWidget();
+    m_layerTree->setHeaderLabels({"Layer", "L/D"});
+    m_layerTree->setRootIsDecorated(false);
+    m_layerTree->setMaximumHeight(150);
+    m_layerTree->header()->setStretchLastSection(false);
+    m_layerTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_layerTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    layersLayout->addWidget(m_layerTree);
+    m_mainLayout->addWidget(m_layersGroup);
+
+    // Array Group (hidden by default)
+    m_arrayGroup = createCollapsibleGroup("Array Configuration");
+    QFormLayout* arrayLayout = new QFormLayout(m_arrayGroup);
+    arrayLayout->setContentsMargins(8, 8, 8, 8);
+    arrayLayout->setSpacing(4);
+    addPropertyRow(arrayLayout, "Pattern:", m_arrayPatternLabel);
+    addPropertyRow(arrayLayout, "Count:", m_arrayCountLabel);
+    addPropertyRow(arrayLayout, "Pitch:", m_arrayPitchLabel);
+    m_arrayGroup->setVisible(false);
+    m_mainLayout->addWidget(m_arrayGroup);
+
+    // Metadata Group
+    m_metadataGroup = createCollapsibleGroup("Metadata");
+    QVBoxLayout* metaLayout = new QVBoxLayout(m_metadataGroup);
+    metaLayout->setContentsMargins(8, 8, 8, 8);
+    m_metadataTree = new QTreeWidget();
+    m_metadataTree->setHeaderLabels({"Key", "Value"});
+    m_metadataTree->setRootIsDecorated(false);
+    m_metadataTree->setMaximumHeight(100);
+    m_metadataTree->header()->setStretchLastSection(true);
+    metaLayout->addWidget(m_metadataTree);
+    m_mainLayout->addWidget(m_metadataGroup);
+}
+
+void PropertiesPanel::addPropertyRow(QFormLayout* layout, const QString& label, QLabel*& valueLabel)
+{
+    valueLabel = createValueLabel();
+    layout->addRow(label, valueLabel);
+}
+
+QLabel* PropertiesPanel::createValueLabel(const QString& text)
+{
+    QLabel* label = new QLabel(text);
+    label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    label->setWordWrap(true);
+    return label;
 }
 
 void PropertiesPanel::setComponent(Component* component)
 {
     m_component = component;
-    refresh();
+    updateDisplay();
 }
 
-void PropertiesPanel::refresh()
+void PropertiesPanel::setAssembly(Assembly* assembly)
 {
-    // Clear existing form
-    while (m_form->rowCount() > 0) {
-        m_form->removeRow(0);
-    }
+    m_assembly = assembly;
+}
 
+void PropertiesPanel::clearSelection()
+{
+    m_component = nullptr;
+
+    // Reset all labels
+    m_idLabel->setText("-");
+    m_typeLabel->setText("-");
+    m_techLabel->setText("-");
+    m_posXLabel->setText("-");
+    m_posYLabel->setText("-");
+    m_posZLabel->setText("-");
+    m_rotZLabel->setText("-");
+    m_widthLabel->setText("-");
+    m_heightLabel->setText("-");
+    m_thicknessLabel->setText("-");
+    m_layoutPathLabel->setText("-");
+    m_topCellLabel->setText("-");
+
+    // Clear trees
+    m_layerTree->clear();
+    m_layersGroup->setTitle("Layers (0)");
+    m_metadataTree->clear();
+
+    // Hide array group
+    m_arrayGroup->setVisible(false);
+}
+
+void PropertiesPanel::onUnitChanged(int index)
+{
+    UnitConverter::instance().setUnit(UnitConverter::unitFromIndex(index));
+    updateDisplay();
+}
+
+void PropertiesPanel::onGroupToggled(bool checked)
+{
+    QGroupBox* group = qobject_cast<QGroupBox*>(sender());
+    if (group) {
+        // Find the content widget and toggle visibility
+        QLayout* layout = group->layout();
+        if (layout) {
+            for (int i = 0; i < layout->count(); ++i) {
+                QWidget* w = layout->itemAt(i)->widget();
+                if (w) {
+                    w->setVisible(checked);
+                }
+            }
+        }
+    }
+}
+
+void PropertiesPanel::updateDisplay()
+{
     if (!m_component) {
-        m_form->addRow(new QLabel("No component selected"));
+        clearSelection();
         return;
     }
 
-    // ID (read-only)
-    QLineEdit* idEdit = new QLineEdit(QString::fromStdString(m_component->id()));
-    idEdit->setReadOnly(true);
-    m_form->addRow("ID:", idEdit);
+    updateComponentGroup();
+    updatePositionGroup();
+    updateDimensionsGroup();
+    updateLayoutGroup();
+    updateLayersGroup();
+    updateArrayGroup();
+    updateMetadataGroup();
+}
 
-    // Technology
-    QLineEdit* techEdit = new QLineEdit(QString::fromStdString(m_component->technology()));
-    techEdit->setReadOnly(true);
-    m_form->addRow("Technology:", techEdit);
+void PropertiesPanel::updateComponentGroup()
+{
+    m_idLabel->setText(QString::fromStdString(m_component->id()));
+    m_typeLabel->setText(typeToString(m_component->type()));
+    m_techLabel->setText(m_component->technology().empty() ?
+                         "-" : QString::fromStdString(m_component->technology()));
+}
 
-    // Position
+void PropertiesPanel::updatePositionGroup()
+{
     const Position3D& pos = m_component->position();
-    m_form->addRow("Position X:", new QLabel(QString::number(pos.x)));
-    m_form->addRow("Position Y:", new QLabel(QString::number(pos.y)));
-    m_form->addRow("Position Z:", new QLabel(QString::number(pos.z)));
+    m_posXLabel->setText(formatValue(pos.x));
+    m_posYLabel->setText(formatValue(pos.y));
+    m_posZLabel->setText(formatValue(pos.z));
+    m_rotZLabel->setText(formatDegrees(m_component->rotation().z));
+}
 
-    // TODO: Add editable fields with proper change handling
+void PropertiesPanel::updateDimensionsGroup()
+{
+    const Dimensions3D& dims = m_component->dimensions();
+    m_widthLabel->setText(formatValue(dims.width));
+    m_heightLabel->setText(formatValue(dims.height));
+    m_thicknessLabel->setText(formatValue(dims.thickness));
+}
+
+void PropertiesPanel::updateLayoutGroup()
+{
+    const std::string& layoutPath = m_component->layout_path();
+    if (layoutPath.empty()) {
+        m_layoutPathLabel->setText("-");
+        m_topCellLabel->setText("-");
+    } else {
+        // Show just filename, not full path
+        QFileInfo fi(QString::fromStdString(layoutPath));
+        m_layoutPathLabel->setText(fi.fileName());
+        m_layoutPathLabel->setToolTip(QString::fromStdString(layoutPath));
+
+        m_topCellLabel->setText(m_component->top_cell().empty() ?
+                                "-" : QString::fromStdString(m_component->top_cell()));
+    }
+}
+
+void PropertiesPanel::updateLayersGroup()
+{
+    m_layerTree->clear();
+    loadLayerProperties();
+
+    if (m_layerProps.layers().empty()) {
+        m_layersGroup->setTitle("Layers (0)");
+        return;
+    }
+
+    m_layersGroup->setTitle(QString("Layers (%1)").arg(m_layerProps.layer_count()));
+
+    for (const auto& layer : m_layerProps.layers()) {
+        QTreeWidgetItem* item = new QTreeWidgetItem();
+
+        // Color swatch as icon
+        QPixmap pix(12, 12);
+        pix.fill(QColor(layer.fill_color.r, layer.fill_color.g,
+                        layer.fill_color.b, layer.fill_color.a));
+        item->setIcon(0, QIcon(pix));
+
+        item->setText(0, QString::fromStdString(layer.name));
+        item->setText(1, QString("%1/%2").arg(layer.key.layer).arg(layer.key.datatype));
+        m_layerTree->addTopLevelItem(item);
+    }
+}
+
+void PropertiesPanel::updateArrayGroup()
+{
+    bool isArray = m_component->is_array();
+    m_arrayGroup->setVisible(isArray);
+
+    if (isArray && m_component->array().has_value()) {
+        const ComponentArray& arr = m_component->array().value();
+        m_arrayPatternLabel->setText(QString::fromStdString(arr.pattern));
+        m_arrayCountLabel->setText(QString("%1 x %2").arg(arr.countX).arg(arr.countY));
+        m_arrayPitchLabel->setText(QString("%1 x %2")
+            .arg(formatValue(arr.pitchX))
+            .arg(formatValue(arr.pitchY)));
+    }
+}
+
+void PropertiesPanel::updateMetadataGroup()
+{
+    m_metadataTree->clear();
+
+    const auto& metadata = m_component->all_metadata();
+    if (metadata.empty()) {
+        m_metadataGroup->setVisible(false);
+        return;
+    }
+
+    m_metadataGroup->setVisible(true);
+    for (const auto& [key, value] : metadata) {
+        QTreeWidgetItem* item = new QTreeWidgetItem();
+        item->setText(0, QString::fromStdString(key));
+        item->setText(1, QString::fromStdString(value));
+        m_metadataTree->addTopLevelItem(item);
+    }
+}
+
+void PropertiesPanel::loadLayerProperties()
+{
+    m_layerProps = LayerPropertiesFile();  // Reset
+
+    if (!m_component || m_component->technology().empty()) {
+        return;
+    }
+
+    if (!m_assembly) {
+        return;
+    }
+
+    Technology* tech = m_assembly->resolve_component_technology(m_component);
+    if (!tech) {
+        return;
+    }
+
+    const std::string& lypPath = tech->layer_properties_path();
+    if (!lypPath.empty()) {
+        m_layerProps.load(lypPath);
+    }
+}
+
+QString PropertiesPanel::formatValue(double um) const
+{
+    return UnitConverter::instance().toDisplayString(um);
+}
+
+QString PropertiesPanel::formatDegrees(double degrees) const
+{
+    return QString::number(degrees, 'f', 2) + QString::fromUtf8("\u00B0");  // degree symbol
+}
+
+QString PropertiesPanel::typeToString(ComponentType type) const
+{
+    switch (type) {
+        case ComponentType::Die: return "Die";
+        case ComponentType::DieArray: return "Die Array";
+        case ComponentType::Interposer: return "Interposer";
+        case ComponentType::Substrate: return "Substrate";
+    }
+    return "Unknown";
 }
 
 } // namespace chiplet
