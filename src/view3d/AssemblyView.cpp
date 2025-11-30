@@ -124,9 +124,11 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_assembly = assembly;
     m_needsRebuild = true;
     m_selectedComponent.clear();
+    m_layerProps.clear();
 
     if (m_initialized) {
         makeCurrent();
+        loadLayerProperties();
         buildMeshes();
         updateSceneBounds();
         fitToAssembly();
@@ -222,6 +224,7 @@ void AssemblyView::initializeGL()
 
     // Build meshes if assembly was set before initialization
     if (m_assembly && m_needsRebuild) {
+        loadLayerProperties();
         buildMeshes();
         updateSceneBounds();
         fitToAssembly();
@@ -263,6 +266,35 @@ void AssemblyView::paintGL()
     renderComponents();
 }
 
+void AssemblyView::loadLayerProperties()
+{
+    m_layerProps.clear();
+
+    if (!m_assembly) {
+        return;
+    }
+
+    // Load .lyp files for each technology
+    const auto& techs = m_assembly->technologies();
+    for (const auto& techPtr : techs) {
+        const std::string& techId = techPtr->id();
+        const std::string& lypPath = techPtr->layer_properties_path();
+        if (!lypPath.empty()) {
+            LayerPropertiesFile lyp;
+            if (lyp.load(lypPath)) {
+                size_t layerCount = lyp.layer_count();
+                m_layerProps[techId] = std::move(lyp);
+                qDebug() << "Loaded" << layerCount << "layers from"
+                         << QString::fromStdString(lypPath);
+            } else {
+                qWarning() << "Failed to load layer properties:"
+                           << QString::fromStdString(lypPath)
+                           << "-" << QString::fromStdString(lyp.error());
+            }
+        }
+    }
+}
+
 void AssemblyView::buildMeshes()
 {
     m_meshes.clear();
@@ -274,7 +306,17 @@ void AssemblyView::buildMeshes()
     const auto& components = m_assembly->components();
     for (const auto& comp : components) {
         if (comp) {
-            ComponentMesh mesh = MeshBuilder::buildComponentMesh(*comp);
+            // Find layer properties for component's technology
+            const LayerPropertiesFile* lyp = nullptr;
+            const std::string& techId = comp->technology();
+            if (!techId.empty()) {
+                auto it = m_layerProps.find(techId);
+                if (it != m_layerProps.end()) {
+                    lyp = &(it->second);
+                }
+            }
+
+            ComponentMesh mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
             mesh.upload();
             m_meshes.emplace(QString::fromStdString(comp->id()), std::move(mesh));
         }

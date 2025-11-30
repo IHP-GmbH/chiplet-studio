@@ -16,6 +16,7 @@
 #include "SceneManager.h"
 #include "ClipPlane.h"
 #include "core/Assembly.h"
+#include "view2d/LayerProperties.h"
 
 namespace chiplet {
 
@@ -69,6 +70,7 @@ protected:
 
 private:
     void buildMeshes();
+    void loadLayerProperties();
     void renderComponents();
     void renderGrid();
     QString pickComponent(int x, int y);
@@ -77,6 +79,9 @@ private:
     // Data
     Assembly* m_assembly = nullptr;
     QString m_selectedComponent;
+
+    // Layer properties cache (technology_id -> LayerPropertiesFile)
+    std::map<std::string, LayerPropertiesFile> m_layerProps;
 
     // Scene management
     SceneManager m_scene;

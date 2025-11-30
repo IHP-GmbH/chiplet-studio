@@ -7,6 +7,7 @@
 
 #include "ComponentMesh.h"
 #include "core/Component.h"
+#include "view2d/LayerProperties.h"
 #include <QColor>
 
 namespace chiplet {
@@ -17,7 +18,9 @@ namespace chiplet {
 class MeshBuilder {
 public:
     // Generate box mesh for a component
-    static ComponentMesh buildComponentMesh(const Component& comp);
+    // If lyp is provided, uses layer colors from .lyp file
+    static ComponentMesh buildComponentMesh(const Component& comp,
+                                            const LayerPropertiesFile* lyp = nullptr);
 
     // Generate a simple box mesh with given dimensions
     static ComponentMesh buildBox(float width, float height, float depth,
@@ -26,8 +29,19 @@ public:
     // Generate a reference grid on the XZ plane
     static ComponentMesh buildGridMesh(float size, float spacing);
 
-    // Get color for component type
+    // Get color for component based on type and optional .lyp
+    static QColor colorForComponent(const Component& comp,
+                                    const LayerPropertiesFile* lyp = nullptr);
+
+    // Get fallback color for component type (when no .lyp available)
     static QColor colorForComponentType(ComponentType type);
+
+    // Convert LayerColor to QColor
+    static QColor toQColor(const LayerColor& lc);
+
+    // Layer keys for top metal (used for component colors)
+    static constexpr int kTopMetal2Layer = 134;
+    static constexpr int kTopMetal2Datatype = 0;
 };
 
 } // namespace chiplet

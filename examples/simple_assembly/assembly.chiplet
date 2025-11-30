@@ -1,0 +1,73 @@
+# Simple Test Assembly
+# Demonstrates a basic chiplet stack with substrate, interposer, and two dies
+
+format_version: "1.0"
+
+assembly:
+  name: "Simple Test Assembly"
+  description: "Basic 2.5D chiplet configuration for testing"
+  author: "Chiplet Studio"
+  created: "2024-11-30"
+  units: "um"
+
+technologies:
+  interposer_tech:
+    description: "Interposer technology (derived from IHP SG13G2)"
+    layer_properties: "../../pdks/interposer/interposer.lyp"
+    dbu: 0.001
+
+components:
+  # Substrate (base layer)
+  - id: substrate
+    type: substrate
+    dimensions:
+      width: 20000
+      height: 20000
+      thickness: 500
+    position:
+      x: 0
+      y: 0
+      z: -500
+
+  # Interposer (redistribution layer)
+  - id: interposer
+    type: interposer
+    technology: interposer_tech
+    dimensions:
+      width: 15000
+      height: 15000
+      thickness: 100
+    position:
+      x: 0
+      y: 0
+      z: 0
+
+  # Die A (left side)
+  - id: die_a
+    type: die
+    technology: interposer_tech
+    dimensions:
+      width: 5000
+      height: 5000
+      thickness: 200
+    position:
+      x: -3000
+      y: 0
+      z: 150
+    metadata:
+      part_number: "DIE-A-001"
+
+  # Die B (right side)
+  - id: die_b
+    type: die
+    technology: interposer_tech
+    dimensions:
+      width: 5000
+      height: 5000
+      thickness: 200
+    position:
+      x: 3000
+      y: 0
+      z: 150
+    metadata:
+      part_number: "DIE-B-001"

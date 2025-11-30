@@ -7,7 +7,8 @@
 
 namespace chiplet {
 
-ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp)
+ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp,
+                                               const LayerPropertiesFile* lyp)
 {
     const auto& dims = comp.dimensions();
     const auto& pos = comp.position();
@@ -21,7 +22,7 @@ ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp)
     float z = static_cast<float>(pos.z / 1000.0);
 
     ComponentMesh mesh = buildBox(w, h, d, x, y, z);
-    mesh.setColor(colorForComponentType(comp.type()));
+    mesh.setColor(colorForComponent(comp, lyp));
 
     return mesh;
 }
@@ -144,6 +145,34 @@ QColor MeshBuilder::colorForComponentType(ComponentType type)
         default:
             return QColor(128, 128, 128);   // Gray
     }
+}
+
+QColor MeshBuilder::colorForComponent(const Component& comp,
+                                       const LayerPropertiesFile* lyp)
+{
+    // Substrate always uses fixed color (no .lyp)
+    if (comp.type() == ComponentType::Substrate) {
+        return colorForComponentType(ComponentType::Substrate);
+    }
+
+    // If no .lyp provided, use fallback colors
+    if (!lyp) {
+        return colorForComponentType(comp.type());
+    }
+
+    // Look up TopMetal2 color from .lyp
+    const LayerStyle* style = lyp->find(kTopMetal2Layer, kTopMetal2Datatype);
+    if (style) {
+        return toQColor(style->fill_color);
+    }
+
+    // Fallback to type-based color
+    return colorForComponentType(comp.type());
+}
+
+QColor MeshBuilder::toQColor(const LayerColor& lc)
+{
+    return QColor(lc.r, lc.g, lc.b, lc.a);
 }
 
 } // namespace chiplet
