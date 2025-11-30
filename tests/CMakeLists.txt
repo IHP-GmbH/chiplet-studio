@@ -25,14 +25,18 @@ add_executable(chiplet_tests
     test_gds_loading.cpp
     test_layer_properties.cpp
     test_clip_plane.cpp
+    test_component_style.cpp
+    test_hierarchy_panel.cpp
+    test_properties_panel.cpp
+    test_klayout_2dview.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
-# Find Qt6 (needed for LayerProperties XML parsing and ClipPlane vectors)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+# Find Qt6 (needed for LayerProperties XML parsing, ClipPlane vectors, HierarchyPanel, and KLayout2DView)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Core5Compat Test)
 
 # Base libraries
 target_link_libraries(chiplet_tests
@@ -40,6 +44,9 @@ target_link_libraries(chiplet_tests
     yaml-cpp
     Qt6::Core
     Qt6::Gui
+    Qt6::Widgets
+    Qt6::Core5Compat
+    Qt6::Test
 )
 
 # Link core sources (we need them for testing)
@@ -51,17 +58,31 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/formats/ChipletFormat.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayoutBridge.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp
+    ${CMAKE_SOURCE_DIR}/src/view2d/KLayout2DView.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/ClipPlane.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/ComponentStyle.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/HierarchyPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/UnitConverter.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/PropertiesPanel.cpp
 )
 
 # KLayout integration for tests (if available)
 if(HAVE_KLAYOUT)
-    target_compile_definitions(chiplet_tests PRIVATE HAVE_KLAYOUT)
+    target_compile_definitions(chiplet_tests PRIVATE HAVE_KLAYOUT HAVE_QT)
     target_include_directories(chiplet_tests PRIVATE
         ${KLAYOUT_SRC_DIR}
         ${KLAYOUT_SRC_DIR}/db/db
         ${KLAYOUT_SRC_DIR}/tl/tl
         ${KLAYOUT_SRC_DIR}/gsi/gsi
+        # KLayout 2D view libraries
+        ${KLAYOUT_SRC_DIR}/layview/layview
+        ${KLAYOUT_SRC_DIR}/laybasic/laybasic
+        ${KLAYOUT_SRC_DIR}/lay/lay
+        ${KLAYOUT_SRC_DIR}/layui/layui
+        ${KLAYOUT_SRC_DIR}/ant/ant
+        ${KLAYOUT_SRC_DIR}/img/img
+        ${KLAYOUT_SRC_DIR}/edt/edt
+        ${KLAYOUT_SRC_DIR}/rdb/rdb
     )
     target_link_directories(chiplet_tests PRIVATE
         ${KLAYOUT_BUILD_DIR}
@@ -69,9 +90,20 @@ if(HAVE_KLAYOUT)
     )
     # Force loading of format plugins (they register via static constructors)
     target_link_libraries(chiplet_tests
+        # Core libraries
         klayout_tl
         klayout_gsi
         klayout_db
+        # 2D view libraries
+        klayout_laybasic
+        klayout_lay
+        klayout_layui
+        klayout_layview
+        klayout_ant
+        klayout_img
+        klayout_edt
+        klayout_rdb
+        # Format plugins
         -Wl,--no-as-needed  # Prevent linker from dropping unused libraries
         gds2  # Format plugin for GDS files
         -Wl,--as-needed

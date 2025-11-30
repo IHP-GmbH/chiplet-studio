@@ -5,9 +5,11 @@
 #include "MainWindow.h"
 #include "HierarchyPanel.h"
 #include "PropertiesPanel.h"
+#include "view2d/KLayout2DView.h"
 #include "view3d/AssemblyView.h"
 #include "view3d/ClipPlane.h"
 #include "formats/ChipletFormat.h"
+#include "core/Technology.h"
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -68,16 +70,28 @@ void MainWindow::setupPanels()
     addDockWidget(Qt::LeftDockWidgetArea, hierarchyDock);
 
     // Properties panel (right dock)
-    QDockWidget* propertiesDock = new QDockWidget("Properties", this);
-    m_propertiesPanel = new PropertiesPanel(propertiesDock);
-    propertiesDock->setWidget(m_propertiesPanel);
-    addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
+    m_propertiesDock = new QDockWidget("Properties", this);
+    m_propertiesPanel = new PropertiesPanel(m_propertiesDock);
+    m_propertiesDock->setWidget(m_propertiesPanel);
+    addDockWidget(Qt::RightDockWidgetArea, m_propertiesDock);
+
+    // 2D Layout view (right dock, tabbed with Properties)
+    m_klayout2DDock = new QDockWidget("2D Layout", this);
+    m_klayout2DView = new KLayout2DView(m_klayout2DDock);
+    m_klayout2DDock->setWidget(m_klayout2DView);
+    addDockWidget(Qt::RightDockWidgetArea, m_klayout2DDock);
+
+    // Tab the 2D view with Properties panel
+    tabifyDockWidget(m_propertiesDock, m_klayout2DDock);
+    m_propertiesDock->raise();  // Properties visible by default
 
     // Central 3D view widget
     m_assemblyView = new AssemblyView(this);
     setCentralWidget(m_assemblyView);
 
     // Connect signals
+
+    // 3D View -> Properties panel (existing)
     connect(m_assemblyView, &AssemblyView::componentClicked,
             this, [this](const QString& componentId) {
                 // Update properties panel when component is clicked
@@ -88,6 +102,41 @@ void MainWindow::setupPanels()
                     m_propertiesPanel->setComponent(nullptr);
                 }
             });
+
+    // Hierarchy -> 3D View (bidirectional selection sync)
+    connect(m_hierarchyPanel, &HierarchyPanel::componentSelected,
+            m_assemblyView, &AssemblyView::selectComponent);
+
+    // 3D View -> Hierarchy (bidirectional selection sync)
+    connect(m_assemblyView, &AssemblyView::selectionChanged,
+            m_hierarchyPanel, &HierarchyPanel::selectComponent);
+
+    // Hierarchy -> Properties panel
+    connect(m_hierarchyPanel, &HierarchyPanel::componentSelected,
+            this, [this](const QString& componentId) {
+                if (m_assembly && !componentId.isEmpty()) {
+                    Component* comp = m_assembly->component(componentId.toStdString());
+                    m_propertiesPanel->setComponent(comp);
+                } else {
+                    m_propertiesPanel->setComponent(nullptr);
+                }
+            });
+
+    // Hierarchy zoom request -> 3D View
+    connect(m_hierarchyPanel, &HierarchyPanel::zoomToComponentRequested,
+            this, [this](const QString& componentId) {
+                // Select the component and fit view
+                m_assemblyView->selectComponent(componentId);
+                // TODO: Add fitToComponent() method in AssemblyView
+            });
+
+    // 2D drill-down connections
+    connect(m_hierarchyPanel, &HierarchyPanel::componentDoubleClicked,
+            this, &MainWindow::onComponentDrillDown);
+
+    // 3D View double-click for drill-down (if signal exists)
+    connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
+            this, &MainWindow::onComponentDrillDown);
 }
 
 void MainWindow::onFileNew()
@@ -95,7 +144,9 @@ void MainWindow::onFileNew()
     m_assembly = std::make_unique<Assembly>();
     m_assembly->set_name("Untitled");
     m_assemblyView->setAssembly(m_assembly.get());
-    m_propertiesPanel->setComponent(nullptr);
+    m_hierarchyPanel->setAssembly(m_assembly.get());
+    m_propertiesPanel->setAssembly(m_assembly.get());
+    m_propertiesPanel->clearSelection();
 }
 
 void MainWindow::onFileOpen()
@@ -112,7 +163,9 @@ void MainWindow::onFileOpen()
             ChipletFormat format;
             m_assembly = format.load(path.toStdString());
             m_assemblyView->setAssembly(m_assembly.get());
-            m_propertiesPanel->setComponent(nullptr);
+            m_hierarchyPanel->setAssembly(m_assembly.get());
+            m_propertiesPanel->setAssembly(m_assembly.get());
+            m_propertiesPanel->clearSelection();
             setWindowTitle(QString("Chiplet Studio - %1").arg(
                 QString::fromStdString(m_assembly->name())));
         } catch (const std::exception& e) {
@@ -263,6 +316,35 @@ void MainWindow::updateClipPositionLabel()
         // Get position in mm (scene units)
         float pos = m_assemblyView->clipPlane().position();
         m_clipPosLabel->setText(QString("%1").arg(pos, 0, 'f', 1));
+    }
+}
+
+void MainWindow::onComponentDrillDown(const QString& componentId)
+{
+    if (!m_assembly || componentId.isEmpty()) {
+        return;
+    }
+
+    Component* comp = m_assembly->component(componentId.toStdString());
+    if (!comp || comp->layout_path().empty()) {
+        m_klayout2DView->clearLayout();
+        return;
+    }
+
+    // Get layer properties from technology
+    QString lypPath;
+    if (!comp->technology().empty()) {
+        Technology* tech = m_assembly->technology(comp->technology());
+        if (tech && !tech->layer_properties_path().empty()) {
+            lypPath = QString::fromStdString(tech->layer_properties_path());
+        }
+    }
+
+    // Load layout and show 2D dock
+    QString layoutPath = QString::fromStdString(comp->layout_path());
+    if (m_klayout2DView->loadLayout(layoutPath, lypPath)) {
+        m_klayout2DDock->show();
+        m_klayout2DDock->raise();
     }
 }
 

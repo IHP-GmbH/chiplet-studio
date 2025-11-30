@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets Core5Compat)
 
 # Find yaml-cpp
 find_package(yaml-cpp REQUIRED)
@@ -42,6 +42,15 @@ include_directories(
     ${KLAYOUT_SRC_DIR}/db/db
     ${KLAYOUT_SRC_DIR}/tl/tl
     ${KLAYOUT_SRC_DIR}/gsi/gsi
+    # KLayout 2D view libraries
+    ${KLAYOUT_SRC_DIR}/layview/layview
+    ${KLAYOUT_SRC_DIR}/laybasic/laybasic
+    ${KLAYOUT_SRC_DIR}/lay/lay
+    ${KLAYOUT_SRC_DIR}/layui/layui
+    ${KLAYOUT_SRC_DIR}/ant/ant
+    ${KLAYOUT_SRC_DIR}/img/img
+    ${KLAYOUT_SRC_DIR}/edt/edt
+    ${KLAYOUT_SRC_DIR}/rdb/rdb
 )
 
 # Source files
@@ -80,12 +89,15 @@ set(VIEW3D_SOURCES
 set(VIEW2D_SOURCES
     src/view2d/KLayoutBridge.cpp
     src/view2d/LayerProperties.cpp
+    src/view2d/KLayout2DView.cpp
 )
 
 set(UI_SOURCES
     src/ui/MainWindow.cpp
     src/ui/HierarchyPanel.cpp
     src/ui/PropertiesPanel.cpp
+    src/ui/ComponentStyle.cpp
+    src/ui/UnitConverter.cpp
 )
 
 # Shader resources
@@ -117,21 +129,33 @@ target_link_libraries(chiplet-studio
     Qt6::Gui
     Qt6::Widgets
     Qt6::OpenGLWidgets
+    Qt6::Core5Compat
     yaml-cpp
 )
 
 # Link KLayout libraries if available
 if(HAVE_KLAYOUT)
-    target_compile_definitions(chiplet-studio PRIVATE HAVE_KLAYOUT)
+    target_compile_definitions(chiplet-studio PRIVATE HAVE_KLAYOUT HAVE_QT)
     target_link_directories(chiplet-studio PRIVATE
         ${KLAYOUT_BUILD_DIR}
         ${KLAYOUT_BUILD_DIR}/db_plugins
     )
     # Force loading of format plugins (they register via static constructors)
     target_link_libraries(chiplet-studio
+        # Core libraries
         klayout_tl
         klayout_gsi
         klayout_db
+        # 2D view libraries
+        klayout_laybasic
+        klayout_lay
+        klayout_layui
+        klayout_layview
+        klayout_ant
+        klayout_img
+        klayout_edt
+        klayout_rdb
+        # Format plugins
         -Wl,--no-as-needed  # Prevent linker from dropping unused libraries
         gds2  # Format plugin for GDS files
         -Wl,--as-needed
@@ -141,7 +165,7 @@ if(HAVE_KLAYOUT)
         BUILD_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
         INSTALL_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
     )
-    message(STATUS "KLayout integration: ENABLED")
+    message(STATUS "KLayout integration: ENABLED (with 2D view)")
 else()
     message(STATUS "KLayout integration: DISABLED (stub implementation)")
 endif()
