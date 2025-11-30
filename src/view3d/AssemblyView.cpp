@@ -18,14 +18,17 @@ layout(location = 1) in vec3 normal;
 
 uniform mat4 modelViewProjection;
 uniform mat4 modelView;
+uniform mat4 model;
 uniform mat3 normalMatrix;
 
 out vec3 fragNormal;
 out vec3 fragPosition;
+out vec3 worldPosition;
 
 void main() {
     fragNormal = normalMatrix * normal;
     fragPosition = vec3(modelView * vec4(position, 1.0));
+    worldPosition = vec3(model * vec4(position, 1.0));
     gl_Position = modelViewProjection * vec4(position, 1.0);
 }
 )";
@@ -34,14 +37,28 @@ static const char* componentFragmentShader = R"(
 #version 330 core
 in vec3 fragNormal;
 in vec3 fragPosition;
+in vec3 worldPosition;
 
 uniform vec4 objectColor;
 uniform vec3 lightDirection;
 uniform bool selected;
 
+// Clip plane: vec4(normal.xyz, distance)
+// Fragments are discarded if dot(position, normal) + distance < 0
+uniform vec4 clipPlane;
+uniform bool clipEnabled;
+
 out vec4 FragColor;
 
 void main() {
+    // Clip plane test
+    if (clipEnabled) {
+        float dist = dot(worldPosition, clipPlane.xyz) + clipPlane.w;
+        if (dist < 0.0) {
+            discard;
+        }
+    }
+
     vec3 norm = normalize(fragNormal);
     float ambient = 0.3;
     float diffuse = max(dot(norm, -lightDirection), 0.0) * 0.6;
@@ -145,6 +162,27 @@ void AssemblyView::fitToAssembly()
 void AssemblyView::resetCamera()
 {
     m_scene.camera().reset();
+    update();
+}
+
+void AssemblyView::setClipEnabled(bool enabled)
+{
+    m_clipPlane.setEnabled(enabled);
+    emit clipPlaneChanged();
+    update();
+}
+
+void AssemblyView::setClipPosition(float position)
+{
+    m_clipPlane.setPosition(position);
+    emit clipPlaneChanged();
+    update();
+}
+
+void AssemblyView::setClipAxis(ClipAxis axis)
+{
+    m_clipPlane.setAxis(axis);
+    emit clipPlaneChanged();
     update();
 }
 
@@ -265,11 +303,23 @@ void AssemblyView::renderComponents()
     QMatrix4x4 mvp = projection * view;
     QMatrix3x3 normalMat = view.normalMatrix();
 
+    // Model matrix is identity (meshes are pre-transformed)
+    QMatrix4x4 model;
+    model.setToIdentity();
+
     m_componentShader.bind();
     m_componentShader.setUniformMat4("modelViewProjection", mvp);
     m_componentShader.setUniformMat4("modelView", view);
+    m_componentShader.setUniformMat4("model", model);
     m_componentShader.setUniformMat3("normalMatrix", normalMat);
     m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+
+    // Clip plane uniforms
+    m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
+    if (m_clipPlane.isEnabled()) {
+        QVector4D plane = m_clipPlane.planeEquation();
+        m_componentShader.setUniformVec4("clipPlane", plane);
+    }
 
     for (auto& [id, mesh] : m_meshes) {
         QColor color = mesh.color();
@@ -382,6 +432,25 @@ void AssemblyView::updateSceneBounds()
     }
 
     m_scene.setSceneBounds(sceneBounds);
+
+    // Update clip plane range based on current axis
+    float minPos, maxPos;
+    switch (m_clipPlane.axis()) {
+    case ClipAxis::X:
+        minPos = sceneBounds.mins.x;
+        maxPos = sceneBounds.maxes.x;
+        break;
+    case ClipAxis::Y:
+        minPos = sceneBounds.mins.y;
+        maxPos = sceneBounds.maxes.y;
+        break;
+    case ClipAxis::Z:
+    default:
+        minPos = sceneBounds.mins.z;
+        maxPos = sceneBounds.maxes.z;
+        break;
+    }
+    m_clipPlane.setRange(minPos, maxPos);
 }
 
 void AssemblyView::mousePressEvent(QMouseEvent* event)

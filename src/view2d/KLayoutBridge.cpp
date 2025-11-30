@@ -3,6 +3,7 @@
  */
 
 #include "KLayoutBridge.h"
+#include <iostream>
 
 #ifdef HAVE_KLAYOUT
 #include "dbLayout.h"
@@ -74,7 +75,16 @@ bool KLayoutBridge::load_layout(const string_type& path)
         return true;
 
     } catch (const tl::Exception& e) {
-        // KLayout exception - reset state
+        // KLayout exception - reset state and log error
+        std::cerr << "KLayoutBridge::load_layout error: " << e.msg() << std::endl;
+        m_impl->mp_layout.reset();
+        m_impl->m_path.clear();
+        m_impl->m_format.clear();
+        m_impl->m_top_cell.clear();
+        return false;
+    } catch (const std::exception& e) {
+        // Standard exception
+        std::cerr << "KLayoutBridge::load_layout std error: " << e.what() << std::endl;
         m_impl->mp_layout.reset();
         m_impl->m_path.clear();
         m_impl->m_format.clear();

@@ -14,6 +14,7 @@
 #include "ShaderProgram.h"
 #include "ComponentMesh.h"
 #include "SceneManager.h"
+#include "ClipPlane.h"
 #include "core/Assembly.h"
 
 namespace chiplet {
@@ -40,7 +41,15 @@ public:
     void fitToAssembly();
     void resetCamera();
 
+    // Clip plane control
+    ClipPlane& clipPlane() { return m_clipPlane; }
+    const ClipPlane& clipPlane() const { return m_clipPlane; }
+    void setClipEnabled(bool enabled);
+    void setClipPosition(float position);
+    void setClipAxis(ClipAxis axis);
+
 signals:
+    void clipPlaneChanged();
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
@@ -86,6 +95,9 @@ private:
     // State
     bool m_initialized = false;
     bool m_needsRebuild = false;
+
+    // Clip plane
+    ClipPlane m_clipPlane;
 };
 
 } // namespace chiplet
