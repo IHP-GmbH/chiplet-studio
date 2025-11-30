@@ -6,6 +6,7 @@
 #include "HierarchyPanel.h"
 #include "PropertiesPanel.h"
 #include "view3d/AssemblyView.h"
+#include "view3d/ClipPlane.h"
 #include "formats/ChipletFormat.h"
 #include <QMenuBar>
 #include <QMenu>
@@ -13,6 +14,12 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QToolBar>
+#include <QSlider>
+#include <QLabel>
+#include <QCheckBox>
+#include <QPushButton>
+#include <QButtonGroup>
 
 namespace chiplet {
 
@@ -24,6 +31,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     setupMenus();
     setupPanels();
+    setupClipToolbar();
 }
 
 MainWindow::~MainWindow() = default;
@@ -129,6 +137,132 @@ void MainWindow::onFileSave()
 
     if (!path.isEmpty()) {
         // TODO: Save assembly to file
+    }
+}
+
+void MainWindow::setupClipToolbar()
+{
+    m_clipToolbar = addToolBar("Cross-section");
+    m_clipToolbar->setMovable(false);
+
+    // Enable checkbox
+    m_clipEnable = new QCheckBox("Clip", this);
+    m_clipEnable->setToolTip("Enable cross-section view");
+    m_clipToolbar->addWidget(m_clipEnable);
+
+    m_clipToolbar->addSeparator();
+
+    // Axis buttons (X, Y, Z)
+    m_axisGroup = new QButtonGroup(this);
+    m_axisGroup->setExclusive(true);
+
+    QPushButton* btnX = new QPushButton("X", this);
+    QPushButton* btnY = new QPushButton("Y", this);
+    QPushButton* btnZ = new QPushButton("Z", this);
+
+    btnX->setCheckable(true);
+    btnY->setCheckable(true);
+    btnZ->setCheckable(true);
+    btnZ->setChecked(true);  // Default axis
+
+    btnX->setFixedWidth(30);
+    btnY->setFixedWidth(30);
+    btnZ->setFixedWidth(30);
+
+    btnX->setToolTip("Clip along X axis (YZ plane)");
+    btnY->setToolTip("Clip along Y axis (XZ plane)");
+    btnZ->setToolTip("Clip along Z axis (XY plane)");
+
+    m_axisGroup->addButton(btnX, static_cast<int>(ClipAxis::X));
+    m_axisGroup->addButton(btnY, static_cast<int>(ClipAxis::Y));
+    m_axisGroup->addButton(btnZ, static_cast<int>(ClipAxis::Z));
+
+    m_clipToolbar->addWidget(btnX);
+    m_clipToolbar->addWidget(btnY);
+    m_clipToolbar->addWidget(btnZ);
+
+    m_clipToolbar->addSeparator();
+
+    // Position slider
+    m_clipSlider = new QSlider(Qt::Horizontal, this);
+    m_clipSlider->setRange(0, 1000);
+    m_clipSlider->setValue(500);  // Middle position
+    m_clipSlider->setMinimumWidth(150);
+    m_clipSlider->setToolTip("Clip plane position");
+    m_clipToolbar->addWidget(m_clipSlider);
+
+    // Position label
+    m_clipPosLabel = new QLabel("0.0", this);
+    m_clipPosLabel->setMinimumWidth(60);
+    m_clipPosLabel->setAlignment(Qt::AlignCenter);
+    m_clipToolbar->addWidget(m_clipPosLabel);
+
+    m_clipToolbar->addSeparator();
+
+    // Flip button
+    m_flipButton = new QPushButton("Flip", this);
+    m_flipButton->setToolTip("Flip clip direction");
+    m_flipButton->setFixedWidth(40);
+    m_clipToolbar->addWidget(m_flipButton);
+
+    // Connect signals
+    connect(m_clipEnable, &QCheckBox::toggled,
+            this, &MainWindow::onClipToggle);
+
+    connect(m_axisGroup, QOverload<int>::of(&QButtonGroup::idClicked),
+            this, &MainWindow::onClipAxisChanged);
+
+    connect(m_clipSlider, &QSlider::valueChanged,
+            this, &MainWindow::onClipPositionChanged);
+
+    connect(m_flipButton, &QPushButton::clicked,
+            this, &MainWindow::onClipFlip);
+
+    // Connect to AssemblyView for position label updates
+    connect(m_assemblyView, &AssemblyView::clipPlaneChanged,
+            this, &MainWindow::updateClipPositionLabel);
+}
+
+void MainWindow::onClipToggle(bool enabled)
+{
+    if (m_assemblyView) {
+        m_assemblyView->setClipEnabled(enabled);
+    }
+}
+
+void MainWindow::onClipAxisChanged(int axis)
+{
+    if (m_assemblyView) {
+        m_assemblyView->setClipAxis(static_cast<ClipAxis>(axis));
+        // Reset slider to middle
+        m_clipSlider->setValue(500);
+    }
+}
+
+void MainWindow::onClipPositionChanged(int value)
+{
+    if (m_assemblyView) {
+        float normalizedPos = value / 1000.0f;
+        m_assemblyView->clipPlane().setNormalizedPosition(normalizedPos);
+        m_assemblyView->update();
+        updateClipPositionLabel();
+    }
+}
+
+void MainWindow::onClipFlip()
+{
+    if (m_assemblyView) {
+        m_assemblyView->clipPlane().flip();
+        m_assemblyView->update();
+    }
+}
+
+void MainWindow::updateClipPositionLabel()
+{
+    if (m_assemblyView) {
+        // Get position in mm (scene units)
+        float pos = m_assemblyView->clipPlane().position();
+        m_clipPosLabel->setText(QString("%1").arg(pos, 0, 'f', 1));
     }
 }
 

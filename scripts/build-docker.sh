@@ -56,16 +56,19 @@ docker run --rm \
         set -e
 
         # Try to build KLayout libraries (optional)
-        KLAYOUT_DIR=/workspace/extern/klayout/bin-release
+        # Libraries are built in build-release, not bin-release
+        KLAYOUT_DIR=/workspace/extern/klayout/build-release
         if [ -f \"\$KLAYOUT_DIR/libklayout_db.so\" ]; then
             echo 'KLayout libraries already built'
         else
             echo 'Attempting to build KLayout libraries...'
             cd /workspace/extern/klayout
-            if ./build.sh -j$PARALLEL -without-qtbinding 2>&1; then
-                echo 'KLayout build successful'
+            ./build.sh -j$PARALLEL -without-qtbinding 2>&1 || true
+            # Check if core libraries were built (buddies may fail)
+            if [ -f \"\$KLAYOUT_DIR/libklayout_db.so\" ]; then
+                echo 'KLayout core libraries built successfully'
             else
-                echo 'KLayout build failed (Qt not available?) - continuing without KLayout'
+                echo 'KLayout build failed - continuing without KLayout'
                 KLAYOUT_DIR=''
             fi
         fi
