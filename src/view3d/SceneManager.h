@@ -5,25 +5,46 @@
 #ifndef CHIPLET_VIEW3D_SCENEMANAGER_H
 #define CHIPLET_VIEW3D_SCENEMANAGER_H
 
+#include "Camera.h"
+#include "math/Maths.h"
+
 namespace chiplet {
 
 /**
- * SceneManager handles camera, lighting, and object picking.
+ * SceneManager orchestrates the 3D scene: camera, lighting, and object picking.
  */
 class SceneManager {
 public:
     SceneManager();
     ~SceneManager();
 
-    void setCamera(double x, double y, double z);
-    void setTarget(double x, double y, double z);
-    void rotate(double dx, double dy);
-    void zoom(double delta);
-    void pan(double dx, double dy);
+    // Camera access
+    Camera& camera() { return m_camera; }
+    const Camera& camera() const { return m_camera; }
+
+    // Lighting
+    VECTOR3D lightDirection() const { return m_lightDirection; }
+    void setLightDirection(const VECTOR3D& dir);
+
+    // Scene bounds
+    void setSceneBounds(const AA_BOUNDING_BOX& bounds);
+    AA_BOUNDING_BOX sceneBounds() const { return m_sceneBounds; }
+
+    // Picking (ray casting)
+    struct Ray {
+        VECTOR3D origin;
+        VECTOR3D direction;
+    };
+
+    Ray screenToRay(int screenX, int screenY, int viewportWidth, int viewportHeight) const;
+
+    // Fit camera to scene
+    void fitToScene();
 
 private:
-    double m_cameraX = 0.0, m_cameraY = 0.0, m_cameraZ = 1000.0;
-    double m_targetX = 0.0, m_targetY = 0.0, m_targetZ = 0.0;
+    Camera m_camera;
+    VECTOR3D m_lightDirection;
+    AA_BOUNDING_BOX m_sceneBounds;
 };
 
 } // namespace chiplet

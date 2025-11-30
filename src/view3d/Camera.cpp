@@ -1,0 +1,179 @@
+/**
+ * Camera.cpp - Orbit camera implementation
+ */
+
+#include "Camera.h"
+#include <algorithm>
+#include <cmath>
+
+namespace chiplet {
+
+Camera::Camera()
+    : m_target(0.0f, 0.0f, 0.0f)
+    , m_up(0.0f, 1.0f, 0.0f)
+    , m_distance(1000.0f)
+    , m_yaw(45.0f)
+    , m_pitch(30.0f)
+    , m_fov(45.0f)
+    , m_near(1.0f)
+    , m_far(100000.0f)
+    , m_orbitSensitivity(0.5f)
+    , m_panSensitivity(1.0f)
+    , m_zoomSensitivity(0.1f)
+{
+}
+
+void Camera::orbit(float deltaYaw, float deltaPitch)
+{
+    m_yaw += deltaYaw * m_orbitSensitivity;
+    m_pitch += deltaPitch * m_orbitSensitivity;
+    clampPitch();
+
+    // Normalize yaw to [0, 360)
+    while (m_yaw < 0.0f) m_yaw += 360.0f;
+    while (m_yaw >= 360.0f) m_yaw -= 360.0f;
+}
+
+void Camera::pan(float deltaX, float deltaY)
+{
+    // Calculate camera's right and up vectors in world space
+    VECTOR3D pos = position();
+    VECTOR3D forward = m_target - pos;
+    forward.Normalize();
+
+    VECTOR3D right = forward.CrossProduct(m_up);
+    right.Normalize();
+
+    VECTOR3D camUp = right.CrossProduct(forward);
+    camUp.Normalize();
+
+    // Scale pan by distance for consistent feel
+    float panScale = m_distance * m_panSensitivity * 0.001f;
+    m_target = m_target - right * deltaX * panScale + camUp * deltaY * panScale;
+}
+
+void Camera::zoom(float delta)
+{
+    // Exponential zoom for smooth feel at all distances
+    float factor = 1.0f - delta * m_zoomSensitivity;
+    m_distance *= factor;
+
+    // Clamp to reasonable range
+    m_distance = std::max(1.0f, std::min(m_distance, 1000000.0f));
+}
+
+void Camera::fitToBox(const AA_BOUNDING_BOX& box)
+{
+    // Set target to box center
+    VECTOR3D center = (box.mins + box.maxes) * 0.5f;
+    m_target = center;
+
+    // Calculate distance to fit box in view
+    VECTOR3D size = box.maxes - box.mins;
+
+    float maxDim = std::max({size.x, size.y, size.z});
+
+    // Distance to fit object in view based on FOV
+    float fovRad = static_cast<float>(m_fov * M_PI / 180.0);
+    m_distance = (maxDim * 0.5f) / std::tan(fovRad * 0.5f) * 1.5f;
+
+    // Set reasonable clipping planes
+    m_near = m_distance * 0.01f;
+    m_far = m_distance * 100.0f;
+}
+
+void Camera::reset()
+{
+    m_target = VECTOR3D(0.0f, 0.0f, 0.0f);
+    m_distance = 1000.0f;
+    m_yaw = 45.0f;
+    m_pitch = 30.0f;
+}
+
+VECTOR3D Camera::position() const
+{
+    // Convert spherical coordinates to Cartesian
+    float yawRad = static_cast<float>(m_yaw * M_PI / 180.0);
+    float pitchRad = static_cast<float>(m_pitch * M_PI / 180.0);
+
+    float cosPitch = std::cos(pitchRad);
+    float sinPitch = std::sin(pitchRad);
+    float cosYaw = std::cos(yawRad);
+    float sinYaw = std::sin(yawRad);
+
+    VECTOR3D offset(
+        m_distance * cosPitch * sinYaw,
+        m_distance * sinPitch,
+        m_distance * cosPitch * cosYaw
+    );
+
+    return m_target + offset;
+}
+
+MATRIX4X4 Camera::viewMatrix() const
+{
+    VECTOR3D eye = position();
+    VECTOR3D forward = m_target - eye;
+    forward.Normalize();
+
+    VECTOR3D right = forward.CrossProduct(m_up);
+    right.Normalize();
+
+    VECTOR3D up = right.CrossProduct(forward);
+    up.Normalize();
+
+    // Build look-at matrix (column-major for OpenGL)
+    MATRIX4X4 view;
+    view.LoadIdentity();
+
+    // Rotation part
+    view.SetEntry(0, right.x);
+    view.SetEntry(4, right.y);
+    view.SetEntry(8, right.z);
+
+    view.SetEntry(1, up.x);
+    view.SetEntry(5, up.y);
+    view.SetEntry(9, up.z);
+
+    view.SetEntry(2, -forward.x);
+    view.SetEntry(6, -forward.y);
+    view.SetEntry(10, -forward.z);
+
+    // Translation part
+    view.SetEntry(12, -right.DotProduct(eye));
+    view.SetEntry(13, -up.DotProduct(eye));
+    view.SetEntry(14, forward.DotProduct(eye));
+
+    return view;
+}
+
+MATRIX4X4 Camera::projectionMatrix(float aspectRatio) const
+{
+    MATRIX4X4 proj;
+    proj.SetPerspective(m_fov, aspectRatio, m_near, m_far);
+    return proj;
+}
+
+void Camera::setTarget(const VECTOR3D& target)
+{
+    m_target = target;
+}
+
+void Camera::setDistance(float distance)
+{
+    m_distance = std::max(1.0f, distance);
+}
+
+void Camera::setClipPlanes(float nearPlane, float farPlane)
+{
+    m_near = nearPlane;
+    m_far = farPlane;
+}
+
+void Camera::clampPitch()
+{
+    // Prevent gimbal lock by limiting pitch
+    m_pitch = std::max(-89.0f, std::min(m_pitch, 89.0f));
+}
+
+} // namespace chiplet

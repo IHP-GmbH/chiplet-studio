@@ -13,6 +13,7 @@ namespace chiplet {
 
 class HierarchyPanel;
 class PropertiesPanel;
+class AssemblyView;
 
 /**
  * MainWindow is the main application window.
@@ -36,6 +37,7 @@ private:
     std::unique_ptr<Assembly> m_assembly;
     HierarchyPanel* m_hierarchyPanel = nullptr;
     PropertiesPanel* m_propertiesPanel = nullptr;
+    AssemblyView* m_assemblyView = nullptr;
 };
 
 } // namespace chiplet

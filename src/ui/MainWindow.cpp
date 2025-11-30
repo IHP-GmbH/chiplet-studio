@@ -5,11 +5,14 @@
 #include "MainWindow.h"
 #include "HierarchyPanel.h"
 #include "PropertiesPanel.h"
+#include "view3d/AssemblyView.h"
+#include "formats/ChipletFormat.h"
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
 #include <QDockWidget>
 #include <QFileDialog>
+#include <QMessageBox>
 
 namespace chiplet {
 
@@ -62,13 +65,29 @@ void MainWindow::setupPanels()
     propertiesDock->setWidget(m_propertiesPanel);
     addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
 
-    // TODO: Add central 3D view widget
+    // Central 3D view widget
+    m_assemblyView = new AssemblyView(this);
+    setCentralWidget(m_assemblyView);
+
+    // Connect signals
+    connect(m_assemblyView, &AssemblyView::componentClicked,
+            this, [this](const QString& componentId) {
+                // Update properties panel when component is clicked
+                if (m_assembly && !componentId.isEmpty()) {
+                    Component* comp = m_assembly->component(componentId.toStdString());
+                    m_propertiesPanel->setComponent(comp);
+                } else {
+                    m_propertiesPanel->setComponent(nullptr);
+                }
+            });
 }
 
 void MainWindow::onFileNew()
 {
     m_assembly = std::make_unique<Assembly>();
     m_assembly->set_name("Untitled");
+    m_assemblyView->setAssembly(m_assembly.get());
+    m_propertiesPanel->setComponent(nullptr);
 }
 
 void MainWindow::onFileOpen()
@@ -77,11 +96,21 @@ void MainWindow::onFileOpen()
         this,
         "Open Assembly",
         QString(),
-        "Chiplet Files (*.chiplet);;All Files (*)"
+        "Chiplet Files (*.chiplet *.yaml *.yml);;All Files (*)"
     );
 
     if (!path.isEmpty()) {
-        // TODO: Load assembly from file
+        try {
+            ChipletFormat format;
+            m_assembly = format.load(path.toStdString());
+            m_assemblyView->setAssembly(m_assembly.get());
+            m_propertiesPanel->setComponent(nullptr);
+            setWindowTitle(QString("Chiplet Studio - %1").arg(
+                QString::fromStdString(m_assembly->name())));
+        } catch (const std::exception& e) {
+            QMessageBox::critical(this, "Error",
+                QString("Failed to load assembly: %1").arg(e.what()));
+        }
     }
 }
 
