@@ -37,6 +37,7 @@ endif()
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/view3d
     ${KLAYOUT_SRC_DIR}
     ${KLAYOUT_SRC_DIR}/db/db
     ${KLAYOUT_SRC_DIR}/tl/tl
@@ -55,9 +56,24 @@ set(FORMAT_SOURCES
     src/formats/ChipletFormat.cpp
 )
 
+set(VIEW3D_MATH_SOURCES
+    src/view3d/math/VECTOR3D.cpp
+    src/view3d/math/VECTOR4D.cpp
+    src/view3d/math/MATRIX4X4.cpp
+    src/view3d/math/PLANE.cpp
+    src/view3d/math/FRUSTUM.cpp
+    src/view3d/math/AA_BOUNDING_BOX.cpp
+)
+
 set(VIEW3D_SOURCES
     src/view3d/AssemblyRenderer.cpp
     src/view3d/SceneManager.cpp
+    src/view3d/Camera.cpp
+    src/view3d/ShaderProgram.cpp
+    src/view3d/ComponentMesh.cpp
+    src/view3d/MeshBuilder.cpp
+    src/view3d/AssemblyView.cpp
+    ${VIEW3D_MATH_SOURCES}
 )
 
 set(VIEW2D_SOURCES
@@ -70,6 +86,14 @@ set(UI_SOURCES
     src/ui/PropertiesPanel.cpp
 )
 
+# Shader resources
+set(SHADER_SOURCES
+    src/view3d/shaders/component.vert
+    src/view3d/shaders/component.frag
+    src/view3d/shaders/grid.vert
+    src/view3d/shaders/grid.frag
+)
+
 # Main executable
 add_executable(chiplet-studio
     src/main.cpp
@@ -78,6 +102,12 @@ add_executable(chiplet-studio
     ${VIEW3D_SOURCES}
     ${VIEW2D_SOURCES}
     ${UI_SOURCES}
+)
+
+# Embed shader files as Qt resources
+qt_add_resources(chiplet-studio "shaders"
+    PREFIX "/shaders"
+    FILES ${SHADER_SOURCES}
 )
 
 target_link_libraries(chiplet-studio
