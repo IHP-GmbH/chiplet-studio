@@ -1,0 +1,292 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+ Interposer PDK - Derived from IHP SG13G2
+
+ Contains only upper metal layers suitable for interposer routing:
+ - Metal4 - First redistribution layer
+ - Via4 - Via between Metal4 and Metal5
+ - Metal5 - Second redistribution layer
+ - TopVia1 - Via to thick metal
+ - TopMetal1 - First thick metal
+ - TopVia2 - Via to top metal
+ - TopMetal2 - Top metal for bumps/pillars
+
+ Colors: Cyan/Blue tones to distinguish from IHP green/yellow
+ Layer numbers same as IHP for GDS compatibility.
+
+ Note: Layer name standardization (pdk_name.layer_name) is handled
+ internally when loading, not in this file.
+-->
+<layer-properties>
+  <!-- Metal4 - Cyan -->
+  <properties>
+    <frame-color>#00bfff</frame-color>
+    <fill-color>#00bfff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C27</dither-pattern>
+    <line-style>C1</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Metal4.drawing</name>
+    <source>50/0</source>
+  </properties>
+  <properties>
+    <frame-color>#00bfff</frame-color>
+    <fill-color>#00bfff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C27</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Metal4.pin</name>
+    <source>50/2</source>
+  </properties>
+  <properties>
+    <frame-color>#00bfff</frame-color>
+    <fill-color>#00bfff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C27</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Metal4.text</name>
+    <source>50/25</source>
+  </properties>
+
+  <!-- Via4 - Blue -->
+  <properties>
+    <frame-color>#0080ff</frame-color>
+    <fill-color>#0080ff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C28</dither-pattern>
+    <line-style>C8</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>2</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Via4.drawing</name>
+    <source>66/0</source>
+  </properties>
+
+  <!-- Metal5 - Light Cyan -->
+  <properties>
+    <frame-color>#00ffff</frame-color>
+    <fill-color>#00ffff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C29</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Metal5.drawing</name>
+    <source>67/0</source>
+  </properties>
+  <properties>
+    <frame-color>#00ffff</frame-color>
+    <fill-color>#00ffff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C29</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Metal5.pin</name>
+    <source>67/2</source>
+  </properties>
+  <properties>
+    <frame-color>#00ffff</frame-color>
+    <fill-color>#00ffff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C29</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Metal5.text</name>
+    <source>67/25</source>
+  </properties>
+
+  <!-- TopVia1 - Darker Blue -->
+  <properties>
+    <frame-color>#0060ff</frame-color>
+    <fill-color>#0060ff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C30</dither-pattern>
+    <line-style>C8</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>2</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopVia1.drawing</name>
+    <source>125/0</source>
+  </properties>
+
+  <!-- TopMetal1 - Very Light Cyan -->
+  <properties>
+    <frame-color>#80ffff</frame-color>
+    <fill-color>#80ffff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C31</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopMetal1.drawing</name>
+    <source>126/0</source>
+  </properties>
+  <properties>
+    <frame-color>#80ffff</frame-color>
+    <fill-color>#80ffff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C31</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopMetal1.pin</name>
+    <source>126/2</source>
+  </properties>
+  <properties>
+    <frame-color>#80ffff</frame-color>
+    <fill-color>#80ffff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C31</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopMetal1.text</name>
+    <source>126/25</source>
+  </properties>
+
+  <!-- TopVia2 - Even Darker Blue -->
+  <properties>
+    <frame-color>#0040ff</frame-color>
+    <fill-color>#0040ff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C32</dither-pattern>
+    <line-style>C8</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>2</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopVia2.drawing</name>
+    <source>133/0</source>
+  </properties>
+
+  <!-- TopMetal2 - Silver/Lavender for top -->
+  <properties>
+    <frame-color>#c0c0ff</frame-color>
+    <fill-color>#c0c0ff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C33</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopMetal2.drawing</name>
+    <source>134/0</source>
+  </properties>
+  <properties>
+    <frame-color>#c0c0ff</frame-color>
+    <fill-color>#c0c0ff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C33</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopMetal2.pin</name>
+    <source>134/2</source>
+  </properties>
+  <properties>
+    <frame-color>#c0c0ff</frame-color>
+    <fill-color>#c0c0ff</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C33</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>1</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>TopMetal2.text</name>
+    <source>134/25</source>
+  </properties>
+
+  <!-- Bump - Gold (for micro-bump visualization) -->
+  <properties>
+    <frame-color>#ffd700</frame-color>
+    <fill-color>#ffd700</fill-color>
+    <frame-brightness>0</frame-brightness>
+    <fill-brightness>0</fill-brightness>
+    <dither-pattern>C34</dither-pattern>
+    <line-style>C0</line-style>
+    <valid>true</valid>
+    <visible>true</visible>
+    <transparent>false</transparent>
+    <width>2</width>
+    <marked>false</marked>
+    <animation>0</animation>
+    <name>Bump.drawing</name>
+    <source>200/0</source>
+  </properties>
+</layer-properties>
