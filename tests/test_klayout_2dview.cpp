@@ -146,24 +146,26 @@ TEST_F(KLayout2DViewTest, KLayoutAvailableCompiles) {
     SUCCEED();
 }
 
-// Test loading a real GDS file (if display available and file exists)
+// Test loading a real GDS file (requires physical display - skip in CI/headless)
+// Note: KLayout's GUI components crash with Xvfb, this test requires real X11
 TEST_F(KLayout2DViewTest, LoadRealGdsIfDisplayAvailable) {
     KLayout2DView view;
 
+    // Skip in headless/CI environments - KLayout GUI requires physical display
+    // The DISPLAY check with QGuiApplication::screens() isn't sufficient
+    // because KLayout crashes even with Xvfb virtual display
     if (!view.isViewAvailable()) {
-        // Skip test in headless mode
-        GTEST_SKIP() << "Display not available for this test";
+        GTEST_SKIP() << "Physical display required (KLayout GUI test)";
     }
 
-    // Try loading test fixture
-    QString testFile = "fixtures/test.gds";
+    // Try loading test fixture (FIXTURES_DIR defined via CMake)
+    QString testFile = QString(FIXTURES_DIR) + "/sample_minimal.gds";
     bool result = view.loadLayout(testFile);
 
-    // Result depends on whether file exists
-    if (result) {
-        EXPECT_TRUE(view.hasLayout());
-        EXPECT_EQ(view.currentPath(), testFile);
-    }
+    // File should exist and load successfully with display available
+    EXPECT_TRUE(result) << "Failed to load " << testFile.toStdString();
+    EXPECT_TRUE(view.hasLayout());
+    EXPECT_EQ(view.currentPath(), testFile);
 }
 
 #endif // HAVE_KLAYOUT

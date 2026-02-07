@@ -14,12 +14,12 @@
 namespace chiplet {
 namespace {
 
-// Fixture paths (copied to build directory by CMake)
-const char* MINIMAL_GDS = "fixtures/sample_minimal.gds";
-const char* HIERARCHICAL_GDS = "fixtures/sample_hierarchical.gds";
+// Fixture paths (FIXTURES_DIR defined via CMake)
+const std::string MINIMAL_GDS = std::string(FIXTURES_DIR) + "/sample_minimal.gds";
+const std::string HIERARCHICAL_GDS = std::string(FIXTURES_DIR) + "/sample_hierarchical.gds";
 
 // Helper to check if fixture exists
-bool fixture_exists(const char* path) {
+bool fixture_exists(const std::string& path) {
     return std::filesystem::exists(path);
 }
 
@@ -210,7 +210,8 @@ TEST_F(GdsLoadingTest, LoadEmptyPath)
 TEST_F(GdsLoadingTest, LoadInvalidExtension)
 {
     // Try to load a non-GDS file (use one of the chiplet fixtures)
-    bool result = bridge.load_layout("fixtures/minimal.chiplet");
+    std::string chipletPath = std::string(FIXTURES_DIR) + "/minimal.chiplet";
+    bool result = bridge.load_layout(chipletPath);
 
     // KLayout may still try to load it, but should fail gracefully
     // The exact behavior depends on KLayout's file detection

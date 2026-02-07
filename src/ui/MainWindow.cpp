@@ -5,11 +5,17 @@
 #include "MainWindow.h"
 #include "HierarchyPanel.h"
 #include "PropertiesPanel.h"
+#include "ScriptConsole.h"
+#include "CellSelectionDialog.h"
 #include "view2d/KLayout2DView.h"
 #include "view3d/AssemblyView.h"
 #include "view3d/ClipPlane.h"
+#include "view3d/GDSAnalyzer.h"
 #include "formats/ChipletFormat.h"
 #include "core/Technology.h"
+#include "core/commands/CmdMoveComponent.h"
+#include "core/Snapper.h"
+#include "scripting/ScriptEngine.h"
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -22,6 +28,15 @@
 #include <QCheckBox>
 #include <QPushButton>
 #include <QButtonGroup>
+#include <QDoubleSpinBox>
+#include <QProgressDialog>
+#include <QTimer>
+#include <QStatusBar>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFileInfo>
+#include <QtConcurrent/QtConcurrent>
+#include <QApplication>
 
 namespace chiplet {
 
@@ -34,6 +49,15 @@ MainWindow::MainWindow(QWidget* parent)
     setupMenus();
     setupPanels();
     setupClipToolbar();
+    setupSnapToolbar();
+    setupRenderModeToolbar();
+    setupScriptConsole();
+    setupAutoSave();
+
+    // Initialize async load watcher
+    m_loadWatcher = new QFutureWatcher<LoadResult>(this);
+    connect(m_loadWatcher, &QFutureWatcher<LoadResult>::finished,
+            this, &MainWindow::onAssemblyLoadFinished);
 }
 
 MainWindow::~MainWindow() = default;
@@ -59,6 +83,27 @@ void MainWindow::setupMenus()
     QAction* exitAction = fileMenu->addAction("E&xit");
     exitAction->setShortcut(QKeySequence::Quit);
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
+
+    // Edit menu
+    QMenu* editMenu = menuBar()->addMenu("&Edit");
+
+    m_undoAction = editMenu->addAction("&Undo");
+    m_undoAction->setShortcut(QKeySequence::Undo);
+    m_undoAction->setEnabled(false);
+    connect(m_undoAction, &QAction::triggered, this, [this]() {
+        if (m_commandProcessor) {
+            m_commandProcessor->undo();
+        }
+    });
+
+    m_redoAction = editMenu->addAction("&Redo");
+    m_redoAction->setShortcut(QKeySequence::Redo);
+    m_redoAction->setEnabled(false);
+    connect(m_redoAction, &QAction::triggered, this, [this]() {
+        if (m_commandProcessor) {
+            m_commandProcessor->redo();
+        }
+    });
 }
 
 void MainWindow::setupPanels()
@@ -95,12 +140,7 @@ void MainWindow::setupPanels()
     connect(m_assemblyView, &AssemblyView::componentClicked,
             this, [this](const QString& componentId) {
                 // Update properties panel when component is clicked
-                if (m_assembly && !componentId.isEmpty()) {
-                    Component* comp = m_assembly->component(componentId.toStdString());
-                    m_propertiesPanel->setComponent(comp);
-                } else {
-                    m_propertiesPanel->setComponent(nullptr);
-                }
+                m_propertiesPanel->setComponent(componentId.toStdString(), m_assembly.get());
             });
 
     // Hierarchy -> 3D View (bidirectional selection sync)
@@ -114,12 +154,7 @@ void MainWindow::setupPanels()
     // Hierarchy -> Properties panel
     connect(m_hierarchyPanel, &HierarchyPanel::componentSelected,
             this, [this](const QString& componentId) {
-                if (m_assembly && !componentId.isEmpty()) {
-                    Component* comp = m_assembly->component(componentId.toStdString());
-                    m_propertiesPanel->setComponent(comp);
-                } else {
-                    m_propertiesPanel->setComponent(nullptr);
-                }
+                m_propertiesPanel->setComponent(componentId.toStdString(), m_assembly.get());
             });
 
     // Hierarchy zoom request -> 3D View
@@ -134,19 +169,58 @@ void MainWindow::setupPanels()
     connect(m_hierarchyPanel, &HierarchyPanel::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
 
+    // Hierarchy visibility toggle -> 3D View
+    connect(m_hierarchyPanel, &HierarchyPanel::componentVisibilityChanged,
+            m_assemblyView, &AssemblyView::setComponentVisibility);
+
     // 3D View double-click for drill-down (if signal exists)
     connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
+
+    // 3D View move request -> CommandProcessor
+    connect(m_assemblyView, &AssemblyView::moveComponentRequested,
+            this, [this](const QString& componentId, double dx, double dy, double dz) {
+                if (!m_commandProcessor || !m_assembly) {
+                    return;
+                }
+                Component* comp = m_assembly->component(componentId.toStdString());
+                if (!comp) {
+                    return;
+                }
+                Position3D oldPos = comp->position();
+                Position3D newPos = {oldPos.x + dx, oldPos.y + dy, oldPos.z + dz};
+
+                // Apply snapping if enabled
+                if (m_snapEnabled && m_gridSize > 0.0) {
+                    newPos = Snapper::snap(newPos, m_gridSize);
+                }
+
+                auto cmd = std::make_unique<CmdMoveComponent>(
+                    componentId.toStdString(), oldPos, newPos);
+                m_commandProcessor->execute(std::move(cmd));
+                m_assemblyView->update();
+            });
 }
 
 void MainWindow::onFileNew()
 {
     m_assembly = std::make_unique<Assembly>();
     m_assembly->set_name("Untitled");
+    m_currentFilePath.clear();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->clearSelection();
+
+    setWindowTitle("Chiplet Studio - Untitled");
+
+    // Initialize command processor for undo/redo
+    initializeCommandProcessor();
+
+    // Reset autosave timer
+    if (m_autoSaveTimer) {
+        m_autoSaveTimer->start(AUTO_SAVE_INTERVAL_MS);
+    }
 }
 
 void MainWindow::onFileOpen()
@@ -158,20 +232,154 @@ void MainWindow::onFileOpen()
         "Chiplet Files (*.chiplet *.yaml *.yml);;All Files (*)"
     );
 
-    if (!path.isEmpty()) {
+    if (path.isEmpty()) {
+        return;
+    }
+
+    // Store path and reset cancel flag
+    m_pendingLoadPath = path;
+    m_loadCanceled = false;
+
+    // Emit signal for testing
+    emit loadingStarted(path);
+
+    // Create and show progress dialog
+    m_loadProgress = new QProgressDialog("Loading Assembly...", "Cancel", 0, 0, this);
+    m_loadProgress->setWindowTitle("Loading");
+    m_loadProgress->setWindowModality(Qt::WindowModal);
+    m_loadProgress->setMinimumDuration(0);  // Show immediately
+    m_loadProgress->setValue(0);
+
+    // Connect cancel button
+    connect(m_loadProgress, &QProgressDialog::canceled,
+            this, &MainWindow::onLoadCanceled);
+
+    // Start async loading
+    // Note: We capture path by value since it needs to outlive this scope
+    QFuture<LoadResult> future = QtConcurrent::run([path]() -> LoadResult {
+        LoadResult result;
         try {
             ChipletFormat format;
-            m_assembly = format.load(path.toStdString());
-            m_assemblyView->setAssembly(m_assembly.get());
-            m_hierarchyPanel->setAssembly(m_assembly.get());
-            m_propertiesPanel->setAssembly(m_assembly.get());
-            m_propertiesPanel->clearSelection();
-            setWindowTitle(QString("Chiplet Studio - %1").arg(
-                QString::fromStdString(m_assembly->name())));
+            result.assembly = format.load(path.toStdString());
         } catch (const std::exception& e) {
-            QMessageBox::critical(this, "Error",
-                QString("Failed to load assembly: %1").arg(e.what()));
+            result.error = QString::fromStdString(e.what());
         }
+        return result;
+    });
+
+    m_loadWatcher->setFuture(future);
+}
+
+void MainWindow::onAssemblyLoadFinished()
+{
+    // Check if load was canceled BEFORE closing progress dialog
+    // (closing the dialog can emit canceled() signal)
+    bool wasCanceled = m_loadCanceled;
+
+    // Clean up progress dialog - disconnect signal first to avoid race condition
+    if (m_loadProgress) {
+        disconnect(m_loadProgress, &QProgressDialog::canceled,
+                   this, &MainWindow::onLoadCanceled);
+        m_loadProgress->close();
+        m_loadProgress->deleteLater();
+        m_loadProgress = nullptr;
+    }
+
+    // Check if load was canceled
+    if (wasCanceled) {
+        m_pendingLoadPath.clear();
+        return;
+    }
+
+    // Get result from future (takeResult() moves, avoiding copy)
+    LoadResult result = m_loadWatcher->future().takeResult();
+
+    if (!result.error.isEmpty()) {
+        QMessageBox::critical(this, "Error",
+            QString("Failed to load assembly: %1").arg(result.error));
+        emit loadingError(result.error);
+        m_pendingLoadPath.clear();
+        return;
+    }
+
+    if (!result.assembly) {
+        QMessageBox::critical(this, "Error", "Failed to load assembly: Unknown error");
+        emit loadingError("Unknown error");
+        m_pendingLoadPath.clear();
+        return;
+    }
+
+    // Successfully loaded - update UI on main thread
+    m_assembly = std::move(result.assembly);
+    m_currentFilePath = m_pendingLoadPath;
+    m_pendingLoadPath.clear();
+
+    // Detect cells for components that need them (shows dialog if needed)
+    bool cellsChanged = detectAndSelectCells();
+
+    // If cells were detected/selected, save back to file
+    if (cellsChanged && !m_currentFilePath.isEmpty()) {
+        try {
+            ChipletFormat format;
+            format.save(*m_assembly, m_currentFilePath.toStdString());
+            statusBar()->showMessage("Saved cell selections to " + m_currentFilePath, 3000);
+        } catch (const std::exception& e) {
+            qWarning() << "Failed to save cell selections:" << e.what();
+        }
+    }
+
+    // Update all views (mesh generation happens here on main thread)
+    m_assemblyView->setAssembly(m_assembly.get());
+    m_hierarchyPanel->setAssembly(m_assembly.get());
+    m_propertiesPanel->setAssembly(m_assembly.get());
+    m_propertiesPanel->clearSelection();
+
+    setWindowTitle(QString("Chiplet Studio - %1").arg(
+        QString::fromStdString(m_assembly->name())));
+
+    // Initialize command processor for undo/redo
+    initializeCommandProcessor();
+
+    // Reset autosave timer
+    if (m_autoSaveTimer) {
+        m_autoSaveTimer->start(AUTO_SAVE_INTERVAL_MS);
+    }
+
+    statusBar()->showMessage("Loaded: " + m_currentFilePath, 3000);
+    emit loadingFinished();
+}
+
+void MainWindow::onLoadCanceled()
+{
+    m_loadCanceled = true;
+    // The watcher will still finish, but we'll ignore the result
+    statusBar()->showMessage("Load canceled", 2000);
+}
+
+void MainWindow::initializeCommandProcessor()
+{
+    m_commandProcessor = std::make_unique<CommandProcessor>(m_assembly.get());
+    connect(m_commandProcessor.get(), &CommandProcessor::can_undo_changed,
+            m_undoAction, &QAction::setEnabled);
+    connect(m_commandProcessor.get(), &CommandProcessor::can_redo_changed,
+            m_redoAction, &QAction::setEnabled);
+    connect(m_commandProcessor.get(), &CommandProcessor::stack_changed,
+            this, [this]() {
+        if (m_commandProcessor->can_undo()) {
+            m_undoAction->setText("&Undo " + m_commandProcessor->undo_description());
+        } else {
+            m_undoAction->setText("&Undo");
+        }
+        if (m_commandProcessor->can_redo()) {
+            m_redoAction->setText("&Redo " + m_commandProcessor->redo_description());
+        } else {
+            m_redoAction->setText("&Redo");
+        }
+    });
+
+    // Update script engine with current assembly
+    if (m_scriptEngine && m_scriptEngine->is_initialized()) {
+        m_scriptEngine->set_assembly(m_assembly.get(), m_commandProcessor.get());
     }
 }
 
@@ -346,6 +554,339 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
         m_klayout2DDock->show();
         m_klayout2DDock->raise();
     }
+}
+
+void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
+{
+    if (!assembly) {
+        return;
+    }
+
+    m_assembly = std::move(assembly);
+    m_currentFilePath.clear();  // Recovered, needs Save As
+    m_assemblyView->setAssembly(m_assembly.get());
+    m_hierarchyPanel->setAssembly(m_assembly.get());
+    m_propertiesPanel->setAssembly(m_assembly.get());
+    m_propertiesPanel->clearSelection();
+
+    setWindowTitle(QString("Chiplet Studio - %1 [Recovered]").arg(
+        QString::fromStdString(m_assembly->name())));
+
+    // Initialize command processor for undo/redo
+    initializeCommandProcessor();
+
+    // Reset autosave timer
+    if (m_autoSaveTimer) {
+        m_autoSaveTimer->start(AUTO_SAVE_INTERVAL_MS);
+    }
+}
+
+void MainWindow::setupSnapToolbar()
+{
+    QToolBar* snapToolbar = addToolBar("Snapping");
+    snapToolbar->setMovable(false);
+
+    // Snap checkbox
+    m_snapEnable = new QCheckBox("Snap", this);
+    m_snapEnable->setToolTip("Snap to grid");
+    m_snapEnable->setChecked(false);
+    snapToolbar->addWidget(m_snapEnable);
+
+    snapToolbar->addSeparator();
+
+    // Grid size spinbox
+    QLabel* gridLabel = new QLabel("Grid:", this);
+    snapToolbar->addWidget(gridLabel);
+
+    m_gridSizeSpinBox = new QDoubleSpinBox(this);
+    m_gridSizeSpinBox->setRange(0.1, 1000.0);
+    m_gridSizeSpinBox->setValue(10.0);  // Default: 10um
+    m_gridSizeSpinBox->setSuffix(" um");
+    m_gridSizeSpinBox->setDecimals(1);
+    m_gridSizeSpinBox->setToolTip("Grid spacing in micrometers");
+    snapToolbar->addWidget(m_gridSizeSpinBox);
+
+    // Preset buttons
+    QPushButton* btn1um = new QPushButton("1", this);
+    QPushButton* btn10um = new QPushButton("10", this);
+    QPushButton* btn100um = new QPushButton("100", this);
+
+    btn1um->setFixedWidth(30);
+    btn10um->setFixedWidth(30);
+    btn100um->setFixedWidth(35);
+
+    btn1um->setToolTip("Set grid to 1um");
+    btn10um->setToolTip("Set grid to 10um");
+    btn100um->setToolTip("Set grid to 100um");
+
+    snapToolbar->addWidget(btn1um);
+    snapToolbar->addWidget(btn10um);
+    snapToolbar->addWidget(btn100um);
+
+    // Connect signals
+    connect(m_snapEnable, &QCheckBox::toggled, this, [this](bool checked) {
+        m_snapEnabled = checked;
+    });
+
+    connect(m_gridSizeSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double value) {
+        m_gridSize = value;
+    });
+
+    connect(btn1um, &QPushButton::clicked, this, [this]() {
+        m_gridSizeSpinBox->setValue(1.0);
+    });
+    connect(btn10um, &QPushButton::clicked, this, [this]() {
+        m_gridSizeSpinBox->setValue(10.0);
+    });
+    connect(btn100um, &QPushButton::clicked, this, [this]() {
+        m_gridSizeSpinBox->setValue(100.0);
+    });
+}
+
+void MainWindow::setupRenderModeToolbar()
+{
+    QToolBar* renderToolbar = addToolBar("Render Mode");
+    renderToolbar->setMovable(false);
+
+    // Label
+    QLabel* modeLabel = new QLabel("View:", this);
+    renderToolbar->addWidget(modeLabel);
+
+    // Button group for exclusive selection
+    m_renderModeGroup = new QButtonGroup(this);
+    m_renderModeGroup->setExclusive(true);
+
+    // Box mode button (simple boxes)
+    QPushButton* btnBox = new QPushButton("Box", this);
+    btnBox->setCheckable(true);
+    btnBox->setToolTip("Simple box representation (fast)");
+    btnBox->setFixedWidth(50);
+    m_renderModeGroup->addButton(btnBox, static_cast<int>(RenderMode::BoxMode));
+    renderToolbar->addWidget(btnBox);
+
+    // Layer mode button (KLayout 2.5D style)
+    QPushButton* btnLayer = new QPushButton("Layer", this);
+    btnLayer->setCheckable(true);
+    btnLayer->setChecked(true);  // Default mode
+    btnLayer->setToolTip("Layer-by-layer 2.5D visualization (like KLayout)");
+    btnLayer->setFixedWidth(50);
+    m_renderModeGroup->addButton(btnLayer, static_cast<int>(RenderMode::LayerMode));
+    renderToolbar->addWidget(btnLayer);
+
+    // Connect button group to AssemblyView
+    connect(m_renderModeGroup, QOverload<int>::of(&QButtonGroup::idClicked),
+            this, [this](int id) {
+        if (m_assemblyView) {
+            m_assemblyView->setRenderMode(static_cast<RenderMode>(id));
+        }
+    });
+}
+
+void MainWindow::setupScriptConsole()
+{
+    // Create script engine
+    m_scriptEngine = std::make_unique<ScriptEngine>(this);
+
+    // Initialize Python interpreter
+    if (ScriptEngine::is_available()) {
+        if (!m_scriptEngine->initialize()) {
+            qWarning() << "Failed to initialize Python interpreter";
+        }
+    }
+
+    // Create console widget
+    m_scriptConsole = new ScriptConsole(this);
+    m_scriptConsole->set_engine(m_scriptEngine.get());
+
+    // Create dock widget
+    m_scriptConsoleDock = new QDockWidget("Python Console", this);
+    m_scriptConsoleDock->setWidget(m_scriptConsole);
+    m_scriptConsoleDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+
+    // Add to bottom dock area
+    addDockWidget(Qt::BottomDockWidgetArea, m_scriptConsoleDock);
+
+    // Set initial height
+    m_scriptConsoleDock->setMinimumHeight(100);
+    m_scriptConsoleDock->resize(m_scriptConsoleDock->width(), 200);
+
+    // Add View menu entry
+    QMenu* viewMenu = menuBar()->findChild<QMenu*>("viewMenu");
+    if (!viewMenu) {
+        viewMenu = menuBar()->addMenu("&View");
+        viewMenu->setObjectName("viewMenu");
+    }
+
+    QAction* toggleConsole = m_scriptConsoleDock->toggleViewAction();
+    toggleConsole->setText("Python Console");
+    toggleConsole->setShortcut(QKeySequence("Ctrl+`"));
+    viewMenu->addAction(toggleConsole);
+}
+
+void MainWindow::setupAutoSave()
+{
+    m_autoSaveTimer = new QTimer(this);
+    connect(m_autoSaveTimer, &QTimer::timeout,
+            this, &MainWindow::onAutoSave);
+
+    // Timer starts when an assembly is loaded/created
+}
+
+void MainWindow::onAutoSave()
+{
+    if (!m_assembly) {
+        return;
+    }
+
+    QString savePath = autoSavePath();
+    if (savePath.isEmpty()) {
+        return;
+    }
+
+    // Serialize on main thread (fast - just building YAML in memory)
+    try {
+        ChipletFormat format;
+        // We need to save first to get the serialized content
+        // For now, do a synchronous save since serialization is fast
+        // The actual file write could be backgrounded but YAML generation
+        // needs the assembly which shouldn't be modified during save
+        format.save(*m_assembly, savePath.toStdString());
+        statusBar()->showMessage("Auto-saved to " + savePath, 3000);
+        qDebug() << "Auto-saved to" << savePath;
+    } catch (const std::exception& e) {
+        qWarning() << "Auto-save failed:" << e.what();
+        statusBar()->showMessage("Auto-save failed: " + QString::fromStdString(e.what()), 5000);
+    }
+}
+
+QString MainWindow::autoSavePath() const
+{
+    // Use a consistent autosave location
+    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (dataPath.isEmpty()) {
+        dataPath = QDir::tempPath();
+    }
+
+    // Ensure directory exists
+    QDir dir(dataPath);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+
+    // If we have a current file path, save alongside it
+    if (!m_currentFilePath.isEmpty()) {
+        QFileInfo info(m_currentFilePath);
+        return info.absolutePath() + "/" + info.baseName() + ".autosave.chiplet";
+    }
+
+    // Otherwise use the app data location
+    return dataPath + "/autosave.chiplet";
+}
+
+bool MainWindow::detectAndSelectCells()
+{
+    if (!m_assembly) {
+        return false;
+    }
+
+    bool anyChanges = false;
+    GDSAnalyzer analyzer;
+
+    for (const auto& compPtr : m_assembly->components()) {
+        Component* comp = compPtr.get();
+        if (!comp) continue;
+
+        // Skip if no layout path
+        if (comp->layout_path().empty()) {
+            continue;
+        }
+
+        // Skip if cells already specified
+        if (!comp->cells().empty()) {
+            continue;
+        }
+
+        // Analyze the GDS file
+        QString layoutPath = QString::fromStdString(comp->layout_path());
+        auto cells = analyzer.analyzeCells(comp->layout_path());
+
+        if (cells.empty()) {
+            qWarning() << "No cells found in GDS:" << layoutPath;
+            continue;
+        }
+
+        // If only one cell, use it automatically
+        if (cells.size() == 1) {
+            comp->set_top_cell(cells[0].name);
+            anyChanges = true;
+            qDebug() << "Auto-selected single cell" << QString::fromStdString(cells[0].name)
+                     << "for component" << QString::fromStdString(comp->id());
+            continue;
+        }
+
+        // Check if it's a flat GDS (all cells are top candidates)
+        bool isFlatGds = analyzer.isFlatGDS(comp->layout_path());
+
+        // Count top candidates
+        int topCandidateCount = 0;
+        for (const auto& cell : cells) {
+            if (cell.isTopCandidate) {
+                topCandidateCount++;
+            }
+        }
+
+        // If exactly one top candidate, use it automatically
+        if (!isFlatGds && topCandidateCount == 1) {
+            for (const auto& cell : cells) {
+                if (cell.isTopCandidate) {
+                    comp->set_top_cell(cell.name);
+                    anyChanges = true;
+                    qDebug() << "Auto-selected top cell" << QString::fromStdString(cell.name)
+                             << "for component" << QString::fromStdString(comp->id());
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // Need user selection: flat GDS or multiple top candidates
+        QString compName = QString::fromStdString(comp->name());
+        QString gdsFile = QFileInfo(layoutPath).fileName();
+
+        CellSelectionDialog dialog(cells, compName, gdsFile, isFlatGds, this);
+
+        if (dialog.exec() == QDialog::Accepted) {
+            QStringList selectedCells = dialog.selectedCells();
+
+            if (!selectedCells.isEmpty()) {
+                std::vector<std::string> cellsVec;
+                for (const QString& cellName : selectedCells) {
+                    cellsVec.push_back(cellName.toStdString());
+                }
+                comp->set_cells(cellsVec);
+                anyChanges = true;
+
+                qDebug() << "User selected" << selectedCells.size() << "cells for component"
+                         << QString::fromStdString(comp->id());
+            }
+        } else {
+            // User canceled - use all top candidates as default
+            std::vector<std::string> defaultCells;
+            for (const auto& cell : cells) {
+                if (cell.isTopCandidate || isFlatGds) {
+                    defaultCells.push_back(cell.name);
+                }
+            }
+            if (!defaultCells.empty()) {
+                comp->set_cells(defaultCells);
+                anyChanges = true;
+                qDebug() << "Using default cells for component" << QString::fromStdString(comp->id());
+            }
+        }
+    }
+
+    return anyChanges;
 }
 
 } // namespace chiplet

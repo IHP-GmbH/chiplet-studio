@@ -18,6 +18,7 @@
 #include <QPixmap>
 #include <QIcon>
 #include <QFileInfo>
+#include <QPainter>
 
 namespace chiplet {
 
@@ -180,9 +181,10 @@ QLabel* PropertiesPanel::createValueLabel(const QString& text)
     return label;
 }
 
-void PropertiesPanel::setComponent(Component* component)
+void PropertiesPanel::setComponent(const ComponentID& componentId, Assembly* assembly)
 {
-    m_component = component;
+    m_selectedComponentId = componentId;
+    m_assembly = assembly;
     updateDisplay();
 }
 
@@ -193,7 +195,7 @@ void PropertiesPanel::setAssembly(Assembly* assembly)
 
 void PropertiesPanel::clearSelection()
 {
-    m_component = nullptr;
+    m_selectedComponentId = INVALID_COMPONENT_ID;
 
     // Reset all labels
     m_idLabel->setText("-");
@@ -243,7 +245,13 @@ void PropertiesPanel::onGroupToggled(bool checked)
 
 void PropertiesPanel::updateDisplay()
 {
-    if (!m_component) {
+    if (!m_assembly || !is_valid_id(m_selectedComponentId)) {
+        clearSelection();
+        return;
+    }
+
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) {
         clearSelection();
         return;
     }
@@ -259,24 +267,33 @@ void PropertiesPanel::updateDisplay()
 
 void PropertiesPanel::updateComponentGroup()
 {
-    m_idLabel->setText(QString::fromStdString(m_component->id()));
-    m_typeLabel->setText(typeToString(m_component->type()));
-    m_techLabel->setText(m_component->technology().empty() ?
-                         "-" : QString::fromStdString(m_component->technology()));
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) return;
+
+    m_idLabel->setText(QString::fromStdString(comp->id()));
+    m_typeLabel->setText(typeToString(comp->type()));
+    m_techLabel->setText(comp->technology().empty() ?
+                         "-" : QString::fromStdString(comp->technology()));
 }
 
 void PropertiesPanel::updatePositionGroup()
 {
-    const Position3D& pos = m_component->position();
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) return;
+
+    const Position3D& pos = comp->position();
     m_posXLabel->setText(formatValue(pos.x));
     m_posYLabel->setText(formatValue(pos.y));
     m_posZLabel->setText(formatValue(pos.z));
-    m_rotZLabel->setText(formatDegrees(m_component->rotation().z));
+    m_rotZLabel->setText(formatDegrees(comp->rotation().z));
 }
 
 void PropertiesPanel::updateDimensionsGroup()
 {
-    const Dimensions3D& dims = m_component->dimensions();
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) return;
+
+    const Dimensions3D& dims = comp->dimensions();
     m_widthLabel->setText(formatValue(dims.width));
     m_heightLabel->setText(formatValue(dims.height));
     m_thicknessLabel->setText(formatValue(dims.thickness));
@@ -284,7 +301,10 @@ void PropertiesPanel::updateDimensionsGroup()
 
 void PropertiesPanel::updateLayoutGroup()
 {
-    const std::string& layoutPath = m_component->layout_path();
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) return;
+
+    const std::string& layoutPath = comp->layout_path();
     if (layoutPath.empty()) {
         m_layoutPathLabel->setText("-");
         m_topCellLabel->setText("-");
@@ -294,10 +314,128 @@ void PropertiesPanel::updateLayoutGroup()
         m_layoutPathLabel->setText(fi.fileName());
         m_layoutPathLabel->setToolTip(QString::fromStdString(layoutPath));
 
-        m_topCellLabel->setText(m_component->top_cell().empty() ?
-                                "-" : QString::fromStdString(m_component->top_cell()));
+        m_topCellLabel->setText(comp->top_cell().empty() ?
+                                "-" : QString::fromStdString(comp->top_cell()));
     }
 }
+
+namespace {
+
+// Generate KLayout-style pattern swatch (16x16 scaled to swatchSize)
+QPixmap createPatternSwatch(const LayerStyle& layer, int swatchSize = 16)
+{
+    QPixmap pix(swatchSize, swatchSize);
+    QColor fillColor(layer.fill_color.r, layer.fill_color.g,
+                     layer.fill_color.b, layer.fill_color.a);
+    QColor bgColor = Qt::white;
+
+    // Solid fill for C0 or no pattern
+    if (!layer.has_pattern()) {
+        pix.fill(fillColor);
+        return pix;
+    }
+
+    // Parse pattern ID (e.g., "C27", "I3")
+    QString patternId = QString::fromStdString(layer.dither_pattern);
+    bool inverted = patternId.startsWith("I");
+    int patternNum = patternId.mid(1).toInt();
+
+    // Fill with background
+    pix.fill(bgColor);
+    QPainter painter(&pix);
+    painter.setPen(Qt::NoPen);
+
+    // Generate pattern based on ID
+    // KLayout patterns: C1=horiz lines, C2=vert lines, C3=diag LR, C4=diag RL,
+    // C5=grid, C6=crosshatch, C7=dots, C8=checker 1px, C9=checker 2px, etc.
+    auto setPixel = [&](int x, int y, bool on) {
+        if (inverted) on = !on;
+        if (on) {
+            painter.fillRect(x, y, 1, 1, fillColor);
+        }
+    };
+
+    for (int y = 0; y < swatchSize; ++y) {
+        for (int x = 0; x < swatchSize; ++x) {
+            bool on = false;
+
+            switch (patternNum) {
+                case 0:  // Solid
+                    on = true;
+                    break;
+                case 1:  // Horizontal lines, spacing 2
+                    on = (y % 2) == 0;
+                    break;
+                case 2:  // Vertical lines, spacing 2
+                    on = (x % 2) == 0;
+                    break;
+                case 3:  // Diagonal LR, spacing 2
+                    on = ((x + y) % 2) == 0;
+                    break;
+                case 4:  // Diagonal RL, spacing 2
+                    on = ((x - y + swatchSize) % 2) == 0;
+                    break;
+                case 5:  // Grid, spacing 4
+                    on = (x % 4 == 0) || (y % 4 == 0);
+                    break;
+                case 6:  // Crosshatch, spacing 4
+                    on = ((x + y) % 4 == 0) || ((x - y + swatchSize) % 4 == 0);
+                    break;
+                case 7:  // Dots, 4x4
+                    on = (x % 4 == 0) && (y % 4 == 0);
+                    break;
+                case 8:  // Checkerboard 1px
+                    on = ((x + y) % 2) == 0;
+                    break;
+                case 9:  // Checkerboard 2px
+                    on = ((x / 2 + y / 2) % 2) == 0;
+                    break;
+                case 10: // Horizontal lines, spacing 4
+                    on = (y % 4) == 0;
+                    break;
+                case 11: // Vertical lines, spacing 4
+                    on = (x % 4) == 0;
+                    break;
+                case 12: // Diagonal LR, spacing 4
+                    on = ((x + y) % 4) == 0;
+                    break;
+                case 13: // Diagonal RL, spacing 4
+                    on = ((x - y + swatchSize) % 4) == 0;
+                    break;
+                case 14: // Sparse stipple
+                    on = ((x + y * 2) % 4) == 0;
+                    break;
+                case 15: // Dense stipple
+                    on = !((x + y * 2) % 4 == 0);
+                    break;
+                default:
+                    // For higher patterns, use modular patterns
+                    {
+                        int variant = (patternNum - 16) % 8;
+                        int spacing = 8;
+                        switch (variant) {
+                            case 0: on = (y % spacing) == 0; break;
+                            case 1: on = (x % spacing) == 0; break;
+                            case 2: on = ((x + y) % spacing) == 0; break;
+                            case 3: on = ((x - y + swatchSize) % spacing) == 0; break;
+                            case 4: on = (x % 2 == 0) && (y % 2 == 0); break;
+                            case 5: on = (x % spacing == 0) && (y % spacing == 0); break;
+                            case 6: on = ((x / 4 + y / 4) % 2) == 0; break;
+                            case 7: on = ((x / 8 + y / 8) % 2) == 0; break;
+                        }
+                    }
+                    break;
+            }
+
+            setPixel(x, y, on);
+        }
+    }
+
+    painter.end();
+    return pix;
+}
+
+} // anonymous namespace
 
 void PropertiesPanel::updateLayersGroup()
 {
@@ -314,25 +452,42 @@ void PropertiesPanel::updateLayersGroup()
     for (const auto& layer : m_layerProps.layers()) {
         QTreeWidgetItem* item = new QTreeWidgetItem();
 
-        // Color swatch as icon
-        QPixmap pix(12, 12);
-        pix.fill(QColor(layer.fill_color.r, layer.fill_color.g,
-                        layer.fill_color.b, layer.fill_color.a));
+        // Pattern swatch as icon (renders pattern if present)
+        QPixmap pix = createPatternSwatch(layer, 16);
         item->setIcon(0, QIcon(pix));
 
-        item->setText(0, QString::fromStdString(layer.name));
+        // Layer name with pattern indicator
+        QString name = QString::fromStdString(layer.name);
+        if (layer.has_pattern()) {
+            name += QString(" [%1]").arg(QString::fromStdString(layer.dither_pattern));
+        }
+        item->setText(0, name);
         item->setText(1, QString("%1/%2").arg(layer.key.layer).arg(layer.key.datatype));
+
+        // Tooltip with full layer info
+        QString tooltip = QString("Layer: %1\nL/D: %2/%3\nPattern: %4")
+            .arg(QString::fromStdString(layer.name))
+            .arg(layer.key.layer)
+            .arg(layer.key.datatype)
+            .arg(layer.has_pattern() ?
+                 QString::fromStdString(layer.dither_pattern) : "Solid");
+        item->setToolTip(0, tooltip);
+        item->setToolTip(1, tooltip);
+
         m_layerTree->addTopLevelItem(item);
     }
 }
 
 void PropertiesPanel::updateArrayGroup()
 {
-    bool isArray = m_component->is_array();
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) return;
+
+    bool isArray = comp->is_array();
     m_arrayGroup->setVisible(isArray);
 
-    if (isArray && m_component->array().has_value()) {
-        const ComponentArray& arr = m_component->array().value();
+    if (isArray && comp->array().has_value()) {
+        const ComponentArray& arr = comp->array().value();
         m_arrayPatternLabel->setText(QString::fromStdString(arr.pattern));
         m_arrayCountLabel->setText(QString("%1 x %2").arg(arr.countX).arg(arr.countY));
         m_arrayPitchLabel->setText(QString("%1 x %2")
@@ -345,7 +500,13 @@ void PropertiesPanel::updateMetadataGroup()
 {
     m_metadataTree->clear();
 
-    const auto& metadata = m_component->all_metadata();
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp) {
+        m_metadataGroup->setVisible(false);
+        return;
+    }
+
+    const auto& metadata = comp->all_metadata();
     if (metadata.empty()) {
         m_metadataGroup->setVisible(false);
         return;
@@ -364,15 +525,16 @@ void PropertiesPanel::loadLayerProperties()
 {
     m_layerProps = LayerPropertiesFile();  // Reset
 
-    if (!m_component || m_component->technology().empty()) {
+    if (!m_assembly || !is_valid_id(m_selectedComponentId)) {
         return;
     }
 
-    if (!m_assembly) {
+    Component* comp = m_assembly->component(m_selectedComponentId);
+    if (!comp || comp->technology().empty()) {
         return;
     }
 
-    Technology* tech = m_assembly->resolve_component_technology(m_component);
+    Technology* tech = m_assembly->resolve_component_technology(m_selectedComponentId);
     if (!tech) {
         return;
     }

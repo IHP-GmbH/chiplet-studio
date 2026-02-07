@@ -9,11 +9,10 @@
 namespace chiplet {
 namespace {
 
-// Get path to test fixtures
+// Get path to test fixtures (FIXTURES_DIR defined via CMake)
 std::string fixturesPath()
 {
-    // When running from build directory, fixtures are copied there
-    return "fixtures";
+    return FIXTURES_DIR;
 }
 
 std::string fixturePath(const std::string& filename)

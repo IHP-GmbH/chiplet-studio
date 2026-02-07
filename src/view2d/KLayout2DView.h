@@ -10,11 +10,17 @@
 
 #include <QWidget>
 #include <QString>
+#include <QVBoxLayout>
+#include <memory>
 
 // Forward declarations (avoid KLayout headers in our header)
 namespace lay {
     class LayoutViewWidget;
     class LayoutView;
+}
+
+namespace chiplet {
+    class EmbeddedDispatcher;
 }
 
 namespace chiplet {
@@ -87,7 +93,10 @@ private:
     bool ensureViewWidget();  // Lazy init, returns true if widget is ready
     static bool isDisplayAvailable();
 
+    QVBoxLayout* m_layout = nullptr;
+
 #ifdef HAVE_KLAYOUT
+    std::unique_ptr<EmbeddedDispatcher> m_dispatcher;
     lay::LayoutViewWidget* m_viewWidget = nullptr;
 #endif
     QString m_currentPath;

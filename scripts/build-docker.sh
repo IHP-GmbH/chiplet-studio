@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 CLEAN=0
-PARALLEL=$(nproc)
+PARALLEL=8
 
 while [[ $# -gt 0 ]]; do
     case $1 in

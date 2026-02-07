@@ -3,6 +3,7 @@
  */
 
 #include "Assembly.h"
+#include <algorithm>
 #include <filesystem>
 
 namespace chiplet {
@@ -78,17 +79,50 @@ void Assembly::set_units(const string_type& units)
 
 void Assembly::add_component(std::unique_ptr<Component> component)
 {
+    if (!component) {
+        return;
+    }
+    const ComponentID& id = component->id();
+    Component* ptr = component.get();
     m_components.push_back(std::move(component));
+    m_component_index[id] = ptr;
 }
 
-Component* Assembly::component(const string_type& id) const
+Component* Assembly::component(const ComponentID& id) const
 {
-    for (const auto& c : m_components) {
-        if (c->id() == id) {
-            return c.get();
-        }
+    auto it = m_component_index.find(id);
+    if (it != m_component_index.end()) {
+        return it->second;
     }
     return nullptr;
+}
+
+bool Assembly::has_component(const ComponentID& id) const
+{
+    return m_component_index.find(id) != m_component_index.end();
+}
+
+bool Assembly::remove_component(const ComponentID& id)
+{
+    auto it = m_component_index.find(id);
+    if (it == m_component_index.end()) {
+        return false;
+    }
+
+    // Remove from index
+    m_component_index.erase(it);
+
+    // Remove from vector
+    auto vec_it = std::find_if(m_components.begin(), m_components.end(),
+        [&id](const std::unique_ptr<Component>& c) {
+            return c->id() == id;
+        });
+
+    if (vec_it != m_components.end()) {
+        m_components.erase(vec_it);
+    }
+
+    return true;
 }
 
 const Assembly::component_list_type& Assembly::components() const
@@ -142,13 +176,18 @@ const Assembly::technology_list_type& Assembly::technologies() const
 
 // Validation
 
-Technology* Assembly::resolve_component_technology(const Component* component) const
+Technology* Assembly::resolve_component_technology(const ComponentID& id) const
 {
-    if (!component) {
+    if (!is_valid_id(id)) {
         return nullptr;
     }
 
-    const auto& tech_id = component->technology();
+    Component* comp = component(id);
+    if (!comp) {
+        return nullptr;
+    }
+
+    const auto& tech_id = comp->technology();
     if (tech_id.empty()) {
         return nullptr;
     }

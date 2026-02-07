@@ -1,17 +1,38 @@
 #!/bin/bash
 # run-docker.sh - Run Chiplet Studio from Docker container
 #
-# Usage: ./scripts/run-docker.sh [project_dir]
+# Usage: ./scripts/run-docker.sh [work_dir]
+#
 # Arguments:
-#   project_dir   Directory containing .chiplet files (default: current dir)
+#   work_dir   Directory to open (default: chiplet_files)
+#
+# Environment:
+#   CHIPLET_NO_PYTHON=1   Disable Python scripting (if crashes)
+#
+# This script mounts:
+#   - /home/montanares/git/heterogenic_chip_design_project (GDS files, chiplet files)
+#   - /home/montanares/git/ihp_pdk (IHP SG13G2 techfiles)
+#
+# The mounts preserve absolute paths so .chiplet files work without modification.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Project files directory (for .chiplet files)
-WORK_DIR="${1:-$(pwd)}"
+# Default working directory (where .chiplet files are)
+DEFAULT_WORK_DIR="/home/montanares/git/heterogenic_chip_design_project/kicad_designs/kicad_interposer_hyperlynx_to_gds/chiplet_files"
+WORK_DIR="${1:-$DEFAULT_WORK_DIR}"
+
+# Docker image (pre-built with all dependencies)
+IMAGE="chiplet-studio-build"
+
+# Paths to mount (these contain GDS files and techfiles referenced by .chiplet files)
+HETERO_PROJECT="/home/montanares/git/heterogenic_chip_design_project"
+IHP_PDK="/home/montanares/git/ihp_pdk"
+
+# KLayout library paths
+KLAYOUT_LIBS="$HETERO_PROJECT/chiplet-studio/extern/klayout/bin-release"
 
 cd "$PROJECT_DIR"
 
@@ -21,22 +42,46 @@ if [ ! -f "build/chiplet-studio" ]; then
     exit 1
 fi
 
+# Check if image exists
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+    echo "Docker image '$IMAGE' not found. Building..."
+    "$SCRIPT_DIR/build-docker.sh"
+fi
+
 # Allow X11 connections from Docker
 xhost +local:docker 2>/dev/null || true
 
-echo "Starting Chiplet Studio..."
-docker run --rm -it \
-    -e DISPLAY="$DISPLAY" \
-    -e QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}" \
+echo "============================================"
+echo "  Chiplet Studio"
+echo "============================================"
+echo "  Working dir: $WORK_DIR"
+echo "  Image: $IMAGE"
+echo ""
+echo "  Mounts:"
+echo "    - $HETERO_PROJECT (GDS, chiplet files)"
+echo "    - $IHP_PDK (IHP techfiles)"
+echo ""
+echo "  Press Ctrl+C to stop"
+echo "============================================"
+echo ""
+
+# Build environment variables
+ENV_VARS="-e DISPLAY=$DISPLAY -e QT_QPA_PLATFORM=xcb"
+if [ -n "$CHIPLET_NO_PYTHON" ]; then
+    ENV_VARS="$ENV_VARS -e CHIPLET_NO_PYTHON=1"
+fi
+
+# Run the container
+docker run --rm \
+    $ENV_VARS \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-    -v "$PROJECT_DIR/build:/app:ro" \
-    -v "$PROJECT_DIR/extern/klayout/bin-release:/app/lib:ro" \
-    -v "$WORK_DIR:/project" \
-    --user $(id -u):$(id -g) \
+    -v "$HETERO_PROJECT:$HETERO_PROJECT:ro" \
+    -v "$IHP_PDK:$IHP_PDK:ro" \
+    --user "$(id -u):$(id -g)" \
     --network host \
-    ubuntu:22.04 \
+    "$IMAGE" \
     bash -c "
-        export LD_LIBRARY_PATH=/app/lib
-        cd /project
-        /app/chiplet-studio
+        export LD_LIBRARY_PATH=$KLAYOUT_LIBS:$KLAYOUT_LIBS/db_plugins
+        cd '$WORK_DIR'
+        $HETERO_PROJECT/chiplet-studio/build/chiplet-studio
     "

@@ -9,11 +9,11 @@
 namespace chiplet {
 namespace {
 
-// Fixture path (copied to build directory by CMake)
-const char* SG13G2_LYP = "fixtures/sg13g2.lyp";
+// Fixture path (FIXTURES_DIR defined via CMake)
+const std::string SG13G2_LYP = std::string(FIXTURES_DIR) + "/sg13g2.lyp";
 
 // Helper to check if fixture exists
-bool fixture_exists(const char* path) {
+bool fixture_exists(const std::string& path) {
     return std::filesystem::exists(path);
 }
 
@@ -189,6 +189,39 @@ TEST(LayerStyle, IsVisible)
     EXPECT_FALSE(style.is_visible());
 }
 
+TEST(LayerStyle, PatternDefaultValues)
+{
+    LayerStyle style;
+
+    EXPECT_TRUE(style.dither_pattern.empty());
+    EXPECT_TRUE(style.line_style.empty());
+    EXPECT_EQ(style.frame_brightness, 0);
+    EXPECT_EQ(style.fill_brightness, 0);
+}
+
+TEST(LayerStyle, HasPattern)
+{
+    LayerStyle style;
+
+    // Empty pattern = no pattern
+    style.dither_pattern = "";
+    EXPECT_FALSE(style.has_pattern());
+
+    // C0 = solid (no pattern)
+    style.dither_pattern = "C0";
+    EXPECT_FALSE(style.has_pattern());
+
+    // Any other pattern = has pattern
+    style.dither_pattern = "C1";
+    EXPECT_TRUE(style.has_pattern());
+
+    style.dither_pattern = "I1";
+    EXPECT_TRUE(style.has_pattern());
+
+    style.dither_pattern = "C27";
+    EXPECT_TRUE(style.has_pattern());
+}
+
 // =============================================================================
 // LayerPropertiesFile Tests
 // =============================================================================
@@ -276,6 +309,61 @@ TEST_F(LayerPropertiesFileTest, VisibilityParsed)
     const LayerStyle* style = lyp.find(1, 0);
     ASSERT_NE(style, nullptr);
     EXPECT_TRUE(style->visible);
+}
+
+TEST_F(LayerPropertiesFileTest, DitherPatternParsed)
+{
+    LayerPropertiesFile lyp;
+    lyp.load(SG13G2_LYP);
+
+    // Substrate.drawing (40/0) has dither-pattern="I1"
+    const LayerStyle* substrate = lyp.find(40, 0);
+    ASSERT_NE(substrate, nullptr);
+    EXPECT_EQ(substrate->dither_pattern, "I1");
+
+    // Activ.drawing (1/0) has dither-pattern="C2"
+    const LayerStyle* activ = lyp.find(1, 0);
+    ASSERT_NE(activ, nullptr);
+    EXPECT_EQ(activ->dither_pattern, "C2");
+}
+
+TEST_F(LayerPropertiesFileTest, LineStyleParsed)
+{
+    LayerPropertiesFile lyp;
+    lyp.load(SG13G2_LYP);
+
+    // Substrate.drawing (40/0) has line-style="C0"
+    const LayerStyle* substrate = lyp.find(40, 0);
+    ASSERT_NE(substrate, nullptr);
+    EXPECT_EQ(substrate->line_style, "C0");
+
+    // Activ.drawing (1/0) has line-style="C2"
+    const LayerStyle* activ = lyp.find(1, 0);
+    ASSERT_NE(activ, nullptr);
+    EXPECT_EQ(activ->line_style, "C2");
+}
+
+TEST_F(LayerPropertiesFileTest, BrightnessParsed)
+{
+    LayerPropertiesFile lyp;
+    lyp.load(SG13G2_LYP);
+
+    // All layers in sg13g2.lyp have brightness=0
+    const LayerStyle* style = lyp.find(40, 0);
+    ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->frame_brightness, 0);
+    EXPECT_EQ(style->fill_brightness, 0);
+}
+
+TEST_F(LayerPropertiesFileTest, HasPatternMethod)
+{
+    LayerPropertiesFile lyp;
+    lyp.load(SG13G2_LYP);
+
+    // Activ.drawing has pattern C2 (not solid)
+    const LayerStyle* activ = lyp.find(1, 0);
+    ASSERT_NE(activ, nullptr);
+    EXPECT_TRUE(activ->has_pattern());
 }
 
 TEST_F(LayerPropertiesFileTest, IterateLayers)

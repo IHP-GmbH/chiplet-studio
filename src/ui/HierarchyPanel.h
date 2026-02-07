@@ -63,10 +63,16 @@ signals:
      */
     void showPropertiesRequested(const QString& componentId);
 
+    /**
+     * Emitted when component visibility is toggled
+     */
+    void componentVisibilityChanged(const QString& componentId, bool visible);
+
 private slots:
     void onItemClicked(QTreeWidgetItem* item, int column);
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
     void onCustomContextMenu(const QPoint& pos);
+    void onItemChanged(QTreeWidgetItem* item, int column);
 
 private:
     void refresh();

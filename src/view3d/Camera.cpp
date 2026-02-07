@@ -12,8 +12,8 @@ Camera::Camera()
     : m_target(0.0f, 0.0f, 0.0f)
     , m_up(0.0f, 1.0f, 0.0f)
     , m_distance(1000.0f)
-    , m_yaw(45.0f)
-    , m_pitch(30.0f)
+    , m_yaw(0.0f)      // Face forward for top-down view
+    , m_pitch(89.0f)   // Near-vertical for top-down view (like KLayout 2.5D)
     , m_fov(45.0f)
     , m_near(1.0f)
     , m_far(100000.0f)
@@ -58,8 +58,13 @@ void Camera::zoom(float delta)
     float factor = 1.0f - delta * m_zoomSensitivity;
     m_distance *= factor;
 
-    // Clamp to reasonable range
-    m_distance = std::max(1.0f, std::min(m_distance, 1000000.0f));
+    // Clamp to extended range for better close-up and overview zoom
+    // Min 0.1 allows very close inspection, max 10,000,000 for large assemblies
+    m_distance = std::max(0.1f, std::min(m_distance, 10000000.0f));
+
+    // Dynamically adjust clip planes based on distance for close-up viewing
+    m_near = std::max(0.01f, m_distance * 0.001f);
+    m_far = m_distance * 100.0f;
 }
 
 void Camera::fitToBox(const AA_BOUNDING_BOX& box)
@@ -86,8 +91,8 @@ void Camera::reset()
 {
     m_target = VECTOR3D(0.0f, 0.0f, 0.0f);
     m_distance = 1000.0f;
-    m_yaw = 45.0f;
-    m_pitch = 30.0f;
+    m_yaw = 0.0f;      // Face forward for top-down view
+    m_pitch = 89.0f;   // Near-vertical for top-down view
 }
 
 VECTOR3D Camera::position() const
@@ -161,7 +166,8 @@ void Camera::setTarget(const VECTOR3D& target)
 
 void Camera::setDistance(float distance)
 {
-    m_distance = std::max(1.0f, distance);
+    // Match zoom() range: 0.1 to 10,000,000
+    m_distance = std::max(0.1f, std::min(distance, 10000000.0f));
 }
 
 void Camera::setClipPlanes(float nearPlane, float farPlane)

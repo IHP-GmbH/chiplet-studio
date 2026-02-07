@@ -7,21 +7,80 @@
 
 namespace chiplet {
 
+// Get default dimensions for component type (in micrometers)
+static Dimensions3D getDefaultDimensions(ComponentType type)
+{
+    Dimensions3D dims;
+    switch (type) {
+        case ComponentType::Die:
+        case ComponentType::DieArray:
+            dims.width = 2000.0;     // 2mm
+            dims.height = 2000.0;    // 2mm
+            dims.thickness = 200.0;  // 200um
+            break;
+        case ComponentType::Interposer:
+            dims.width = 8000.0;     // 8mm
+            dims.height = 8000.0;    // 8mm
+            dims.thickness = 100.0;  // 100um
+            break;
+        case ComponentType::Substrate:
+            dims.width = 10000.0;    // 10mm
+            dims.height = 10000.0;   // 10mm
+            dims.thickness = 500.0;  // 500um
+            break;
+    }
+    return dims;
+}
+
 ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp,
                                                const LayerPropertiesFile* lyp)
 {
-    const auto& dims = comp.dimensions();
+    auto dims = comp.dimensions();
     const auto& pos = comp.position();
 
+    // Use default dimensions if not specified
+    if (dims.width <= 0 || dims.height <= 0 || dims.thickness <= 0) {
+        dims = getDefaultDimensions(comp.type());
+    }
+
     // Convert micrometers to mm for reasonable scale
+    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z (elevation) -> 3D Y
+    // This aligns the EDA X-Y plane with the 3D X-Z plane (horizontal)
+    // and maps layer elevation to the Y axis (vertical, matching camera up vector)
     float w = static_cast<float>(dims.width / 1000.0);
     float h = static_cast<float>(dims.height / 1000.0);
     float d = static_cast<float>(dims.thickness / 1000.0);
     float x = static_cast<float>(pos.x / 1000.0);
-    float y = static_cast<float>(pos.y / 1000.0);
-    float z = static_cast<float>(pos.z / 1000.0);
+    float y = static_cast<float>(pos.z / 1000.0);   // Chiplet Z elevation -> 3D Y (vertical)
+    float z = static_cast<float>(pos.y / 1000.0);   // Chiplet Y -> 3D Z (horizontal)
 
-    ComponentMesh mesh = buildBox(w, h, d, x, y, z);
+    // Build box with dimensions: (width, thickness, height) for (3D X, 3D Y, 3D Z)
+    // w = chiplet width -> 3D X, d = chiplet thickness -> 3D Y (vertical), h = chiplet height -> 3D Z
+    ComponentMesh mesh = buildBox(w, d, h, x, y, z);
+    mesh.setColor(colorForComponent(comp, lyp));
+
+    return mesh;
+}
+
+ComponentMesh MeshBuilder::buildComponentMeshAtOrigin(const Component& comp,
+                                                       const LayerPropertiesFile* lyp)
+{
+    auto dims = comp.dimensions();
+
+    // Use default dimensions if not specified
+    if (dims.width <= 0 || dims.height <= 0 || dims.thickness <= 0) {
+        dims = getDefaultDimensions(comp.type());
+    }
+
+    // Convert micrometers to mm for reasonable scale
+    // Position is NOT included - mesh is at origin for instanced rendering
+    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z (elevation) -> 3D Y
+    float w = static_cast<float>(dims.width / 1000.0);
+    float h = static_cast<float>(dims.height / 1000.0);
+    float d = static_cast<float>(dims.thickness / 1000.0);
+
+    // Build box with dimension swap: (width, thickness, height) for (3D X, 3D Y, 3D Z)
+    ComponentMesh mesh = buildBox(w, d, h, 0, 0, 0);
     mesh.setColor(colorForComponent(comp, lyp));
 
     return mesh;
@@ -127,6 +186,39 @@ ComponentMesh MeshBuilder::buildGridMesh(float size, float spacing)
     mesh.setVertices(vertices);
     mesh.setIndices(indices);
     mesh.setColor(QColor(100, 100, 100, 100));
+
+    return mesh;
+}
+
+ComponentMesh MeshBuilder::buildPlaneMesh(float size, float centerX, float centerZ, float y)
+{
+    ComponentMesh mesh;
+    float halfSize = size * 0.5f;
+
+    // Calculate vertex positions centered at (centerX, y, centerZ)
+    float x0 = centerX - halfSize;
+    float x1 = centerX + halfSize;
+    float z0 = centerZ - halfSize;
+    float z1 = centerZ + halfSize;
+
+    // Quad on XZ plane at specified Y position
+    // Normal pointing up (+Y)
+    std::vector<Vertex> vertices = {
+        {{x0, y, z0}, {0, 1, 0}},  // Bottom-left
+        {{x1, y, z0}, {0, 1, 0}},  // Bottom-right
+        {{x1, y, z1}, {0, 1, 0}},  // Top-right
+        {{x0, y, z1}, {0, 1, 0}},  // Top-left
+    };
+
+    // Two triangles forming a quad
+    std::vector<GLuint> indices = {
+        0, 1, 2,  // First triangle
+        0, 2, 3   // Second triangle
+    };
+
+    mesh.setVertices(vertices);
+    mesh.setIndices(indices);
+    mesh.setColor(QColor(230, 230, 230, 255));  // Light gray/white
 
     return mesh;
 }

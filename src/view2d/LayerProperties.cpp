@@ -112,6 +112,22 @@ bool LayerPropertiesFile::load(const string_type& path)
                     } catch (const std::exception&) {
                         current_style.width = 1;
                     }
+                } else if (name == "dither-pattern") {
+                    current_style.dither_pattern = content_str;
+                } else if (name == "line-style") {
+                    current_style.line_style = content_str;
+                } else if (name == "frame-brightness") {
+                    try {
+                        current_style.frame_brightness = std::stoi(content_str);
+                    } catch (const std::exception&) {
+                        current_style.frame_brightness = 0;
+                    }
+                } else if (name == "fill-brightness") {
+                    try {
+                        current_style.fill_brightness = std::stoi(content_str);
+                    } catch (const std::exception&) {
+                        current_style.fill_brightness = 0;
+                    }
                 }
             }
         } else if (token == QXmlStreamReader::EndElement) {

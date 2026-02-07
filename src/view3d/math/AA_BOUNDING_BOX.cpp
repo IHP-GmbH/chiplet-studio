@@ -100,3 +100,97 @@ void AA_BOUNDING_BOX::AddBounds(const AA_BOUNDING_BOX & bounds)
 	// Make bbox
 	SetFromMinsMaxes(mins, maxes);
 }
+
+// BVH support methods
+
+bool AA_BOUNDING_BOX::rayIntersect(const VECTOR3D& origin, const VECTOR3D& dir,
+                                    float& tMin, float& tMax) const
+{
+	tMin = 0.0f;
+	tMax = 1e30f;  // Large value instead of FLT_MAX for numerical stability
+
+	// X axis slab
+	if (fabs(dir.x) < EPSILON) {
+		// Ray is parallel to X slab
+		if (origin.x < mins.x || origin.x > maxes.x) return false;
+	} else {
+		float t1 = (mins.x - origin.x) / dir.x;
+		float t2 = (maxes.x - origin.x) / dir.x;
+		if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+		if (t1 > tMin) tMin = t1;
+		if (t2 < tMax) tMax = t2;
+		if (tMin > tMax) return false;
+	}
+
+	// Y axis slab
+	if (fabs(dir.y) < EPSILON) {
+		if (origin.y < mins.y || origin.y > maxes.y) return false;
+	} else {
+		float t1 = (mins.y - origin.y) / dir.y;
+		float t2 = (maxes.y - origin.y) / dir.y;
+		if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+		if (t1 > tMin) tMin = t1;
+		if (t2 < tMax) tMax = t2;
+		if (tMin > tMax) return false;
+	}
+
+	// Z axis slab
+	if (fabs(dir.z) < EPSILON) {
+		if (origin.z < mins.z || origin.z > maxes.z) return false;
+	} else {
+		float t1 = (mins.z - origin.z) / dir.z;
+		float t2 = (maxes.z - origin.z) / dir.z;
+		if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+		if (t1 > tMin) tMin = t1;
+		if (t2 < tMax) tMax = t2;
+		if (tMin > tMax) return false;
+	}
+
+	return true;
+}
+
+bool AA_BOUNDING_BOX::intersects(const AA_BOUNDING_BOX& other) const
+{
+	// Separating axis test for axis-aligned boxes
+	if (maxes.x < other.mins.x || mins.x > other.maxes.x) return false;
+	if (maxes.y < other.mins.y || mins.y > other.maxes.y) return false;
+	if (maxes.z < other.mins.z || mins.z > other.maxes.z) return false;
+	return true;
+}
+
+VECTOR3D AA_BOUNDING_BOX::center() const
+{
+	return VECTOR3D(
+		(mins.x + maxes.x) * 0.5f,
+		(mins.y + maxes.y) * 0.5f,
+		(mins.z + maxes.z) * 0.5f
+	);
+}
+
+VECTOR3D AA_BOUNDING_BOX::extent() const
+{
+	return VECTOR3D(
+		(maxes.x - mins.x) * 0.5f,
+		(maxes.y - mins.y) * 0.5f,
+		(maxes.z - mins.z) * 0.5f
+	);
+}
+
+float AA_BOUNDING_BOX::surfaceArea() const
+{
+	float dx = maxes.x - mins.x;
+	float dy = maxes.y - mins.y;
+	float dz = maxes.z - mins.z;
+	return 2.0f * (dx * dy + dy * dz + dz * dx);
+}
+
+int AA_BOUNDING_BOX::longestAxis() const
+{
+	float dx = maxes.x - mins.x;
+	float dy = maxes.y - mins.y;
+	float dz = maxes.z - mins.z;
+
+	if (dx >= dy && dx >= dz) return 0;  // X axis
+	if (dy >= dz) return 1;              // Y axis
+	return 2;                            // Z axis
+}

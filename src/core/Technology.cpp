@@ -3,6 +3,8 @@
  */
 
 #include "Technology.h"
+#include "LayerStackup.h"
+#include "process_cfg.h"  // GDS3D process parser
 #include <filesystem>
 
 namespace chiplet {
@@ -88,6 +90,89 @@ TechnologyValidation Technology::validate() const
 bool Technology::is_valid() const
 {
     return validate().valid;
+}
+
+// GDS3D Process Definition support
+
+bool Technology::load_process_def(const std::string& path)
+{
+    if (path.empty()) return false;
+
+    m_process = std::make_unique<GDSProcess>();
+    m_process->Parse(const_cast<char*>(path.c_str()));
+
+    if (m_process->IsValid() && m_process->LayerCount() > 0) {
+        m_processDefPath = path;
+        return true;
+    }
+
+    m_process.reset();
+    return false;
+}
+
+bool Technology::has_process_def() const
+{
+    return m_process && m_process->IsValid();
+}
+
+const std::string& Technology::process_def_path() const
+{
+    return m_processDefPath;
+}
+
+double Technology::get_layer_z_um(int layer, int datatype) const
+{
+    if (!m_process) return 0.0;
+
+    ProcessLayer* pl = m_process->GetLayer(layer, datatype);
+    if (!pl) return 0.0;
+
+    // Convert nm to um
+    return pl->Height / 1000.0;
+}
+
+double Technology::get_layer_thickness_um(int layer, int datatype) const
+{
+    if (!m_process) return 1.0;  // Default 1um
+
+    ProcessLayer* pl = m_process->GetLayer(layer, datatype);
+    if (!pl) return 1.0;
+
+    // Convert nm to um
+    return pl->Thickness / 1000.0;
+}
+
+std::array<float, 3> Technology::get_layer_color(int layer, int datatype) const
+{
+    if (!m_process) return {0.5f, 0.5f, 0.5f};
+
+    ProcessLayer* pl = m_process->GetLayer(layer, datatype);
+    if (!pl) return {0.5f, 0.5f, 0.5f};
+
+    return {pl->Red, pl->Green, pl->Blue};
+}
+
+LayerStackup Technology::createStackup() const
+{
+    LayerStackup stackup;
+
+    if (!m_process) return stackup;
+
+    // Iterate through all layers in the process
+    for (int i = 0; i < m_process->LayerCount(); ++i) {
+        ProcessLayer* pl = m_process->GetLayer(i);
+        if (!pl) continue;
+
+        // Convert nm to um
+        double z_um = pl->Height / 1000.0;
+        double thickness_um = pl->Thickness / 1000.0;
+
+        std::string name = pl->Name ? pl->Name : "";
+
+        stackup.addLayer(pl->Layer, pl->Datatype, z_um, thickness_um, name);
+    }
+
+    return stackup;
 }
 
 } // namespace chiplet

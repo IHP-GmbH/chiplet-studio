@@ -99,14 +99,15 @@ TEST(KLayoutBridge, MoveAssignment)
 
 TEST(KLayoutBridge, LoadValidGds)
 {
-    // Uses sample_minimal.gds fixture (copied from KLayout testdata/arefs.gds)
+    // Uses sample_minimal.gds fixture (FIXTURES_DIR defined via CMake)
     KLayoutBridge bridge;
 
-    bool result = bridge.load_layout("fixtures/sample_minimal.gds");
+    std::string gdsPath = std::string(FIXTURES_DIR) + "/sample_minimal.gds";
+    bool result = bridge.load_layout(gdsPath);
 
-    ASSERT_TRUE(result) << "Failed to load fixtures/sample_minimal.gds";
+    ASSERT_TRUE(result) << "Failed to load " << gdsPath;
     EXPECT_TRUE(bridge.is_loaded());
-    EXPECT_EQ(bridge.path(), "fixtures/sample_minimal.gds");
+    EXPECT_EQ(bridge.path(), gdsPath);
     EXPECT_EQ(bridge.format(), "GDS2");
     EXPECT_GT(bridge.cell_count(), 0u);
 }

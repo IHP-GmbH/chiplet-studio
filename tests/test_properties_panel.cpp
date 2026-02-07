@@ -188,10 +188,11 @@ TEST_F(PropertiesPanelTest, Construction)
     EXPECT_TRUE(true);
 }
 
-TEST_F(PropertiesPanelTest, SetNullComponent)
+TEST_F(PropertiesPanelTest, SetInvalidComponent)
 {
     PropertiesPanel panel;
-    panel.setComponent(nullptr);
+    // Set with invalid/empty component ID
+    panel.setComponent("", nullptr);
     // Should not crash
     EXPECT_TRUE(true);
 }
@@ -200,12 +201,13 @@ TEST_F(PropertiesPanelTest, SetValidComponent)
 {
     PropertiesPanel panel;
     auto assembly = createTestAssembly();
-    panel.setAssembly(assembly.get());
 
+    // Verify component exists
     Component* die = assembly->component("die_a");
     ASSERT_NE(die, nullptr);
 
-    panel.setComponent(die);
+    // Set component using ID-based API
+    panel.setComponent("die_a", assembly.get());
     // Should display component properties without crash
     EXPECT_TRUE(true);
 }
@@ -214,10 +216,8 @@ TEST_F(PropertiesPanelTest, ClearSelection)
 {
     PropertiesPanel panel;
     auto assembly = createTestAssembly();
-    panel.setAssembly(assembly.get());
 
-    Component* die = assembly->component("die_a");
-    panel.setComponent(die);
+    panel.setComponent("die_a", assembly.get());
     panel.clearSelection();
     // Should reset all fields without crash
     EXPECT_TRUE(true);
@@ -235,14 +235,21 @@ TEST_F(PropertiesPanelTest, SetAssembly)
 TEST_F(PropertiesPanelTest, DieArrayShowsArrayGroup)
 {
     PropertiesPanel panel;
+    auto assembly = std::make_unique<Assembly>();
+
+    // Add a regular die
+    auto die = std::make_unique<Component>("die", ComponentType::Die);
+    assembly->add_component(std::move(die));
+
+    // Add a die array
+    auto dieArray = createDieArrayComponent();
+    assembly->add_component(std::move(dieArray));
 
     // First set a regular die - array group should be hidden
-    auto die = std::make_unique<Component>("die", ComponentType::Die);
-    panel.setComponent(die.get());
+    panel.setComponent("die", assembly.get());
 
     // Then set a die array - array group should be visible
-    auto dieArray = createDieArrayComponent();
-    panel.setComponent(dieArray.get());
+    panel.setComponent("hbm_array", assembly.get());
     // Should not crash
     EXPECT_TRUE(true);
 }
@@ -251,10 +258,9 @@ TEST_F(PropertiesPanelTest, ComponentWithMetadata)
 {
     PropertiesPanel panel;
     auto assembly = createTestAssembly();
-    panel.setAssembly(assembly.get());
 
-    Component* die = assembly->component("die_a");
-    panel.setComponent(die);
+    // die_a has metadata set in createTestAssembly()
+    panel.setComponent("die_a", assembly.get());
     // Metadata group should be visible
     EXPECT_TRUE(true);
 }
@@ -262,10 +268,13 @@ TEST_F(PropertiesPanelTest, ComponentWithMetadata)
 TEST_F(PropertiesPanelTest, ComponentWithoutMetadata)
 {
     PropertiesPanel panel;
+    auto assembly = std::make_unique<Assembly>();
 
+    // Add a simple die without metadata
     auto die = std::make_unique<Component>("simple_die", ComponentType::Die);
-    // No metadata set
-    panel.setComponent(die.get());
+    assembly->add_component(std::move(die));
+
+    panel.setComponent("simple_die", assembly.get());
     // Metadata group should be hidden
     EXPECT_TRUE(true);
 }
@@ -274,14 +283,11 @@ TEST_F(PropertiesPanelTest, MultipleComponentChanges)
 {
     PropertiesPanel panel;
     auto assembly = createTestAssembly();
-    panel.setAssembly(assembly.get());
 
-    Component* die = assembly->component("die_a");
-
-    // Cycle through components
-    panel.setComponent(die);
-    panel.setComponent(nullptr);
-    panel.setComponent(die);
+    // Cycle through components using ID-based API
+    panel.setComponent("die_a", assembly.get());
+    panel.setComponent("", assembly.get());  // Invalid ID clears selection
+    panel.setComponent("die_a", assembly.get());
     panel.clearSelection();
     // Should handle multiple changes without crash
     EXPECT_TRUE(true);

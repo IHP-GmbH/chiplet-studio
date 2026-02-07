@@ -7,11 +7,59 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# Debug build configuration
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
+endif()
+set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -DDEBUG_ENABLED" CACHE STRING "Debug flags" FORCE)
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O2 -DNDEBUG" CACHE STRING "RelWithDebInfo flags" FORCE)
+
+# Include sanitizers configuration (ASan, UBSan, TSan)
+include(${CMAKE_SOURCE_DIR}/cmake/Sanitizers.cmake)
+
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets Core5Compat)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets Core5Compat Concurrent)
 
 # Find yaml-cpp
 find_package(yaml-cpp REQUIRED)
+
+# Fetch nlohmann_json for Command serialization/journaling
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+# Python scripting support (optional)
+option(ENABLE_PYTHON_SCRIPTING "Enable Python scripting support" ON)
+set(HAVE_PYTHON FALSE)
+
+if(ENABLE_PYTHON_SCRIPTING)
+    find_package(Python3 COMPONENTS Interpreter Development)
+    if(Python3_FOUND)
+        message(STATUS "Python ${Python3_VERSION} found")
+        message(STATUS "  Interpreter: ${Python3_EXECUTABLE}")
+        message(STATUS "  Include dirs: ${Python3_INCLUDE_DIRS}")
+        message(STATUS "  Libraries: ${Python3_LIBRARIES}")
+
+        # Fetch pybind11
+        FetchContent_Declare(
+            pybind11
+            GIT_REPOSITORY https://github.com/pybind/pybind11.git
+            GIT_TAG v2.11.1
+        )
+        FetchContent_MakeAvailable(pybind11)
+        set(HAVE_PYTHON TRUE)
+        message(STATUS "Python scripting: ENABLED")
+    else()
+        message(WARNING "Python development libraries not found. Python scripting disabled.")
+        message(STATUS "Python scripting: DISABLED")
+    endif()
+else()
+    message(STATUS "Python scripting: DISABLED (by option)")
+endif()
 
 # KLayout integration
 # KLayout must be built separately using its build.sh script
@@ -59,6 +107,12 @@ set(CORE_SOURCES
     src/core/Component.cpp
     src/core/Interface.cpp
     src/core/Technology.cpp
+    src/core/LayerStackup.cpp
+    src/core/CommandProcessor.cpp
+    src/core/CommandJournal.cpp
+    src/core/CommandFactory.cpp
+    src/core/commands/CmdMoveComponent.cpp
+    src/core/commands/CmdRenameComponent.cpp
 )
 
 set(FORMAT_SOURCES
@@ -72,6 +126,7 @@ set(VIEW3D_MATH_SOURCES
     src/view3d/math/PLANE.cpp
     src/view3d/math/FRUSTUM.cpp
     src/view3d/math/AA_BOUNDING_BOX.cpp
+    src/view3d/math/BVH.cpp
 )
 
 set(VIEW3D_SOURCES
@@ -83,6 +138,11 @@ set(VIEW3D_SOURCES
     src/view3d/MeshBuilder.cpp
     src/view3d/AssemblyView.cpp
     src/view3d/ClipPlane.cpp
+    src/view3d/DitherPatterns.cpp
+    src/view3d/GDSLayerExtractor.cpp
+    src/view3d/GDSAnalyzer.cpp
+    src/view3d/LayerMeshBuilder.cpp
+    src/view3d/gizmos/TransformGizmo.cpp
     ${VIEW3D_MATH_SOURCES}
 )
 
@@ -90,6 +150,7 @@ set(VIEW2D_SOURCES
     src/view2d/KLayoutBridge.cpp
     src/view2d/LayerProperties.cpp
     src/view2d/KLayout2DView.cpp
+    src/view2d/EmbeddedDispatcher.cpp
 )
 
 set(UI_SOURCES
@@ -98,6 +159,14 @@ set(UI_SOURCES
     src/ui/PropertiesPanel.cpp
     src/ui/ComponentStyle.cpp
     src/ui/UnitConverter.cpp
+    src/ui/CrashRecoveryDialog.cpp
+    src/ui/CellSelectionDialog.cpp
+    src/ui/ScriptConsole.cpp
+)
+
+# Scripting sources (always included, conditionally compiled)
+set(SCRIPTING_SOURCES
+    src/scripting/ScriptEngine.cpp
 )
 
 # Shader resources
@@ -116,6 +185,7 @@ add_executable(chiplet-studio
     ${VIEW3D_SOURCES}
     ${VIEW2D_SOURCES}
     ${UI_SOURCES}
+    ${SCRIPTING_SOURCES}
 )
 
 # Embed shader files as Qt resources
@@ -130,7 +200,10 @@ target_link_libraries(chiplet-studio
     Qt6::Widgets
     Qt6::OpenGLWidgets
     Qt6::Core5Compat
+    Qt6::Concurrent
     yaml-cpp
+    nlohmann_json::nlohmann_json
+    chiplet_gds3d
 )
 
 # Link KLayout libraries if available
@@ -169,6 +242,54 @@ if(HAVE_KLAYOUT)
 else()
     message(STATUS "KLayout integration: DISABLED (stub implementation)")
 endif()
+
+# Link Python for embedded interpreter in main executable
+if(HAVE_PYTHON)
+    target_compile_definitions(chiplet-studio PRIVATE HAVE_PYTHON
+        PYTHON_MODULE_DIR="${CMAKE_BINARY_DIR}/python")
+    target_include_directories(chiplet-studio PRIVATE ${pybind11_INCLUDE_DIRS})
+    target_link_libraries(chiplet-studio pybind11::embed)
+endif()
+
+# Python scripting module
+if(HAVE_PYTHON)
+    # Create Python module 'chiplet_studio'
+    pybind11_add_module(chiplet_studio_py
+        src/scripting/PyBindings.cpp
+        ${CORE_SOURCES}
+        ${FORMAT_SOURCES}
+    )
+
+    target_include_directories(chiplet_studio_py PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/extern/GDS3D/libgdsto3d
+        ${CMAKE_SOURCE_DIR}/extern/GDS3D/math
+        ${KLAYOUT_SRC_DIR}
+        ${KLAYOUT_SRC_DIR}/db/db
+        ${KLAYOUT_SRC_DIR}/tl/tl
+        ${KLAYOUT_SRC_DIR}/gsi/gsi
+    )
+
+    target_link_libraries(chiplet_studio_py PRIVATE
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+        Qt6::Core
+        chiplet_gds3d
+    )
+
+    target_compile_definitions(chiplet_studio_py PRIVATE HAVE_PYTHON CHIPLET_STANDALONE_PYMODULE)
+
+    # Output as 'chiplet_studio.so' in build directory
+    set_target_properties(chiplet_studio_py PROPERTIES
+        OUTPUT_NAME "chiplet_studio"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+    )
+
+    message(STATUS "Python module will be built at: ${CMAKE_BINARY_DIR}/python/chiplet_studio*.so")
+endif()
+
+# GDS3D library for advanced 3D rendering
+add_subdirectory(extern/GDS3D/libgdsto3d)
 
 # Tests
 enable_testing()

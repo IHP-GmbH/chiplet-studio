@@ -1,0 +1,28 @@
+# Test file for 2D View manual verification
+# Uses the actual GDS fixtures for testing KLayout integration
+
+format_version: "1.0"
+
+assembly:
+  name: "2D View Test Assembly"
+  description: "Assembly to test KLayout 2D drill-down view"
+  author: "Chiplet Studio"
+  created: "2024-12-01"
+  units: "um"
+
+components:
+  # Component with minimal GDS layout
+  - id: minimal_die
+    type: die
+    layout: "sample_minimal.gds"
+    top_cell: "TOP"
+    dimensions: {width: 1000, height: 1000, thickness: 200}
+    position: {x: 0, y: 0, z: 0}
+
+  # Component with hierarchical GDS layout
+  - id: hierarchical_die
+    type: die
+    layout: "sample_hierarchical.gds"
+    top_cell: "TOP"
+    dimensions: {width: 2000, height: 2000, thickness: 200}
+    position: {x: 1500, y: 0, z: 0}

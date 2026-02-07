@@ -11,6 +11,7 @@
 #include <QWidget>
 #include <memory>
 #include "core/Component.h"
+#include "core/ComponentID.h"
 #include "view2d/LayerProperties.h"
 
 class QScrollArea;
@@ -46,9 +47,10 @@ public:
 public slots:
     /**
      * Set the component to display properties for
-     * @param component Component pointer (nullptr clears selection)
+     * @param componentId ComponentID to display (empty clears selection)
+     * @param assembly Assembly to look up component from
      */
-    void setComponent(Component* component);
+    void setComponent(const ComponentID& componentId, Assembly* assembly);
 
     /**
      * Set the assembly for technology resolution
@@ -96,7 +98,7 @@ private:
     QString typeToString(ComponentType type) const;
 
     // Data
-    Component* m_component = nullptr;
+    ComponentID m_selectedComponentId;
     Assembly* m_assembly = nullptr;
     LayerPropertiesFile m_layerProps;
 
