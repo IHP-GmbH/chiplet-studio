@@ -14,6 +14,9 @@
 
 #ifdef HAVE_KLAYOUT
 #include "layLayoutView.h"
+#include "layLayerProperties.h"
+#include "layCellView.h"
+#include "dbLayout.h"
 #include "dbLoadLayoutOptions.h"
 #include "tlException.h"
 #endif
@@ -232,13 +235,180 @@ void KLayout2DView::zoomFit()
 QWidget* KLayout2DView::layerControlFrame()
 {
 #ifdef HAVE_KLAYOUT
-    // Ensure widget is created first
     if (!ensureViewWidget()) {
         return nullptr;
     }
     return m_viewWidget ? m_viewWidget->layer_control_frame() : nullptr;
 #else
     return nullptr;
+#endif
+}
+
+QWidget* KLayout2DView::hierarchyControlFrame()
+{
+#ifdef HAVE_KLAYOUT
+    if (!ensureViewWidget()) {
+        return nullptr;
+    }
+    return m_viewWidget ? m_viewWidget->hierarchy_control_frame() : nullptr;
+#else
+    return nullptr;
+#endif
+}
+
+QStringList KLayout2DView::cellNames() const
+{
+    QStringList names;
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return names;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (view->cellviews() == 0) {
+            return names;
+        }
+        const lay::CellView& cv = view->cellview(0);
+        if (!cv.is_valid()) {
+            return names;
+        }
+        const db::Layout& layout = cv->layout();
+        for (db::Layout::const_iterator ci = layout.begin(); ci != layout.end(); ++ci) {
+            names.append(QString::fromStdString(std::string(layout.cell_name(ci->cell_index()))));
+        }
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::cellNames failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::cellNames failed: %s", e.what());
+    }
+#endif
+    return names;
+}
+
+QString KLayout2DView::currentCellName() const
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return {};
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (view->cellviews() == 0) {
+            return {};
+        }
+        const lay::CellView& cv = view->cellview(0);
+        if (!cv.is_valid()) {
+            return {};
+        }
+        const db::Layout& layout = cv->layout();
+        return QString::fromStdString(std::string(layout.cell_name(cv.cell_index())));
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::currentCellName failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::currentCellName failed: %s", e.what());
+    }
+#endif
+    return {};
+}
+
+bool KLayout2DView::setCurrentCell(const QString& name)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return false;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (view->cellviews() == 0) {
+            return false;
+        }
+        lay::CellViewRef cvRef = view->cellview_ref(0);
+        cvRef.set_cell(name.toStdString());
+        view->zoom_fit();
+        emit cellChanged(name);
+        return true;
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::setCurrentCell failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::setCurrentCell failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(name);
+#endif
+    return false;
+}
+
+int KLayout2DView::layerCount() const
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return 0;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        int count = 0;
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            ++count;
+        }
+        return count;
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::layerCount failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::layerCount failed: %s", e.what());
+    }
+#endif
+    return 0;
+}
+
+void KLayout2DView::setAllLayersVisible(bool visible)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            lay::LayerPropertiesNode props(*it);
+            props.set_visible(visible);
+            view->replace_layer_node(it, props);
+        }
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::setAllLayersVisible failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::setAllLayersVisible failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(visible);
+#endif
+}
+
+void KLayout2DView::setLayerVisible(int index, bool visible)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        int i = 0;
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            if (i == index) {
+                lay::LayerPropertiesNode props(*it);
+                props.set_visible(visible);
+                view->replace_layer_node(it, props);
+                return;
+            }
+            ++i;
+        }
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::setLayerVisible failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::setLayerVisible failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(index);
+    Q_UNUSED(visible);
 #endif
 }
 

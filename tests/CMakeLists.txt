@@ -30,6 +30,7 @@ add_executable(chiplet_tests
     test_hierarchy_panel.cpp
     test_properties_panel.cpp
     test_klayout_2dview.cpp
+    test_drilldown_panel.cpp
     test_command_processor.cpp
     test_bvh.cpp
     test_file_loading_crash.cpp
@@ -95,6 +96,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui/HierarchyPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/UnitConverter.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/PropertiesPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/DrillDownPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/scripting/ScriptEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/LayerMeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/GDSLayerExtractor.cpp

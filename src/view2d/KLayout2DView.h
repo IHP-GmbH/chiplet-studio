@@ -10,6 +10,7 @@
 
 #include <QWidget>
 #include <QString>
+#include <QStringList>
 #include <QVBoxLayout>
 #include <memory>
 
@@ -67,9 +68,49 @@ public:
     QString currentPath() const { return m_currentPath; }
 
     /**
-     * @brief Get the layer control frame (for separate dock if needed)
+     * @brief Get the layer control frame widget
      */
     QWidget* layerControlFrame();
+
+    /**
+     * @brief Get the hierarchy control frame widget
+     */
+    QWidget* hierarchyControlFrame();
+
+    // -- Cell navigation --
+
+    /**
+     * @brief Get all cell names in the loaded layout
+     */
+    QStringList cellNames() const;
+
+    /**
+     * @brief Get the name of the currently active cell
+     */
+    QString currentCellName() const;
+
+    /**
+     * @brief Set the active cell by name
+     * @return true if cell was found and set
+     */
+    bool setCurrentCell(const QString& name);
+
+    // -- Layer control --
+
+    /**
+     * @brief Get number of layer entries in the view
+     */
+    int layerCount() const;
+
+    /**
+     * @brief Set visibility of all layers
+     */
+    void setAllLayersVisible(bool visible);
+
+    /**
+     * @brief Set visibility of a single layer by index
+     */
+    void setLayerVisible(int index, bool visible);
 
     /**
      * @brief Check if the view is functional (KLayout available and display present)
@@ -86,6 +127,11 @@ signals:
      * @brief Emitted when a layout is loaded or cleared
      */
     void layoutChanged(bool hasLayout);
+
+    /**
+     * @brief Emitted when the active cell changes
+     */
+    void cellChanged(const QString& cellName);
 
 private:
     void setupUI();

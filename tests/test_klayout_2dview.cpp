@@ -135,6 +135,61 @@ TEST_F(KLayout2DViewTest, IsViewAvailableConsistent) {
     EXPECT_EQ(second, third);
 }
 
+// -- Cell navigation API tests (safe in all environments) --
+
+TEST_F(KLayout2DViewTest, CellNamesEmptyWhenNoLayout) {
+    KLayout2DView view;
+    EXPECT_TRUE(view.cellNames().isEmpty());
+}
+
+TEST_F(KLayout2DViewTest, CurrentCellNameEmptyWhenNoLayout) {
+    KLayout2DView view;
+    EXPECT_TRUE(view.currentCellName().isEmpty());
+}
+
+TEST_F(KLayout2DViewTest, SetCurrentCellReturnsFalseWhenNoLayout) {
+    KLayout2DView view;
+    EXPECT_FALSE(view.setCurrentCell("TOP"));
+}
+
+TEST_F(KLayout2DViewTest, HierarchyControlFrameNullWhenUnavailable) {
+    KLayout2DView view;
+    if (!view.isViewAvailable()) {
+        EXPECT_EQ(view.hierarchyControlFrame(), nullptr);
+    }
+}
+
+// -- Layer control API tests (safe in all environments) --
+
+TEST_F(KLayout2DViewTest, LayerCountZeroWhenNoLayout) {
+    KLayout2DView view;
+    EXPECT_EQ(view.layerCount(), 0);
+}
+
+TEST_F(KLayout2DViewTest, SetAllLayersVisibleSafe) {
+    KLayout2DView view;
+    // Should not crash when no layout loaded
+    view.setAllLayersVisible(true);
+    view.setAllLayersVisible(false);
+    SUCCEED();
+}
+
+TEST_F(KLayout2DViewTest, SetLayerVisibleSafe) {
+    KLayout2DView view;
+    // Should not crash even with invalid index
+    view.setLayerVisible(0, true);
+    view.setLayerVisible(99, false);
+    SUCCEED();
+}
+
+TEST_F(KLayout2DViewTest, CellChangedSignalExists) {
+    KLayout2DView view;
+    QSignalSpy spy(&view, &KLayout2DView::cellChanged);
+    ASSERT_TRUE(spy.isValid());
+    // Signal should not fire without a layout
+    EXPECT_EQ(spy.count(), 0);
+}
+
 #ifdef HAVE_KLAYOUT
 // KLayout-specific tests that verify correct behavior with KLayout available
 // (but may still be in headless mode)

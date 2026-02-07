@@ -157,6 +157,7 @@ set(UI_SOURCES
     src/ui/MainWindow.cpp
     src/ui/HierarchyPanel.cpp
     src/ui/PropertiesPanel.cpp
+    src/ui/DrillDownPanel.cpp
     src/ui/ComponentStyle.cpp
     src/ui/UnitConverter.cpp
     src/ui/CrashRecoveryDialog.cpp
