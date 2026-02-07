@@ -31,6 +31,7 @@ class HierarchyPanel;
 class PropertiesPanel;
 class AssemblyView;
 class KLayout2DView;
+class DrillDownPanel;
 class ScriptConsole;
 class ScriptEngine;
 
@@ -102,7 +103,8 @@ private:
     AssemblyView* m_assemblyView = nullptr;
 
     // 2D view dock
-    KLayout2DView* m_klayout2DView = nullptr;
+    DrillDownPanel* m_drillDownPanel = nullptr;
+    KLayout2DView* m_klayout2DView = nullptr;  // convenience ptr, owned by DrillDownPanel
     QDockWidget* m_klayout2DDock = nullptr;
     QDockWidget* m_propertiesDock = nullptr;
 

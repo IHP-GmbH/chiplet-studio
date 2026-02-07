@@ -5,6 +5,7 @@
 #include "MainWindow.h"
 #include "HierarchyPanel.h"
 #include "PropertiesPanel.h"
+#include "DrillDownPanel.h"
 #include "ScriptConsole.h"
 #include "CellSelectionDialog.h"
 #include "view2d/KLayout2DView.h"
@@ -122,8 +123,9 @@ void MainWindow::setupPanels()
 
     // 2D Layout view (right dock, tabbed with Properties)
     m_klayout2DDock = new QDockWidget("2D Layout", this);
-    m_klayout2DView = new KLayout2DView(m_klayout2DDock);
-    m_klayout2DDock->setWidget(m_klayout2DView);
+    m_drillDownPanel = new DrillDownPanel(m_klayout2DDock);
+    m_klayout2DView = m_drillDownPanel->view2d();
+    m_klayout2DDock->setWidget(m_drillDownPanel);
     addDockWidget(Qt::RightDockWidgetArea, m_klayout2DDock);
 
     // Tab the 2D view with Properties panel
@@ -168,6 +170,14 @@ void MainWindow::setupPanels()
     // 2D drill-down connections
     connect(m_hierarchyPanel, &HierarchyPanel::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
+
+    // DrillDownPanel back button -> hide 2D dock and raise Properties
+    connect(m_drillDownPanel, &DrillDownPanel::backRequested,
+            this, [this]() {
+                m_klayout2DDock->hide();
+                m_propertiesDock->show();
+                m_propertiesDock->raise();
+            });
 
     // Hierarchy visibility toggle -> 3D View
     connect(m_hierarchyPanel, &HierarchyPanel::componentVisibilityChanged,
@@ -536,12 +546,15 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
     Component* comp = m_assembly->component(componentId.toStdString());
     if (!comp || comp->layout_path().empty()) {
         m_klayout2DView->clearLayout();
+        m_drillDownPanel->clearContext();
         return;
     }
 
     // Get layer properties from technology
     QString lypPath;
+    QString techName;
     if (!comp->technology().empty()) {
+        techName = QString::fromStdString(comp->technology());
         Technology* tech = m_assembly->technology(comp->technology());
         if (tech && !tech->layer_properties_path().empty()) {
             lypPath = QString::fromStdString(tech->layer_properties_path());
@@ -551,6 +564,16 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
     // Load layout and show 2D dock
     QString layoutPath = QString::fromStdString(comp->layout_path());
     if (m_klayout2DView->loadLayout(layoutPath, lypPath)) {
+        // Set context on drill-down panel (populates cell combo, reparents side panels)
+        QString compName = QString::fromStdString(comp->name());
+        m_drillDownPanel->setContext(componentId, compName, techName);
+
+        // If component has a top cell, navigate to it
+        if (!comp->top_cell().empty()) {
+            m_klayout2DView->setCurrentCell(
+                QString::fromStdString(comp->top_cell()));
+        }
+
         m_klayout2DDock->show();
         m_klayout2DDock->raise();
     }
@@ -722,6 +745,12 @@ void MainWindow::setupScriptConsole()
     toggleConsole->setText("Python Console");
     toggleConsole->setShortcut(QKeySequence("Ctrl+`"));
     viewMenu->addAction(toggleConsole);
+
+    // 2D Layout dock toggle
+    QAction* toggle2D = m_klayout2DDock->toggleViewAction();
+    toggle2D->setText("2D Layout");
+    toggle2D->setShortcut(QKeySequence("F4"));
+    viewMenu->addAction(toggle2D);
 }
 
 void MainWindow::setupAutoSave()
