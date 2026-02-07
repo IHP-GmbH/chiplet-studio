@@ -188,9 +188,8 @@ void MainWindow::setupPanels()
     // Hierarchy zoom request -> 3D View
     connect(m_hierarchyPanel, &HierarchyPanel::zoomToComponentRequested,
             this, [this](const QString& componentId) {
-                // Select the component and fit view
                 m_assemblyView->selectComponent(componentId);
-                // TODO: Add fitToComponent() method in AssemblyView
+                m_assemblyView->fitToComponent(componentId);
             });
 
     // 2D drill-down connections

@@ -76,6 +76,7 @@ public:
 
     // Camera control
     void fitToAssembly();
+    void fitToComponent(const QString& componentId);
     void resetCamera();
 
     // Clip plane control

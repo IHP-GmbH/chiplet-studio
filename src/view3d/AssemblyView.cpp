@@ -467,6 +467,86 @@ void AssemblyView::fitToAssembly()
     update();
 }
 
+void AssemblyView::fitToComponent(const QString& componentId)
+{
+    if (componentId.isEmpty()) {
+        fitToAssembly();
+        return;
+    }
+
+    // Search layer geometry first (LayerMode is the default)
+    auto lgIt = m_layerGeometry.find(componentId);
+    if (lgIt != m_layerGeometry.end()) {
+        const Component3DGeometry& geom = lgIt->second;
+        QVector3D translation = geom.transform.column(3).toVector3D();
+
+        AA_BOUNDING_BOX compBounds;
+        bool first = true;
+        for (const auto& layer : geom.layers) {
+            AA_BOUNDING_BOX lb = layer.mesh.boundingBox();
+            AA_BOUNDING_BOX wb;
+            VECTOR3D wMins(lb.mins.x + translation.x(),
+                           lb.mins.y + translation.y(),
+                           lb.mins.z + translation.z());
+            VECTOR3D wMaxes(lb.maxes.x + translation.x(),
+                            lb.maxes.y + translation.y(),
+                            lb.maxes.z + translation.z());
+            wb.SetFromMinsMaxes(wMins, wMaxes);
+            if (first) {
+                compBounds = wb;
+                first = false;
+            } else {
+                compBounds.AddBounds(wb);
+            }
+        }
+
+        if (!first) {
+            m_scene.camera().fitToBox(compBounds);
+            update();
+            return;
+        }
+    }
+
+    // Search instanced groups (BoxMode)
+    for (const auto& [sig, group] : m_instanceGroups) {
+        for (size_t i = 0; i < group.componentIds.size(); ++i) {
+            if (group.componentIds[i] == componentId) {
+                m_scene.camera().fitToBox(group.boundingBoxes[i]);
+                update();
+                return;
+            }
+        }
+    }
+
+    // Fallback: non-instanced meshes
+    auto it = m_meshes.find(componentId);
+    if (it != m_meshes.end()) {
+        m_scene.camera().fitToBox(it->second.boundingBox());
+        update();
+        return;
+    }
+
+    // Last resort: compute from component data
+    if (m_assembly) {
+        Component* comp = m_assembly->component(componentId.toStdString());
+        if (comp) {
+            const auto& pos = comp->position();
+            const auto& dims = comp->dimensions();
+            AA_BOUNDING_BOX box;
+            VECTOR3D mins(static_cast<float>(pos.x),
+                          static_cast<float>(pos.y),
+                          static_cast<float>(pos.z));
+            VECTOR3D maxes(static_cast<float>(pos.x + dims.width),
+                           static_cast<float>(pos.y + dims.height),
+                           static_cast<float>(pos.z + dims.thickness));
+            box.SetFromMinsMaxes(mins, maxes);
+            m_scene.camera().fitToBox(box);
+            update();
+            return;
+        }
+    }
+}
+
 void AssemblyView::resetCamera()
 {
     m_scene.camera().reset();
