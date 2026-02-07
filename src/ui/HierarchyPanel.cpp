@@ -37,6 +37,8 @@ HierarchyPanel::HierarchyPanel(QWidget* parent)
             this, &HierarchyPanel::onItemDoubleClicked);
     connect(m_tree, &QTreeWidget::customContextMenuRequested,
             this, &HierarchyPanel::onCustomContextMenu);
+    connect(m_tree, &QTreeWidget::itemChanged,
+            this, &HierarchyPanel::onItemChanged);
 }
 
 HierarchyPanel::~HierarchyPanel() = default;
@@ -68,9 +70,13 @@ void HierarchyPanel::selectComponent(const QString& componentId)
 
 void HierarchyPanel::refresh()
 {
+    // Block signals during refresh to avoid spurious itemChanged signals
+    m_tree->blockSignals(true);
+
     m_tree->clear();
 
     if (!m_assembly) {
+        m_tree->blockSignals(false);
         return;
     }
 
@@ -81,7 +87,7 @@ void HierarchyPanel::refresh()
     root->setText(2, "");
     root->setFlags(root->flags() & ~Qt::ItemIsSelectable);
 
-    // Add component items
+    // Add component items with visibility checkbox
     for (const auto& comp : m_assembly->components()) {
         QTreeWidgetItem* item = new QTreeWidgetItem(root);
         item->setText(0, QString::fromStdString(comp->id()));
@@ -89,6 +95,10 @@ void HierarchyPanel::refresh()
         item->setText(2, QString::fromStdString(comp->technology()));
         item->setIcon(0, iconForComponent(*comp));
         item->setData(0, Qt::UserRole, QString::fromStdString(comp->id()));
+
+        // Add checkbox for visibility toggle
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, Qt::Checked);
     }
 
     m_tree->expandAll();
@@ -97,6 +107,8 @@ void HierarchyPanel::refresh()
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+
+    m_tree->blockSignals(false);
 }
 
 void HierarchyPanel::setupContextMenu()
@@ -148,6 +160,18 @@ void HierarchyPanel::onCustomContextMenu(const QPoint& pos)
     if (item && item->parent()) {
         m_contextMenu->exec(m_tree->viewport()->mapToGlobal(pos));
     }
+}
+
+void HierarchyPanel::onItemChanged(QTreeWidgetItem* item, int column)
+{
+    // Only handle checkbox changes in the name column
+    if (!item || !item->parent() || column != 0) {
+        return;
+    }
+
+    QString componentId = item->data(0, Qt::UserRole).toString();
+    bool visible = (item->checkState(0) == Qt::Checked);
+    emit componentVisibilityChanged(componentId, visible);
 }
 
 QIcon HierarchyPanel::iconForComponent(const Component& comp) const

@@ -76,10 +76,17 @@ struct LayerStyle {
     bool valid = true;
     int width = 1;
 
+    // Pattern and style fields (from .lyp)
+    string_type dither_pattern;   // e.g., "C27", "C0" (solid)
+    string_type line_style;       // e.g., "C0", "C1", "C8"
+    int frame_brightness = 0;     // -255 to 255
+    int fill_brightness = 0;      // -255 to 255
+
     LayerStyle() = default;
 
     // Convenience accessors
     bool is_visible() const { return visible && valid; }
+    bool has_pattern() const { return !dither_pattern.empty() && dither_pattern != "C0"; }
 };
 
 /**

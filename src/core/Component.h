@@ -6,6 +6,7 @@
 #define CHIPLET_CORE_COMPONENT_H
 
 #include <string>
+#include <vector>
 #include <optional>
 #include <map>
 
@@ -79,6 +80,10 @@ public:
     const string_type& id() const;
     ComponentType type() const;
 
+    // Getters/Setters - display name (user-editable, defaults to id)
+    void set_name(const string_type& name);
+    const string_type& name() const;
+
     // Getters/Setters - technology
     void set_technology(const string_type& techId);
     const string_type& technology() const;
@@ -87,8 +92,15 @@ public:
     void set_layout_path(const string_type& path);
     const string_type& layout_path() const;
 
+    // Legacy top_cell (backward compatibility - returns cells[0])
     void set_top_cell(const string_type& cell);
     const string_type& top_cell() const;
+
+    // Multi-cell support (for flat GDS files)
+    void set_cells(const std::vector<string_type>& cells);
+    const std::vector<string_type>& cells() const;
+    void add_cell(const string_type& cell);
+    void clear_cells();
 
     // Getters/Setters - geometry
     void set_position(const position_type& pos);
@@ -112,15 +124,19 @@ public:
 
 private:
     string_type m_id;
+    string_type m_name;  // User-editable display name, defaults to id
     ComponentType m_type;
     string_type m_technology;
     string_type m_layoutPath;
-    string_type m_topCell;
+    std::vector<string_type> m_cells;  // List of cells to visualize (replaces m_topCell)
     position_type m_position;
     rotation_type m_rotation;
     dimensions_type m_dimensions;
     std::optional<array_type> m_array;
     metadata_type m_metadata;
+
+    // Static empty string for backward compatibility reference return
+    static const string_type s_emptyString;
 };
 
 } // namespace chiplet

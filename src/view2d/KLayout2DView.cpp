@@ -6,8 +6,8 @@
  */
 
 #include "KLayout2DView.h"
+#include "EmbeddedDispatcher.h"
 
-#include <QVBoxLayout>
 #include <QLabel>
 #include <QGuiApplication>
 #include <QScreen>
@@ -50,61 +50,62 @@ bool KLayout2DView::isDisplayAvailable()
 bool KLayout2DView::ensureViewWidget()
 {
 #ifdef HAVE_KLAYOUT
-    // Already initialized successfully
-    if (m_viewWidget && m_viewAvailable) {
-        return true;
+    if (m_initAttempted) {
+        return m_viewAvailable;
     }
-
-    // Already tried and failed
-    if (m_initAttempted && !m_viewAvailable) {
-        return false;
-    }
-
     m_initAttempted = true;
 
-    // Check if display is available
     if (!isDisplayAvailable()) {
-        qWarning("KLayout2DView: No display available, view disabled");
+        qWarning("KLayout2DView: No display available for 2D view");
+        m_viewAvailable = false;
         return false;
     }
 
     try {
-        // Create KLayout view widget
-        // Options: LV_Normal = full features (layer panel, hierarchy panel, etc.)
-        m_viewWidget = new lay::LayoutViewWidget(
-            nullptr,    // No undo manager (read-only)
-            false,      // Not editable
-            nullptr,    // No plugin parent
-            this,
-            lay::LayoutView::LV_Normal
-        );
+        // Create dispatcher with menu infrastructure BEFORE creating LayoutViewWidget.
+        // This is critical: plugins call dispatcher->menu() during init, which crashes
+        // if the menu hasn't been created via make_menu().
+        m_dispatcher = std::make_unique<EmbeddedDispatcher>(this);
 
-        // Add to layout (find existing layout)
-        QLayout* existingLayout = layout();
-        if (existingLayout) {
-            // Remove placeholder if present
-            while (existingLayout->count() > 0) {
-                QLayoutItem* item = existingLayout->takeAt(0);
-                if (item->widget()) {
-                    item->widget()->deleteLater();
-                }
-                delete item;
-            }
-            existingLayout->addWidget(m_viewWidget);
+        if (!m_dispatcher->isInitialized()) {
+            qWarning("KLayout2DView: Failed to initialize dispatcher");
+            m_viewAvailable = false;
+            return false;
         }
 
-        connectSignals();
+        // Remove placeholder widget
+        if (m_layout->count() > 0) {
+            QWidget* placeholder = m_layout->itemAt(0)->widget();
+            if (placeholder) {
+                m_layout->removeWidget(placeholder);
+                delete placeholder;
+            }
+        }
+
+        // Now safe to create LayoutViewWidget - dispatcher menu is ready
+        // Constructor: (db::Manager*, bool editable, lay::Plugin*, QWidget*, unsigned int options)
+        m_viewWidget = new lay::LayoutViewWidget(
+            nullptr,           // db::Manager - not needed for viewing
+            false,             // editable = false (view-only mode)
+            m_dispatcher.get(),
+            this
+            // LV_Normal options is the default
+        );
+
+        m_layout->addWidget(m_viewWidget);
         m_viewAvailable = true;
+
+        connectSignals();
+
+        qDebug() << "KLayout2DView: LayoutViewWidget created successfully";
         return true;
 
-    } catch (const std::exception& e) {
-        qWarning("KLayout2DView: Failed to create view widget: %s", e.what());
-        m_viewWidget = nullptr;
+    } catch (const tl::Exception& e) {
+        qCritical() << "KLayout2DView: Failed to create widget:" << e.msg().c_str();
         m_viewAvailable = false;
         return false;
-    } catch (...) {
-        qWarning("KLayout2DView: Failed to create view widget (unknown error)");
-        m_viewWidget = nullptr;
+    } catch (const std::exception& e) {
+        qCritical() << "KLayout2DView: Failed to create widget:" << e.what();
         m_viewAvailable = false;
         return false;
     }
@@ -115,8 +116,8 @@ bool KLayout2DView::ensureViewWidget()
 
 void KLayout2DView::setupUI()
 {
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
+    m_layout = new QVBoxLayout(this);
+    m_layout->setContentsMargins(0, 0, 0, 0);
 
     // Always start with a placeholder - real widget created lazily
     QLabel* placeholder = new QLabel(this);
@@ -127,7 +128,7 @@ void KLayout2DView::setupUI()
 #endif
     placeholder->setAlignment(Qt::AlignCenter);
     placeholder->setStyleSheet("background-color: #2a2a2a; color: #888;");
-    mainLayout->addWidget(placeholder);
+    m_layout->addWidget(placeholder);
 }
 
 void KLayout2DView::connectSignals()

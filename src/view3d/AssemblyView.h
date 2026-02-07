@@ -8,17 +8,49 @@
 #include <QOpenGLWidget>
 #include <QOpenGLExtraFunctions>
 #include <QMatrix4x4>
+#include <QElapsedTimer>
 #include <map>
+#include <vector>
+#include <memory>
 
 #include "Camera.h"
 #include "ShaderProgram.h"
 #include "ComponentMesh.h"
 #include "SceneManager.h"
 #include "ClipPlane.h"
+#include "DitherPatterns.h"
+#include "math/BVH.h"
 #include "core/Assembly.h"
+#include "core/LayerStackup.h"
 #include "view2d/LayerProperties.h"
+#include "gizmos/TransformGizmo.h"
+#include "LayerMeshBuilder.h"
 
 namespace chiplet {
+
+/**
+ * Rendering mode for 3D view
+ */
+enum class RenderMode {
+    BoxMode,      // Simple boxes (fast, schematic)
+    LayerMode     // Layer-by-layer 2.5D visualization (like KLayout 2.5D)
+};
+
+/**
+ * MeshInstanceGroup holds a shared mesh and per-instance data for instanced rendering.
+ * Components with identical geometry (same type + dimensions) share a mesh.
+ */
+struct MeshInstanceGroup {
+    ComponentMesh mesh;                        // Shared geometry
+    std::vector<QMatrix4x4> transforms;        // Per-instance transforms
+    std::vector<QColor> colors;                // Per-instance colors
+    std::vector<bool> selected;                // Per-instance selection state
+    std::vector<QString> componentIds;         // For picking/selection
+    std::vector<AA_BOUNDING_BOX> boundingBoxes; // Per-instance world bounds
+
+    // Update instance data on GPU
+    void updateInstanceBuffer();
+};
 
 /**
  * AssemblyView is the main 3D view widget for chiplet assemblies.
@@ -38,6 +70,10 @@ public:
     void selectComponent(const QString& componentId);
     QString selectedComponent() const { return m_selectedComponent; }
 
+    // Visibility control
+    void setComponentVisibility(const QString& componentId, bool visible);
+    bool isComponentVisible(const QString& componentId) const;
+
     // Camera control
     void fitToAssembly();
     void resetCamera();
@@ -49,11 +85,19 @@ public:
     void setClipPosition(float position);
     void setClipAxis(ClipAxis axis);
 
+    // Render mode control (BoxMode vs LayerMode)
+    RenderMode renderMode() const { return m_renderMode; }
+    void setRenderMode(RenderMode mode);
+
 signals:
+    void renderModeChanged(RenderMode mode);
     void clipPlaneChanged();
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
+
+    // Command system signals (emitted when user requests actions)
+    void moveComponentRequested(const QString& componentId, double dx, double dy, double dz);
 
 protected:
     // OpenGL lifecycle
@@ -75,10 +119,17 @@ private:
     void renderGrid();
     QString pickComponent(int x, int y);
     void updateSceneBounds();
+    void updateBasePlane();
+
+    // Generate mesh signature for grouping identical components
+    static QString getMeshSignature(const Component* comp);
 
     // Data
     Assembly* m_assembly = nullptr;
     QString m_selectedComponent;
+
+    // Component visibility (true = visible, absent = visible by default)
+    std::map<QString, bool> m_componentVisibility;
 
     // Layer properties cache (technology_id -> LayerPropertiesFile)
     std::map<std::string, LayerPropertiesFile> m_layerProps;
@@ -88,14 +139,30 @@ private:
 
     // Rendering
     ShaderProgram m_componentShader;
+    ShaderProgram m_componentShaderInstanced;  // Instanced version
     ShaderProgram m_gridShader;
+
+    // Instance groups for instanced rendering (signature -> group)
+    std::map<QString, MeshInstanceGroup> m_instanceGroups;
+
+    // Legacy per-component mesh map (for fallback/transition)
     std::map<QString, ComponentMesh> m_meshes;
     ComponentMesh m_gridMesh;
+
+    // Instancing enabled flag
+    bool m_useInstancing = true;
 
     // Mouse state
     QPoint m_lastMousePos;
     bool m_isDragging = false;
     Qt::MouseButton m_dragButton = Qt::NoButton;
+
+    // Gizmo
+    TransformGizmo m_gizmo;
+    GizmoAxis m_activeGizmoAxis = GizmoAxis::None;
+    bool m_isDraggingGizmo = false;
+    QVector3D m_gizmoDragStart;      // Component position at drag start
+    QPoint m_gizmoDragMouseStart;    // Mouse position at drag start
 
     // State
     bool m_initialized = false;
@@ -103,6 +170,45 @@ private:
 
     // Clip plane
     ClipPlane m_clipPlane;
+
+    // Dither patterns for layer fill styles
+    DitherPatterns m_ditherPatterns;
+
+    // Render mode (BoxMode = simple boxes, LayerMode = 2.5D layer extrusion)
+    RenderMode m_renderMode = RenderMode::LayerMode;  // Default to layer mode
+
+    // Layer geometry for 2.5D rendering (component_id -> geometry)
+    std::map<QString, Component3DGeometry> m_layerGeometry;
+
+    // Layer stackup cache (technology_id -> stackup)
+    std::map<std::string, LayerStackup> m_stackups;
+
+    // Helper to build layer geometry for a component
+    void buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp);
+
+    // Render layers for a component
+    void renderLayerGeometry();
+
+    // BVH for spatial acceleration
+    std::unique_ptr<BVH> m_bvh;
+    bool m_bvhDirty = true;
+    std::vector<QString> m_meshIndexToId;  // Maps BVH indices to component IDs
+
+    void ensureBVH();
+
+    // Performance metrics
+    QElapsedTimer m_frameTimer;
+    int m_frameCount = 0;
+    float m_fps = 0.0f;
+    int m_drawCallCount = 0;
+    bool m_showDebugStats = false;
+    bool m_debugPrinted = false;  // Reset per assembly load
+
+public:
+    // Performance accessors
+    float fps() const { return m_fps; }
+    int drawCallCount() const { return m_drawCallCount; }
+    void setShowDebugStats(bool show) { m_showDebugStats = show; }
 };
 
 } // namespace chiplet

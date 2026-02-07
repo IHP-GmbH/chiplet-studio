@@ -45,6 +45,28 @@ RUN apt-get update && apt-get install -y \
     libyaml-cpp-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# X11 virtual framebuffer for headless GUI testing
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    libxkbcommon-x11-0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-xinerama0 \
+    libxcb-xfixes0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Debugging tools (gdb, valgrind, strace)
+RUN apt-get update && apt-get install -y \
+    gdb \
+    gdbserver \
+    valgrind \
+    strace \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for builds
 ARG UID=1000
 ARG GID=1000

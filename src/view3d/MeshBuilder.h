@@ -22,12 +22,24 @@ public:
     static ComponentMesh buildComponentMesh(const Component& comp,
                                             const LayerPropertiesFile* lyp = nullptr);
 
+    // Generate box mesh for a component at origin (for instanced rendering)
+    // The position is NOT baked into geometry - use instance transform instead
+    static ComponentMesh buildComponentMeshAtOrigin(const Component& comp,
+                                                     const LayerPropertiesFile* lyp = nullptr);
+
     // Generate a simple box mesh with given dimensions
     static ComponentMesh buildBox(float width, float height, float depth,
                                   float offsetX = 0, float offsetY = 0, float offsetZ = 0);
 
-    // Generate a reference grid on the XZ plane
+    // Generate a reference grid on the XZ plane (lines)
     static ComponentMesh buildGridMesh(float size, float spacing);
+
+    // Generate a solid plane on the XZ plane (for substrate/base)
+    // With optional center position and Y offset
+    static ComponentMesh buildPlaneMesh(float size,
+                                         float centerX = 0.0f,
+                                         float centerZ = 0.0f,
+                                         float y = 0.0f);
 
     // Get color for component based on type and optional .lyp
     static QColor colorForComponent(const Component& comp,

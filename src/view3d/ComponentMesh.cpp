@@ -3,6 +3,8 @@
  */
 
 #include "ComponentMesh.h"
+#include <QOpenGLContext>
+#include <QDebug>
 
 namespace chiplet {
 
@@ -25,11 +27,16 @@ ComponentMesh::ComponentMesh(ComponentMesh&& other) noexcept
     , m_vao(other.m_vao)
     , m_vbo(other.m_vbo)
     , m_ebo(other.m_ebo)
-    , m_initialized(other.m_initialized)
+    , m_initialized(false)  // Force re-initialization of GL functions after move
+    , m_instances(std::move(other.m_instances))
+    , m_instanceVBO(other.m_instanceVBO)
+    , m_instanceCount(other.m_instanceCount)
 {
     other.m_vao = 0;
     other.m_vbo = 0;
     other.m_ebo = 0;
+    other.m_instanceVBO = 0;
+    other.m_instanceCount = 0;
     other.m_initialized = false;
 }
 
@@ -46,11 +53,16 @@ ComponentMesh& ComponentMesh::operator=(ComponentMesh&& other) noexcept
         m_vao = other.m_vao;
         m_vbo = other.m_vbo;
         m_ebo = other.m_ebo;
-        m_initialized = other.m_initialized;
+        m_initialized = false;  // Force re-initialization of GL functions after move
+        m_instances = std::move(other.m_instances);
+        m_instanceVBO = other.m_instanceVBO;
+        m_instanceCount = other.m_instanceCount;
 
         other.m_vao = 0;
         other.m_vbo = 0;
         other.m_ebo = 0;
+        other.m_instanceVBO = 0;
+        other.m_instanceCount = 0;
         other.m_initialized = false;
     }
     return *this;
@@ -73,12 +85,25 @@ void ComponentMesh::upload()
         return;
     }
 
+    // Verify OpenGL context is available before any GL operations
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if (!context) {
+        qCritical() << "ComponentMesh::upload: No OpenGL context available!";
+        return;
+    }
+
+    if (!context->isValid()) {
+        qCritical() << "ComponentMesh::upload: OpenGL context is invalid!";
+        return;
+    }
+
     if (!m_initialized) {
         initializeOpenGLFunctions();
         m_initialized = true;
     }
 
     if (!m_initialized) {
+        qWarning() << "ComponentMesh::upload: Failed to initialize OpenGL functions";
         return;
     }
 
@@ -128,6 +153,18 @@ void ComponentMesh::render()
         return;
     }
 
+    // Verify OpenGL context is available
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if (!context || !context->isValid()) {
+        return;
+    }
+
+    // Lazy initialization of GL functions (needed after move)
+    if (!m_initialized) {
+        initializeOpenGLFunctions();
+        m_initialized = true;
+    }
+
     glBindVertexArray(m_vao);
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_indices.size()),
                    GL_UNSIGNED_INT, nullptr);
@@ -136,6 +173,19 @@ void ComponentMesh::render()
 
 void ComponentMesh::release()
 {
+    // Verify OpenGL context is available before deleting GL resources
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if (!context || !context->isValid()) {
+        // Reset handles without calling GL functions
+        m_vao = 0;
+        m_vbo = 0;
+        m_ebo = 0;
+        m_instanceVBO = 0;
+        m_instanceCount = 0;
+        m_initialized = false;
+        return;
+    }
+
     if (m_vao != 0) {
         glDeleteVertexArrays(1, &m_vao);
         m_vao = 0;
@@ -148,6 +198,109 @@ void ComponentMesh::release()
         glDeleteBuffers(1, &m_ebo);
         m_ebo = 0;
     }
+    if (m_instanceVBO != 0) {
+        glDeleteBuffers(1, &m_instanceVBO);
+        m_instanceVBO = 0;
+    }
+    m_instanceCount = 0;
+}
+
+void ComponentMesh::setInstanceData(const std::vector<InstanceData>& instances)
+{
+    m_instances = instances;
+    m_instanceCount = static_cast<int>(instances.size());
+}
+
+void ComponentMesh::uploadInstanceData()
+{
+    if (!m_initialized || m_vao == 0 || m_instances.empty()) {
+        return;
+    }
+
+    // Verify OpenGL context is available
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if (!context || !context->isValid()) {
+        qCritical() << "ComponentMesh::uploadInstanceData: No valid OpenGL context!";
+        return;
+    }
+
+    glBindVertexArray(m_vao);
+
+    // Create instance VBO if needed
+    if (m_instanceVBO == 0) {
+        glGenBuffers(1, &m_instanceVBO);
+    }
+
+    // Upload instance data
+    glBindBuffer(GL_ARRAY_BUFFER, m_instanceVBO);
+    glBufferData(GL_ARRAY_BUFFER,
+                 m_instances.size() * sizeof(InstanceData),
+                 m_instances.data(),
+                 GL_DYNAMIC_DRAW);
+
+    setupInstanceAttributes();
+
+    glBindVertexArray(0);
+}
+
+void ComponentMesh::setupInstanceAttributes()
+{
+    // Instance data layout (96 bytes per instance):
+    // - modelMatrix: 4 vec4s at locations 2,3,4,5 (64 bytes)
+    // - color: vec4 at location 6 (16 bytes)
+    // - selected: float at location 7 (4 bytes)
+    // - padding: 12 bytes
+
+    const GLsizei stride = sizeof(InstanceData);
+
+    // Model matrix (4 vec4 attributes for mat4)
+    for (int i = 0; i < 4; ++i) {
+        GLuint loc = 2 + i;
+        glEnableVertexAttribArray(loc);
+        glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, stride,
+                              reinterpret_cast<void*>(i * 4 * sizeof(float)));
+        glVertexAttribDivisor(loc, 1);  // Per-instance
+    }
+
+    // Color (vec4)
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, stride,
+                          reinterpret_cast<void*>(offsetof(InstanceData, color)));
+    glVertexAttribDivisor(6, 1);  // Per-instance
+
+    // Selected (float)
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride,
+                          reinterpret_cast<void*>(offsetof(InstanceData, selected)));
+    glVertexAttribDivisor(7, 1);  // Per-instance
+}
+
+void ComponentMesh::renderInstanced()
+{
+    if (m_vao == 0 || m_indices.empty() || m_instanceCount == 0) {
+        return;
+    }
+
+    // Verify OpenGL context is available
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if (!context || !context->isValid()) {
+        return;
+    }
+
+    // Lazy initialization of GL functions (needed after move)
+    if (!m_initialized) {
+        initializeOpenGLFunctions();
+        m_initialized = true;
+    }
+
+    glBindVertexArray(m_vao);
+
+    // Always use instanced draw - even for 1 instance, because the shader
+    // expects instance attributes (transform, color) at locations 2-7
+    glDrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(m_indices.size()),
+                            GL_UNSIGNED_INT, nullptr, m_instanceCount);
+
+    glBindVertexArray(0);
 }
 
 void ComponentMesh::calculateBoundingBox()

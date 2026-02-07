@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <unordered_map>
+#include "ComponentID.h"
 #include "Component.h"
 #include "Interface.h"
 #include "Technology.h"
@@ -58,6 +60,14 @@ public:
     Assembly();
     ~Assembly();
 
+    // Non-copyable (contains unique_ptr members)
+    Assembly(const Assembly&) = delete;
+    Assembly& operator=(const Assembly&) = delete;
+
+    // Move operations
+    Assembly(Assembly&&) = default;
+    Assembly& operator=(Assembly&&) = default;
+
     // Getters - metadata
     const string_type& name() const;
     const string_type& description() const;
@@ -76,7 +86,9 @@ public:
 
     // Components
     void add_component(std::unique_ptr<Component> component);
-    Component* component(const string_type& id) const;
+    Component* component(const ComponentID& id) const;
+    bool has_component(const ComponentID& id) const;
+    bool remove_component(const ComponentID& id);
     const component_list_type& components() const;
 
     // Interfaces
@@ -92,10 +104,10 @@ public:
     // Validation
     /**
      * Resolve a component's technology reference to a Technology object.
-     * @param component Component to resolve technology for
-     * @return Pointer to Technology or nullptr if not found
+     * @param id ComponentID to resolve technology for
+     * @return Pointer to Technology or nullptr if not found or component has no technology
      */
-    Technology* resolve_component_technology(const Component* component) const;
+    Technology* resolve_component_technology(const ComponentID& id) const;
 
     /**
      * Validate the entire assembly.
@@ -120,6 +132,7 @@ private:
     string_type m_modified;
     string_type m_units = "um";  // Default to micrometers
     component_list_type m_components;
+    std::unordered_map<ComponentID, Component*> m_component_index;  // O(1) lookup
     interface_list_type m_interfaces;
     technology_list_type m_technologies;
 };

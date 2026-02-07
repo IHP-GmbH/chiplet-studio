@@ -1,0 +1,95 @@
+# GDS3D Techfile for Interposer
+# Derived from IHP SG13G2 - Upper metals only
+# Author: Chiplet Studio
+# Date: 2025
+
+LayerStart: Metal4
+Layer: 50
+Datatype: 0
+Height: 3880
+Thickness: 450
+Red: 0.58
+Green: 0.91
+Blue: 0.22
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd
+
+LayerStart: Via4
+Layer: 66
+Datatype: 0
+Height: 4330
+Thickness: 550
+Red: 0.87
+Green: 0.67
+Blue: 0.37
+Filter: 0.0
+Metal: 0
+Show: 1
+LayerEnd
+
+LayerStart: Metal5
+Layer: 67
+Datatype: 0
+Height: 4880
+Thickness: 450
+Red: 0.86
+Green: 0.82
+Blue: 0.27
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd
+
+LayerStart: TopVia1
+Layer: 125
+Datatype: 0
+Height: 5330
+Thickness: 830
+Red: 1.00
+Green: 0.90
+Blue: 0.75
+Filter: 0.0
+Metal: 0
+Show: 1
+LayerEnd
+
+LayerStart: TopMetal1
+Layer: 126
+Datatype: 0
+Height: 6160
+Thickness: 2000
+Red: 1.00
+Green: 0.90
+Blue: 0.75
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd
+
+LayerStart: TopVia2
+Layer: 133
+Datatype: 0
+Height: 8160
+Thickness: 3000
+Red: 1.00
+Green: 0.50
+Blue: 0.00
+Filter: 0.0
+Metal: 0
+Show: 1
+LayerEnd
+
+LayerStart: TopMetal2
+Layer: 134
+Datatype: 0
+Height: 11160
+Thickness: 3000
+Red: 1.00
+Green: 0.50
+Blue: 0.00
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd

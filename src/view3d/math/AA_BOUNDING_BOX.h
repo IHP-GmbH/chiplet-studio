@@ -30,13 +30,28 @@ class AA_BOUNDING_BOX
 public:
 	void SetFromMinsMaxes(const VECTOR3D & newMins, const VECTOR3D & newMaxes);
 	void SetFromPoints(int numpoints, VECTOR3D *points);
-	
+
 	virtual bool IsPointInside(const VECTOR3D & point) const;
-	
+
 	float DistFromPoint( const VECTOR3D & point);
 	void Mult(const MATRIX4X4 & mat);
 
 	void AddBounds(const AA_BOUNDING_BOX & bounds);
+
+	// BVH support methods
+	// Ray-AABB intersection using slab method
+	// Returns true if ray intersects, sets tMin/tMax to entry/exit parameters
+	bool rayIntersect(const VECTOR3D& rayOrigin, const VECTOR3D& rayDir,
+	                  float& tMin, float& tMax) const;
+
+	// AABB-AABB intersection test
+	bool intersects(const AA_BOUNDING_BOX& other) const;
+
+	// Geometric properties for BVH construction
+	VECTOR3D center() const;
+	VECTOR3D extent() const;  // Half-widths
+	float surfaceArea() const;
+	int longestAxis() const;  // Returns 0 (X), 1 (Y), or 2 (Z)
 
 	VECTOR3D vertices[8];
 	VECTOR3D mins, maxes;

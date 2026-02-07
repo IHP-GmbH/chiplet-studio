@@ -174,7 +174,20 @@ void ChipletFormat::parse_technologies(const YAML::Node& node, Assembly& assembl
 
         if (techNode["layer_properties"]) {
             std::string lpPath = techNode["layer_properties"].as<std::string>();
-            tech->set_layer_properties_path(resolve_path(lpPath));
+            std::string resolvedLypPath = resolve_path(lpPath);
+            tech->set_layer_properties_path(resolvedLypPath);
+
+            // Auto-load techfile based on layer_properties path
+            // If layer_properties is "pdks/ihp-sg13g2/sg13g2.lyp"
+            // Try loading "pdks/ihp-sg13g2/techfile/sg13g2.txt"
+            std::filesystem::path lypPath(resolvedLypPath);
+            std::string stem = lypPath.stem().string();  // "sg13g2"
+            std::filesystem::path parent = lypPath.parent_path();  // "pdks/ihp-sg13g2"
+            std::filesystem::path techfile = parent / "techfile" / (stem + ".txt");
+
+            if (std::filesystem::exists(techfile)) {
+                tech->load_process_def(techfile.string());
+            }
         }
 
         if (techNode["dbu"]) {
@@ -224,8 +237,21 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
         component->set_layout_path(resolve_path(layoutPath));
     }
 
-    // Top cell
-    if (node["top_cell"]) {
+    // Cells - support both new 'cells' array and legacy 'top_cell' string
+    if (node["cells"]) {
+        // New format: cells is an array
+        if (node["cells"].IsSequence()) {
+            std::vector<std::string> cells;
+            for (const auto& cellNode : node["cells"]) {
+                cells.push_back(cellNode.as<std::string>());
+            }
+            component->set_cells(cells);
+        } else {
+            // Single cell as string (alternate format)
+            component->set_top_cell(node["cells"].as<std::string>());
+        }
+    } else if (node["top_cell"]) {
+        // Legacy format: single top_cell string -> convert to cells[0]
         component->set_top_cell(node["top_cell"].as<std::string>());
     }
 
@@ -352,8 +378,20 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::Key << "layout" << YAML::Value << comp->layout_path();
             }
 
-            if (!comp->top_cell().empty()) {
-                out << YAML::Key << "top_cell" << YAML::Value << comp->top_cell();
+            // Save cells - use 'cells' array for multi-cell, 'top_cell' for single (backward compat)
+            const auto& cells = comp->cells();
+            if (!cells.empty()) {
+                if (cells.size() == 1) {
+                    // Single cell: use legacy 'top_cell' for backward compatibility
+                    out << YAML::Key << "top_cell" << YAML::Value << cells[0];
+                } else {
+                    // Multiple cells: use new 'cells' array
+                    out << YAML::Key << "cells" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+                    for (const auto& cell : cells) {
+                        out << cell;
+                    }
+                    out << YAML::EndSeq;
+                }
             }
 
             // Position

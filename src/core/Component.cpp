@@ -6,8 +6,12 @@
 
 namespace chiplet {
 
+// Static empty string for backward compatibility reference return
+const Component::string_type Component::s_emptyString;
+
 Component::Component(const std::string& id, ComponentType type)
     : m_id(id)
+    , m_name(id)  // Default display name to id
     , m_type(type)
 {
 }
@@ -22,6 +26,16 @@ const std::string& Component::id() const
 ComponentType Component::type() const
 {
     return m_type;
+}
+
+void Component::set_name(const string_type& name)
+{
+    m_name = name;
+}
+
+const Component::string_type& Component::name() const
+{
+    return m_name;
 }
 
 void Component::set_technology(const string_type& techId)
@@ -46,12 +60,37 @@ const Component::string_type& Component::layout_path() const
 
 void Component::set_top_cell(const string_type& cell)
 {
-    m_topCell = cell;
+    // Backward compatibility: set as first (and only) cell
+    m_cells.clear();
+    if (!cell.empty()) {
+        m_cells.push_back(cell);
+    }
 }
 
 const Component::string_type& Component::top_cell() const
 {
-    return m_topCell;
+    // Backward compatibility: return first cell if any
+    return m_cells.empty() ? s_emptyString : m_cells[0];
+}
+
+void Component::set_cells(const std::vector<string_type>& cells)
+{
+    m_cells = cells;
+}
+
+const std::vector<Component::string_type>& Component::cells() const
+{
+    return m_cells;
+}
+
+void Component::add_cell(const string_type& cell)
+{
+    m_cells.push_back(cell);
+}
+
+void Component::clear_cells()
+{
+    m_cells.clear();
 }
 
 void Component::set_position(const position_type& pos)

@@ -1,3 +1,6 @@
 [submodule "extern/klayout"]
 	path = extern/klayout
 	url = https://github.com/KLayout/klayout.git
+[submodule "extern/GDS3D"]
+	path = extern/GDS3D
+	url = https://github.com/trilomix/GDS3D.git
