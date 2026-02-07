@@ -12,6 +12,11 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QSplitter>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QHeaderView>
+#include <QLineEdit>
+#include <QMenu>
 
 namespace chiplet {
 
@@ -31,7 +36,25 @@ void DrillDownPanel::setupUI()
 
     // -- Nav bar --
     auto* navBar = new QWidget(this);
-    navBar->setStyleSheet("background-color: #353535; border-bottom: 1px solid #555;");
+    navBar->setStyleSheet(
+        "QWidget { background-color: #353535; border-bottom: 1px solid #555; }"
+        "QLabel { color: #ccc; border: none; }"
+        "QPushButton { color: #ddd; background-color: #4a4a4a; border: 1px solid #666; "
+        "  border-radius: 3px; padding: 2px 8px; }"
+        "QPushButton:hover { background-color: #5a5a5a; }"
+        "QPushButton:pressed { background-color: #3a3a3a; }"
+        "QComboBox { color: #ddd; background-color: #4a4a4a; border: 1px solid #666; "
+        "  border-radius: 3px; padding: 2px 6px; }"
+        "QComboBox::drop-down { border: none; }"
+        "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
+        "  border-right: 4px solid transparent; border-top: 5px solid #ccc; }"
+        "QComboBox QAbstractItemView { color: #ddd; background-color: #4a4a4a; "
+        "  selection-background-color: #3daee9; selection-color: #fff; }"
+        "QToolButton { color: #ddd; background-color: #4a4a4a; border: 1px solid #666; "
+        "  border-radius: 3px; padding: 2px 8px; }"
+        "QToolButton:hover { background-color: #5a5a5a; }"
+        "QToolButton:checked { background-color: #3daee9; color: #fff; border-color: #2d9ed9; }"
+    );
     auto* navLayout = new QHBoxLayout(navBar);
     navLayout->setContentsMargins(4, 2, 4, 2);
     navLayout->setSpacing(6);
@@ -42,13 +65,12 @@ void DrillDownPanel::setupUI()
     navLayout->addWidget(m_backButton);
 
     m_contextLabel = new QLabel(navBar);
-    m_contextLabel->setStyleSheet("color: #ccc; font-weight: bold;");
+    m_contextLabel->setStyleSheet("font-weight: bold;");
     navLayout->addWidget(m_contextLabel);
 
     navLayout->addStretch();
 
     auto* cellLabel = new QLabel("Cell:", navBar);
-    cellLabel->setStyleSheet("color: #aaa;");
     navLayout->addWidget(cellLabel);
 
     m_cellCombo = new QComboBox(navBar);
@@ -75,15 +97,42 @@ void DrillDownPanel::setupUI()
     // -- Central area with splitter --
     m_splitter = new QSplitter(Qt::Horizontal, this);
 
-    // Layer panel container (left sidebar)
+    // Layer panel container (left sidebar) with custom layer tree
     m_layerContainer = new QWidget(m_splitter);
     auto* layerLayout = new QVBoxLayout(m_layerContainer);
     layerLayout->setContentsMargins(0, 0, 0, 0);
+    layerLayout->setSpacing(0);
     auto* layerHeader = new QLabel("Layers", m_layerContainer);
     layerHeader->setStyleSheet(
         "background-color: #404040; color: #ccc; padding: 2px 6px; font-weight: bold;");
     layerLayout->addWidget(layerHeader);
-    // KLayout's layer_control_frame() will be reparented here after loadLayout()
+
+    // Layer search filter
+    m_layerFilter = new QLineEdit(m_layerContainer);
+    m_layerFilter->setPlaceholderText("Filter layers...");
+    m_layerFilter->setClearButtonEnabled(true);
+    m_layerFilter->setStyleSheet(
+        "QLineEdit { background-color: #3a3a3a; color: #ddd; border: 1px solid #555; "
+        "  border-radius: 3px; padding: 3px 6px; }"
+        "QLineEdit:focus { border-color: #3daee9; }");
+    layerLayout->addWidget(m_layerFilter);
+
+    // Custom layer tree widget (replaces KLayout's native layer_control_frame)
+    m_layerTree = new QTreeWidget(m_layerContainer);
+    m_layerTree->setHeaderHidden(true);
+    m_layerTree->setRootIsDecorated(false);
+    m_layerTree->setIndentation(0);
+    m_layerTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_layerTree->setStyleSheet(
+        "QTreeWidget { background-color: #2a2a2a; color: #ddd; border: none; }"
+        "QTreeWidget::item { padding: 2px 4px; }"
+        "QTreeWidget::item:selected { background-color: #3daee9; color: #fff; }"
+        "QTreeWidget::item:hover { background-color: #404040; }"
+        "QTreeWidget::indicator { width: 14px; height: 14px; }"
+        "QTreeWidget::indicator:checked { background-color: #3daee9; border: 1px solid #2d9ed9; border-radius: 2px; }"
+        "QTreeWidget::indicator:unchecked { background-color: #555; border: 1px solid #666; border-radius: 2px; }"
+    );
+    layerLayout->addWidget(m_layerTree);
 
     m_splitter->addWidget(m_layerContainer);
 
@@ -99,7 +148,6 @@ void DrillDownPanel::setupUI()
     hierHeader->setStyleSheet(
         "background-color: #404040; color: #ccc; padding: 2px 6px; font-weight: bold;");
     hierLayout->addWidget(hierHeader);
-    // KLayout's hierarchy_control_frame() will be reparented here after loadLayout()
 
     m_splitter->addWidget(m_hierContainer);
 
@@ -115,18 +163,18 @@ void DrillDownPanel::setupUI()
 
     // -- Status bar --
     auto* statusBar = new QWidget(this);
-    statusBar->setStyleSheet("background-color: #353535; border-top: 1px solid #555;");
+    statusBar->setStyleSheet(
+        "QWidget { background-color: #353535; border-top: 1px solid #555; }"
+        "QLabel { color: #aaa; border: none; }");
     auto* statusLayout = new QHBoxLayout(statusBar);
     statusLayout->setContentsMargins(6, 2, 6, 2);
 
     m_posLabel = new QLabel("x: --  y: --", statusBar);
-    m_posLabel->setStyleSheet("color: #aaa;");
     statusLayout->addWidget(m_posLabel);
 
     statusLayout->addStretch();
 
     m_cellLabel = new QLabel(statusBar);
-    m_cellLabel->setStyleSheet("color: #aaa;");
     statusLayout->addWidget(m_cellLabel);
 
     mainLayout->addWidget(statusBar);
@@ -154,6 +202,18 @@ void DrillDownPanel::setupUI()
             this, [this](const QString& cellName) {
                 m_cellLabel->setText("Cell: " + cellName);
             });
+
+    // Layer tree: checkbox toggling
+    connect(m_layerTree, &QTreeWidget::itemChanged,
+            this, &DrillDownPanel::onLayerItemChanged);
+
+    // Layer tree: right-click context menu
+    connect(m_layerTree, &QTreeWidget::customContextMenuRequested,
+            this, &DrillDownPanel::onLayerContextMenu);
+
+    // Layer filter
+    connect(m_layerFilter, &QLineEdit::textChanged,
+            this, &DrillDownPanel::onLayerFilterChanged);
 }
 
 void DrillDownPanel::setContext(const QString& componentId,
@@ -179,6 +239,8 @@ void DrillDownPanel::clearContext()
     m_cellCombo->clear();
     m_cellLabel->setText("");
     m_posLabel->setText("x: --  y: --");
+    m_layerFilter->clear();
+    m_layerTree->clear();
 }
 
 bool DrillDownPanel::isLayerPanelVisible() const
@@ -237,29 +299,96 @@ void DrillDownPanel::onLayoutChanged(bool hasLayout)
     } else {
         m_cellCombo->clear();
         m_cellLabel->setText("");
+        m_layerTree->clear();
+    }
+}
+
+void DrillDownPanel::onLayerItemChanged(QTreeWidgetItem* item, int column)
+{
+    Q_UNUSED(column);
+    if (m_blockLayerSync || !item) {
+        return;
+    }
+
+    int layerIndex = item->data(0, Qt::UserRole).toInt();
+    bool visible = (item->checkState(0) == Qt::Checked);
+    m_view2d->setLayerVisible(layerIndex, visible);
+}
+
+void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
+{
+    QTreeWidgetItem* item = m_layerTree->itemAt(pos);
+
+    QMenu menu(this);
+    menu.setStyleSheet(
+        "QMenu { background-color: #3a3a3a; color: #ddd; border: 1px solid #555; }"
+        "QMenu::item { padding: 4px 20px; }"
+        "QMenu::item:selected { background-color: #3daee9; color: #fff; }"
+        "QMenu::separator { height: 1px; background: #555; margin: 2px 8px; }"
+    );
+
+    if (item) {
+        bool isVisible = (item->checkState(0) == Qt::Checked);
+        int layerIndex = item->data(0, Qt::UserRole).toInt();
+
+        QAction* toggleAction = menu.addAction(isVisible ? "Hide" : "Show");
+        connect(toggleAction, &QAction::triggered, this, [this, item, isVisible]() {
+            item->setCheckState(0, isVisible ? Qt::Unchecked : Qt::Checked);
+        });
+
+        QAction* showOnlyAction = menu.addAction("Show Only This");
+        connect(showOnlyAction, &QAction::triggered, this, [this, layerIndex]() {
+            m_blockLayerSync = true;
+            m_view2d->setAllLayersVisible(false);
+            m_view2d->setLayerVisible(layerIndex, true);
+            // Update all checkboxes
+            for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+                QTreeWidgetItem* it = m_layerTree->topLevelItem(i);
+                int idx = it->data(0, Qt::UserRole).toInt();
+                it->setCheckState(0, (idx == layerIndex) ? Qt::Checked : Qt::Unchecked);
+            }
+            m_blockLayerSync = false;
+        });
+
+        menu.addSeparator();
+    }
+
+    QAction* showAllAction = menu.addAction("Show All");
+    connect(showAllAction, &QAction::triggered, this, [this]() {
+        m_blockLayerSync = true;
+        m_view2d->setAllLayersVisible(true);
+        for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+            m_layerTree->topLevelItem(i)->setCheckState(0, Qt::Checked);
+        }
+        m_blockLayerSync = false;
+    });
+
+    QAction* hideAllAction = menu.addAction("Hide All");
+    connect(hideAllAction, &QAction::triggered, this, [this]() {
+        m_blockLayerSync = true;
+        m_view2d->setAllLayersVisible(false);
+        for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+            m_layerTree->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
+        }
+        m_blockLayerSync = false;
+    });
+
+    menu.exec(m_layerTree->viewport()->mapToGlobal(pos));
+}
+
+void DrillDownPanel::onLayerFilterChanged(const QString& text)
+{
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        bool match = text.isEmpty() ||
+                     item->text(0).contains(text, Qt::CaseInsensitive);
+        item->setHidden(!match);
     }
 }
 
 void DrillDownPanel::updateSidePanels()
 {
-    // Reparent KLayout's layer control frame into our container
-    QWidget* layerFrame = m_view2d->layerControlFrame();
-    if (layerFrame) {
-        QVBoxLayout* layerLayout = qobject_cast<QVBoxLayout*>(m_layerContainer->layout());
-        if (layerLayout) {
-            // Remove any previously reparented frame (index 1+)
-            while (layerLayout->count() > 1) {
-                QLayoutItem* item = layerLayout->takeAt(1);
-                if (item->widget()) {
-                    item->widget()->setParent(nullptr);
-                }
-                delete item;
-            }
-            layerFrame->setParent(m_layerContainer);
-            layerLayout->addWidget(layerFrame);
-            layerFrame->show();
-        }
-    }
+    populateLayerList();
 
     // Reparent KLayout's hierarchy control frame into our container
     QWidget* hierFrame = m_view2d->hierarchyControlFrame();
@@ -274,10 +403,57 @@ void DrillDownPanel::updateSidePanels()
                 delete item;
             }
             hierFrame->setParent(m_hierContainer);
+            hierFrame->setStyleSheet(
+                "QWidget { background-color: #f0f0f0; color: #1a1a1a; }"
+                "QTreeView, QListView, QTableView { "
+                "  background-color: #ffffff; color: #1a1a1a; "
+                "  selection-background-color: #3daee9; selection-color: #ffffff; }"
+                "QHeaderView::section { background-color: #e0e0e0; color: #1a1a1a; "
+                "  border: 1px solid #c0c0c0; padding: 2px; }"
+                "QScrollBar { background-color: #e8e8e8; }");
             hierLayout->addWidget(hierFrame);
             hierFrame->show();
         }
     }
+}
+
+void DrillDownPanel::populateLayerList()
+{
+    m_blockLayerSync = true;
+    m_layerTree->clear();
+
+    QVector<LayerInfo> layers = m_view2d->layerInfos();
+    for (const LayerInfo& info : layers) {
+        auto* item = new QTreeWidgetItem(m_layerTree);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, info.visible ? Qt::Checked : Qt::Unchecked);
+        item->setData(0, Qt::UserRole, info.index);
+
+        // Build display text: "layer/datatype - name" or just name
+        QString text;
+        if (info.layer >= 0 && info.datatype >= 0) {
+            text = QString("%1/%2").arg(info.layer).arg(info.datatype);
+            if (!info.name.isEmpty() && info.name != text) {
+                text += " " + info.name;
+            }
+        } else {
+            text = info.name;
+        }
+        item->setText(0, text);
+
+        // Set color swatch via decoration role
+        QColor color = info.fillColor.isValid() ? info.fillColor :
+                       (info.frameColor.isValid() ? info.frameColor : QColor(128, 128, 128));
+        QPixmap swatch(14, 14);
+        swatch.fill(color);
+        item->setIcon(0, QIcon(swatch));
+
+        item->setToolTip(0, QString("Layer %1/%2%3")
+            .arg(info.layer).arg(info.datatype)
+            .arg(info.name.isEmpty() ? "" : " - " + info.name));
+    }
+
+    m_blockLayerSync = false;
 }
 
 void DrillDownPanel::populateCellCombo()

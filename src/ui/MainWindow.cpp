@@ -123,10 +123,36 @@ void MainWindow::setupPanels()
 
     // 2D Layout view (right dock, tabbed with Properties)
     m_klayout2DDock = new QDockWidget("2D Layout", this);
+    m_klayout2DDock->setFeatures(
+        QDockWidget::DockWidgetMovable |
+        QDockWidget::DockWidgetFloatable |
+        QDockWidget::DockWidgetClosable);
     m_drillDownPanel = new DrillDownPanel(m_klayout2DDock);
     m_klayout2DView = m_drillDownPanel->view2d();
     m_klayout2DDock->setWidget(m_drillDownPanel);
     addDockWidget(Qt::RightDockWidgetArea, m_klayout2DDock);
+
+    // Add maximize/minimize buttons when dock is floating (detached)
+    connect(m_klayout2DDock, &QDockWidget::topLevelChanged,
+            this, [this](bool floating) {
+        if (floating) {
+            QTimer::singleShot(0, this, [this]() {
+                if (!m_klayout2DDock->isFloating()) return;
+                QRect geo = m_klayout2DDock->geometry();
+                m_klayout2DDock->hide();
+                m_klayout2DDock->setWindowFlags(
+                    Qt::Window |
+                    Qt::WindowTitleHint |
+                    Qt::WindowCloseButtonHint |
+                    Qt::WindowMaximizeButtonHint |
+                    Qt::WindowMinimizeButtonHint);
+                m_klayout2DDock->setGeometry(geo);
+                m_klayout2DDock->show();
+                m_klayout2DDock->raise();
+                m_klayout2DDock->activateWindow();
+            });
+        }
+    });
 
     // Tab the 2D view with Properties panel
     tabifyDockWidget(m_propertiesDock, m_klayout2DDock);

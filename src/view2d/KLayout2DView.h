@@ -11,7 +11,9 @@
 #include <QWidget>
 #include <QString>
 #include <QStringList>
+#include <QColor>
 #include <QVBoxLayout>
+#include <QVector>
 #include <memory>
 
 // Forward declarations (avoid KLayout headers in our header)
@@ -25,6 +27,19 @@ namespace chiplet {
 }
 
 namespace chiplet {
+
+/**
+ * @brief Information about a single layer in the view
+ */
+struct LayerInfo {
+    QString name;       // Display name (e.g., "Metal1" or "67/0")
+    int layer = -1;     // GDS layer number
+    int datatype = -1;  // GDS datatype
+    bool visible = true;
+    QColor fillColor;   // Fill color for display
+    QColor frameColor;  // Frame/outline color
+    int index = -1;     // Index in the layer list (for setLayerVisible)
+};
 
 /**
  * @brief Wrapper widget for KLayout's 2D layout view
@@ -111,6 +126,11 @@ public:
      * @brief Set visibility of a single layer by index
      */
     void setLayerVisible(int index, bool visible);
+
+    /**
+     * @brief Get information about all layers in the view
+     */
+    QVector<LayerInfo> layerInfos() const;
 
     /**
      * @brief Check if the view is functional (KLayout available and display present)
