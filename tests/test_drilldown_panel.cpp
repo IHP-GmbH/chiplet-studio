@@ -10,6 +10,7 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QToolButton>
+#include <QTreeWidget>
 #include "ui/DrillDownPanel.h"
 #include "view2d/KLayout2DView.h"
 
@@ -119,6 +120,29 @@ TEST_F(DrillDownPanelTest, CellComboInitiallyEmpty) {
     QComboBox* combo = panel.findChild<QComboBox*>();
     ASSERT_NE(combo, nullptr);
     EXPECT_EQ(combo->count(), 0);
+}
+
+TEST_F(DrillDownPanelTest, LayerTreeExists) {
+    DrillDownPanel panel;
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(tree->topLevelItemCount(), 0);
+}
+
+TEST_F(DrillDownPanelTest, LayerTreeEmptyAfterClearContext) {
+    DrillDownPanel panel;
+    panel.setContext("comp_1", "CPU", "Tech");
+    panel.clearContext();
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(tree->topLevelItemCount(), 0);
+}
+
+TEST_F(DrillDownPanelTest, LayerTreeContextMenuPolicy) {
+    DrillDownPanel panel;
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(tree->contextMenuPolicy(), Qt::CustomContextMenu);
 }
 
 } // namespace chiplet

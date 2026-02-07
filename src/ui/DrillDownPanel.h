@@ -18,6 +18,9 @@ class QToolButton;
 class QHBoxLayout;
 class QVBoxLayout;
 class QSplitter;
+class QLineEdit;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 namespace chiplet {
 
@@ -91,11 +94,15 @@ private slots:
     void onCellComboChanged(int index);
     void onPositionChanged(double x, double y);
     void onLayoutChanged(bool hasLayout);
+    void onLayerItemChanged(QTreeWidgetItem* item, int column);
+    void onLayerContextMenu(const QPoint& pos);
+    void onLayerFilterChanged(const QString& text);
 
 private:
     void setupUI();
     void updateSidePanels();
     void populateCellCombo();
+    void populateLayerList();
 
     // Nav bar
     QPushButton* m_backButton = nullptr;
@@ -111,6 +118,8 @@ private:
     QWidget* m_layerContainer = nullptr;
     QWidget* m_hierContainer = nullptr;
     QSplitter* m_splitter = nullptr;
+    QLineEdit* m_layerFilter = nullptr;
+    QTreeWidget* m_layerTree = nullptr;
 
     // Status bar
     QLabel* m_posLabel = nullptr;
@@ -119,6 +128,7 @@ private:
     // State
     QString m_componentId;
     bool m_blockCellCombo = false;
+    bool m_blockLayerSync = false;
     bool m_layerPanelVisible = true;
     bool m_hierPanelVisible = false;
 };

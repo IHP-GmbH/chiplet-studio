@@ -15,6 +15,7 @@
 #ifdef HAVE_KLAYOUT
 #include "layLayoutView.h"
 #include "layLayerProperties.h"
+#include "layParsedLayerSource.h"
 #include "layCellView.h"
 #include "dbLayout.h"
 #include "dbLoadLayoutOptions.h"
@@ -410,6 +411,67 @@ void KLayout2DView::setLayerVisible(int index, bool visible)
     Q_UNUSED(index);
     Q_UNUSED(visible);
 #endif
+}
+
+QVector<LayerInfo> KLayout2DView::layerInfos() const
+{
+    QVector<LayerInfo> result;
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return result;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        int index = 0;
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            LayerInfo info;
+            info.index = index;
+            info.visible = it->visible(true);
+
+            // Get display name
+            std::string name = it->name();
+            if (!name.empty()) {
+                info.name = QString::fromStdString(name);
+            }
+
+            // Get layer/datatype from source
+            std::string srcStr = it->source_string(true);
+            if (!srcStr.empty()) {
+                if (info.name.isEmpty()) {
+                    info.name = QString::fromStdString(srcStr);
+                }
+                // Parse layer/datatype from source string (format: "layer/datatype")
+                const lay::ParsedLayerSource& src = it->source(true);
+                info.layer = src.layer();
+                info.datatype = src.datatype();
+            }
+
+            if (info.name.isEmpty()) {
+                info.name = QString("Layer %1").arg(index);
+            }
+
+            // Get fill color
+            if (it->has_fill_color(true)) {
+                tl::color_t fc = it->eff_fill_color(true);
+                info.fillColor = QColor((fc >> 16) & 0xFF, (fc >> 8) & 0xFF, fc & 0xFF);
+            }
+
+            // Get frame color
+            if (it->has_frame_color(true)) {
+                tl::color_t ec = it->eff_frame_color(true);
+                info.frameColor = QColor((ec >> 16) & 0xFF, (ec >> 8) & 0xFF, ec & 0xFF);
+            }
+
+            result.append(info);
+            ++index;
+        }
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::layerInfos failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::layerInfos failed: %s", e.what());
+    }
+#endif
+    return result;
 }
 
 } // namespace chiplet

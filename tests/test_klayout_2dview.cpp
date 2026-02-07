@@ -190,6 +190,12 @@ TEST_F(KLayout2DViewTest, CellChangedSignalExists) {
     EXPECT_EQ(spy.count(), 0);
 }
 
+TEST_F(KLayout2DViewTest, LayerInfosEmptyWhenNoLayout) {
+    KLayout2DView view;
+    QVector<LayerInfo> infos = view.layerInfos();
+    EXPECT_TRUE(infos.isEmpty());
+}
+
 #ifdef HAVE_KLAYOUT
 // KLayout-specific tests that verify correct behavior with KLayout available
 // (but may still be in headless mode)
