@@ -11,6 +11,7 @@
 #include <QWheelEvent>
 #include <QDebug>
 #include <set>
+#include <cmath>
 
 namespace chiplet {
 
@@ -1771,91 +1772,109 @@ void AssemblyView::mouseDoubleClickEvent(QMouseEvent* event)
 
 void AssemblyView::zoomToRect(const QRect& rect)
 {
-    // Fire a ray through the rectangle center
-    int cx = rect.center().x();
-    int cy = rect.center().y();
-    auto ray = m_scene.screenToRay(cx, cy, width(), height());
-
     Camera& cam = m_scene.camera();
-    VECTOR3D forward = cam.target() - cam.position();
-    forward.Normalize();
 
-    // Find depth along center ray: try geometry hit first, then plane fallback
-    float hitDepth = -1.0f;
-
-    ensureBVH();
-    if (m_bvh && !m_meshIndexToId.empty()) {
-        m_bvh->rayQueryClosest(
-            ray.origin, ray.direction,
-            [&](int idx) -> float {
-                if (idx < 0 || idx >= static_cast<int>(m_meshIndexToId.size()))
-                    return -1.0f;
-
-                const QString& id = m_meshIndexToId[idx];
-                if (m_useInstancing && !m_instanceGroups.empty()) {
-                    for (const auto& [sig, group] : m_instanceGroups) {
-                        for (size_t i = 0; i < group.componentIds.size(); ++i) {
-                            if (group.componentIds[i] == id) {
-                                float tMin, tMax;
-                                if (group.boundingBoxes[i].rayIntersect(
-                                        ray.origin, ray.direction, tMin, tMax)) {
-                                    if (tMin > 0 && (hitDepth < 0 || tMin < hitDepth)) {
-                                        hitDepth = tMin;
-                                    }
-                                    return tMin > 0 ? tMin : -1.0f;
-                                }
-                                return -1.0f;
-                            }
-                        }
-                    }
-                } else {
-                    auto it = m_meshes.find(id);
-                    if (it != m_meshes.end()) {
-                        float tMin, tMax;
-                        if (it->second.boundingBox().rayIntersect(
-                                ray.origin, ray.direction, tMin, tMax)) {
-                            if (tMin > 0 && (hitDepth < 0 || tMin < hitDepth)) {
-                                hitDepth = tMin;
-                            }
-                            return tMin > 0 ? tMin : -1.0f;
-                        }
-                    }
-                }
-                return -1.0f;
-            });
-    }
-
-    // Compute new target: always along the center ray
-    VECTOR3D newTarget;
-    if (hitDepth > 0) {
-        // Target the geometry surface
-        newTarget = ray.origin + ray.direction * hitDepth;
-    } else {
-        // Fallback: intersect center ray with plane through current target
-        float denom = ray.direction.DotProduct(forward);
-        if (std::abs(denom) < 1e-6f) {
-            return;
-        }
-        VECTOR3D toTarget = cam.target() - ray.origin;
-        float t = toTarget.DotProduct(forward) / denom;
-        if (t <= 0.0f) {
-            return;
-        }
-        newTarget = ray.origin + ray.direction * t;
-    }
-
-    // Scale distance by the ratio of rectangle to viewport
+    // Scale distance by rectangle-to-viewport ratio, capped at 20x per drag
     float scaleX = static_cast<float>(rect.width()) / static_cast<float>(width());
     float scaleY = static_cast<float>(rect.height()) / static_cast<float>(height());
     float scale = std::max(scaleX, scaleY);
+    scale = std::max(scale, 0.05f);
 
-    // Cap so rubber-band never jumps more than 10x closer in one step
-    scale = std::max(scale, 0.1f);
+    // HiDPI: screen coords -> framebuffer coords
+    float dpr = static_cast<float>(devicePixelRatioF());
+    int fbW = static_cast<int>(width() * dpr);
+    int fbH = static_cast<int>(height() * dpr);
 
-    float newDistance = cam.distance() * scale;
-    cam.setTarget(newTarget);
-    cam.setDistance(newDistance);
+    // Build view and projection matrices
+    float aspect = (height() > 0) ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0f;
+    MATRIX4X4 view = cam.viewMatrix();
+    MATRIX4X4 proj = cam.projectionMatrix(aspect);
+    MATRIX4X4 invProj = proj.GetInverse();
+    MATRIX4X4 invView = view.GetInverse();
 
+    float FcoefHalf = cam.fcoef() * 0.5f;
+
+    // Sample 9 points in the rectangle: center + 8 at 25%/75% grid.
+    // Use the first valid depth found (center has priority).
+    struct SamplePoint { float sx; float sy; };
+    float cx = rect.center().x() + 0.5f;
+    float cy = rect.center().y() + 0.5f;
+    float qx = rect.width() * 0.25f;
+    float qy = rect.height() * 0.25f;
+
+    SamplePoint samples[9] = {
+        {cx, cy},                               // center (highest priority)
+        {cx - qx, cy - qy}, {cx, cy - qy}, {cx + qx, cy - qy},  // top row
+        {cx - qx, cy},                     {cx + qx, cy},         // mid sides
+        {cx - qx, cy + qy}, {cx, cy + qy}, {cx + qx, cy + qy}   // bottom row
+    };
+
+    // Read depth buffer at sample points to find actual 3D surface
+    makeCurrent();
+
+    float hitScreenX = cx;
+    float hitScreenY = cy;
+    float hitDepth = 1.0f;
+    bool foundHit = false;
+
+    for (int i = 0; i < 9 && !foundHit; ++i) {
+        int fbX = static_cast<int>(samples[i].sx * dpr);
+        int fbY = fbH - 1 - static_cast<int>(samples[i].sy * dpr);  // GL: bottom-up
+
+        // Clamp to framebuffer bounds
+        fbX = std::max(0, std::min(fbX, fbW - 1));
+        fbY = std::max(0, std::min(fbY, fbH - 1));
+
+        float depth = 1.0f;
+        glReadPixels(fbX, fbY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+
+        if (depth < 1.0f - 1e-6f) {
+            hitDepth = depth;
+            hitScreenX = samples[i].sx;
+            hitScreenY = samples[i].sy;
+            foundHit = true;
+        }
+    }
+
+    doneCurrent();
+
+    if (foundHit && FcoefHalf > 1e-8f) {
+        // Reverse logarithmic depth to recover eye-space Z.
+        // Shader writes: gl_FragDepth = log2(1.0 + w) * Fcoef_half
+        //   where w = -eyeZ (perspective projection).
+        // Reverse:  w = pow(2, depth / Fcoef_half) - 1
+        //           eyeZ = -w
+        float w = std::pow(2.0f, hitDepth / FcoefHalf) - 1.0f;
+        float eyeZ = -w;
+
+        // Convert screen coords to NDC [-1, 1]
+        float ndcX = (hitScreenX / static_cast<float>(width())) * 2.0f - 1.0f;
+        float ndcY = 1.0f - (hitScreenY / static_cast<float>(height())) * 2.0f;
+
+        // Unproject: NDC -> eye-space direction via inverse projection
+        VECTOR4D clipNear(ndcX, ndcY, -1.0f, 1.0f);
+        VECTOR4D eyeNear = invProj * clipNear;
+
+        // Perspective divide to get eye-space direction
+        if (std::abs(eyeNear.w) > 1e-8f) {
+            eyeNear = eyeNear / eyeNear.w;
+        }
+
+        // Scale the direction to reach the correct eye-space depth
+        if (std::abs(eyeNear.z) > 1e-8f) {
+            float t = eyeZ / eyeNear.z;
+            VECTOR4D eyePoint(eyeNear.x * t, eyeNear.y * t, eyeZ, 1.0f);
+
+            // Transform from eye-space to world-space
+            VECTOR4D worldPoint = invView * eyePoint;
+
+            VECTOR3D newTarget(worldPoint.x, worldPoint.y, worldPoint.z);
+            cam.setTarget(newTarget);
+        }
+    }
+    // If no hit (all background), only zoom distance without moving target
+
+    cam.setDistance(cam.distance() * scale);
     update();
 }
 
