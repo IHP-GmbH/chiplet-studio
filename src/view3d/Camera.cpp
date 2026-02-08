@@ -178,9 +178,11 @@ void Camera::setClipPlanes(float nearPlane, float farPlane)
 
 void Camera::updateClipPlanes()
 {
-    // With logarithmic depth buffer, precision is uniform across the entire
-    // depth range, so we use fixed clip planes spanning 100nm to 100m.
-    m_near = 0.0001f;     // 100nm
+    // With logarithmic depth buffer, precision is uniform regardless of
+    // near/far ratio, so we can safely use a very small near plane.
+    // Scale near plane with camera distance to prevent geometry at the
+    // target from being clipped when zoomed in very close.
+    m_near = std::max(1e-7f, m_distance * 0.001f);
     m_far = 100000.0f;    // 100m
 }
 
