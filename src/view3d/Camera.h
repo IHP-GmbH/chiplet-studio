@@ -43,6 +43,7 @@ public:
     float fov() const { return m_fov; }
     float nearPlane() const { return m_near; }
     float farPlane() const { return m_far; }
+    float fcoef() const;
 
     // Setters
     void setTarget(const VECTOR3D& target);
@@ -52,6 +53,7 @@ public:
 
 private:
     void updatePosition();
+    void updateClipPlanes();
     void clampPitch();
 
     VECTOR3D m_target;       // Point the camera orbits around

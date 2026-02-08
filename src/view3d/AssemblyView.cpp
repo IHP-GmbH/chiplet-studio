@@ -29,12 +29,14 @@ uniform mat3 normalMatrix;
 out vec3 fragNormal;
 out vec3 fragPosition;
 out vec3 worldPosition;
+out float flogz;
 
 void main() {
     fragNormal = normalMatrix * normal;
     fragPosition = vec3(modelView * vec4(position, 1.0));
     worldPosition = vec3(model * vec4(position, 1.0));
     gl_Position = modelViewProjection * vec4(position, 1.0);
+    flogz = 1.0 + gl_Position.w;
 }
 )";
 
@@ -60,6 +62,7 @@ out vec3 fragPosition;
 out vec3 worldPosition;
 out vec4 vertexColor;
 out float vertexSelected;
+out float flogz;
 
 void main() {
     // Reconstruct instance model matrix
@@ -86,6 +89,7 @@ void main() {
     vertexSelected = instanceSelected;
 
     gl_Position = viewProjection * worldPos;
+    flogz = 1.0 + gl_Position.w;
 }
 )";
 
@@ -95,10 +99,12 @@ static const char* componentFragmentShader = R"(
 in vec3 fragNormal;
 in vec3 fragPosition;
 in vec3 worldPosition;
+in float flogz;
 
 uniform vec4 objectColor;
 uniform vec3 lightDirection;
 uniform bool selected;
+uniform float Fcoef_half;
 
 // Clip plane: vec4(normal.xyz, distance)
 // Fragments are discarded if dot(position, normal) + distance < 0
@@ -142,6 +148,7 @@ void main() {
     }
 
     FragColor = vec4(color, objectColor.a);
+    gl_FragDepth = log2(max(1e-6, flogz)) * Fcoef_half;
 }
 )";
 
@@ -153,8 +160,10 @@ in vec3 fragPosition;
 in vec3 worldPosition;
 in vec4 vertexColor;
 in float vertexSelected;
+in float flogz;
 
 uniform vec3 lightDirection;
+uniform float Fcoef_half;
 
 // Clip plane: vec4(normal.xyz, distance)
 uniform vec4 clipPlane;
@@ -197,6 +206,7 @@ void main() {
     }
 
     FragColor = vec4(color, vertexColor.a);
+    gl_FragDepth = log2(max(1e-6, flogz)) * Fcoef_half;
 }
 )";
 
@@ -207,19 +217,23 @@ layout(location = 0) in vec3 position;
 uniform mat4 modelViewProjection;
 
 out vec3 fragPosition;
+out float flogz;
 
 void main() {
     fragPosition = position;
     gl_Position = modelViewProjection * vec4(position, 1.0);
+    flogz = 1.0 + gl_Position.w;
 }
 )";
 
 static const char* gridFragmentShader = R"(
 #version 330 core
 in vec3 fragPosition;
+in float flogz;
 
 uniform vec4 gridColor;
 uniform float fadeDistance;
+uniform float Fcoef_half;
 
 out vec4 FragColor;
 
@@ -227,6 +241,7 @@ void main() {
     float dist = length(fragPosition.xz);
     float fade = 1.0 - smoothstep(fadeDistance * 0.5, fadeDistance, dist);
     FragColor = vec4(gridColor.rgb, gridColor.a * fade);
+    gl_FragDepth = log2(max(1e-6, flogz)) * Fcoef_half;
 }
 )";
 
@@ -992,6 +1007,7 @@ void AssemblyView::renderComponents()
         m_componentShaderInstanced.setUniformMat4("viewProjection", viewProjection);
         m_componentShaderInstanced.setUniformMat4("view", view);
         m_componentShaderInstanced.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+        m_componentShaderInstanced.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
         // Clip plane uniforms
         m_componentShaderInstanced.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
@@ -1026,6 +1042,7 @@ void AssemblyView::renderComponents()
         m_componentShader.setUniformMat4("model", model);
         m_componentShader.setUniformMat3("normalMatrix", normalMat);
         m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+        m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
         // Clip plane uniforms
         m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
@@ -1090,6 +1107,7 @@ void AssemblyView::renderGrid()
     m_componentShader.setUniformMat4("model", model);
     m_componentShader.setUniformMat3("normalMatrix", normalMat);
     m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+    m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
     // Solid white/light gray color for base plane
     m_componentShader.setUniformVec4("objectColor", QVector4D(0.95f, 0.95f, 0.95f, 1.0f));
@@ -1203,15 +1221,32 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     // Get or create stackup for technology
     const std::string& techId = comp.technology();
     LayerStackup stackup;
+    LayerColorScheme colorScheme;
+    bool hasColorScheme = false;
 
     auto stackupIt = m_stackups.find(techId);
     if (stackupIt != m_stackups.end()) {
         stackup = stackupIt->second;
     } else {
-        // Priority 1: Try to get stackup from Technology's process definition (techfile)
-        // This has the correct physical layer heights in micrometers
         bool usedStackup = false;
-        if (m_assembly && !techId.empty()) {
+
+        // Priority 0: BlenderGDS YAML stackup (accurate physical dimensions)
+        if (!usedStackup && !techId.empty()) {
+            std::string bgdsPath = BlenderGDSConfigs::stackupPath(techId);
+            if (!bgdsPath.empty()) {
+                LayerStackup bgdsStackup;
+                if (bgdsStackup.loadFromBlenderGDS(bgdsPath)) {
+                    stackup = bgdsStackup;
+                    usedStackup = true;
+                    qDebug() << "Using BlenderGDS stackup for" << QString::fromStdString(techId)
+                             << "from" << QString::fromStdString(bgdsPath)
+                             << "with" << stackup.layerCount() << "layers";
+                }
+            }
+        }
+
+        // Priority 1: Try to get stackup from Technology's process definition (techfile)
+        if (!usedStackup && m_assembly && !techId.empty()) {
             Technology* tech = m_assembly->technology(techId);
             if (tech && tech->has_process_def()) {
                 stackup = tech->createStackup();
@@ -1222,9 +1257,7 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         }
 
         // Priority 2: Detect known technology names and use predefined stackups
-        // This provides realistic layer thicknesses for common process technologies
         if (!usedStackup && !techId.empty()) {
-            // Check for SG13G2 technology (IHP 130nm BiCMOS)
             if (techId.find("sg13g2") != std::string::npos ||
                 techId.find("SG13G2") != std::string::npos ||
                 techId.find("ihp") != std::string::npos) {
@@ -1233,7 +1266,6 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
                 qDebug() << "Using predefined SG13G2 stackup for" << QString::fromStdString(techId)
                          << "with" << stackup.layerCount() << "layers";
             }
-            // Check for interposer technology
             else if (techId.find("interposer") != std::string::npos ||
                      techId.find("Interposer") != std::string::npos ||
                      techId.find("rdl") != std::string::npos ||
@@ -1261,6 +1293,17 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         m_stackups[techId] = stackup;
     }
 
+    // Load BlenderGDS color scheme if available
+    if (!techId.empty()) {
+        std::string csPath = BlenderGDSConfigs::colorSchemePath(techId, "realistic");
+        if (!csPath.empty() && colorScheme.loadFromYAML(csPath)) {
+            hasColorScheme = true;
+            qDebug() << "Loaded BlenderGDS color scheme" << QString::fromStdString(colorScheme.name)
+                     << "for" << QString::fromStdString(techId)
+                     << "with" << colorScheme.layers.size() << "layer colors";
+        }
+    }
+
     // Extract polygons from GDS
     GDSLayerExtractor extractor;
     ExtractionConfig config;
@@ -1282,7 +1325,9 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
 
     // Build 3D geometry from polygons
     LayerMeshBuilder meshBuilder;
-    Component3DGeometry geometry = meshBuilder.build(polygons, stackup, lyp);
+    Component3DGeometry geometry = meshBuilder.build(
+        polygons, stackup, lyp,
+        hasColorScheme ? &colorScheme : nullptr);
 
     // Set component ID and apply transform
     geometry.componentId = compId;
@@ -1331,6 +1376,7 @@ void AssemblyView::renderLayerGeometry()
 
     m_componentShader.bind();
     m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+    m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
     // Clip plane uniforms
     m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());

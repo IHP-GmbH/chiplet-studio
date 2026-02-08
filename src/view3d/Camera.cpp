@@ -65,9 +65,7 @@ void Camera::zoom(float delta)
     // Min 0.00001 (10nm) for inspecting nanoscale features, max 10M for large assemblies
     m_distance = std::max(0.00001f, std::min(m_distance, 10000000.0f));
 
-    // Clip planes: near scales with distance, far has a floor so nearby geometry is never clipped
-    m_near = std::max(m_distance * 0.01f, 1e-7f);
-    m_far = std::max(m_distance * 50.0f, 0.01f);
+    updateClipPlanes();
 }
 
 void Camera::fitToBox(const AA_BOUNDING_BOX& box)
@@ -85,9 +83,7 @@ void Camera::fitToBox(const AA_BOUNDING_BOX& box)
     float fovRad = static_cast<float>(m_fov * M_PI / 180.0);
     m_distance = (maxDim * 0.5f) / std::tan(fovRad * 0.5f) * 1.5f;
 
-    // Clip planes: near scales with distance, far has a floor
-    m_near = std::max(m_distance * 0.01f, 1e-7f);
-    m_far = std::max(m_distance * 50.0f, 0.01f);
+    updateClipPlanes();
 }
 
 void Camera::reset()
@@ -171,16 +167,26 @@ void Camera::setDistance(float distance)
 {
     // Match zoom() range: 0.00001 (10nm) to 10,000,000
     m_distance = std::max(0.00001f, std::min(distance, 10000000.0f));
-
-    // Clip planes: near scales with distance, far has a floor (same as zoom())
-    m_near = std::max(m_distance * 0.01f, 1e-7f);
-    m_far = std::max(m_distance * 50.0f, 0.01f);
+    updateClipPlanes();
 }
 
 void Camera::setClipPlanes(float nearPlane, float farPlane)
 {
     m_near = nearPlane;
     m_far = farPlane;
+}
+
+void Camera::updateClipPlanes()
+{
+    // With logarithmic depth buffer, precision is uniform across the entire
+    // depth range, so we use fixed clip planes spanning 100nm to 100m.
+    m_near = 0.0001f;     // 100nm
+    m_far = 100000.0f;    // 100m
+}
+
+float Camera::fcoef() const
+{
+    return 2.0f / log2f(m_far + 1.0f);
 }
 
 void Camera::clampPitch()

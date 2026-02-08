@@ -244,6 +244,10 @@ else()
     message(STATUS "KLayout integration: DISABLED (stub implementation)")
 endif()
 
+# BlenderGDS configs directory
+target_compile_definitions(chiplet-studio PRIVATE
+    CONFIGS_DIR="${CMAKE_SOURCE_DIR}/configs")
+
 # Link Python for embedded interpreter in main executable
 if(HAVE_PYTHON)
     target_compile_definitions(chiplet-studio PRIVATE HAVE_PYTHON
