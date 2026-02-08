@@ -854,8 +854,8 @@ void AssemblyView::buildMeshes()
                 transform.setToIdentity();
                 const auto& pos = comp->position();
                 transform.translate(static_cast<float>(pos.x / 1000.0),
-                                   static_cast<float>(pos.z / 1000.0),   // Chiplet Z -> 3D Y (vertical)
-                                   static_cast<float>(pos.y / 1000.0));  // Chiplet Y -> 3D Z (horizontal)
+                                   static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y (vertical)
+                                   static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z (negated)
 
                 group.transforms.push_back(transform);
 
@@ -872,8 +872,8 @@ void AssemblyView::buildMeshes()
                 AA_BOUNDING_BOX localBB = group.mesh.boundingBox();
                 AA_BOUNDING_BOX worldBB;
                 VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
-                               static_cast<float>(pos.z / 1000.0),   // Chiplet Z -> 3D Y
-                               static_cast<float>(pos.y / 1000.0));  // Chiplet Y -> 3D Z
+                               static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y
+                               static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z
                 worldBB.mins = localBB.mins + offset;
                 worldBB.maxes = localBB.maxes + offset;
                 group.boundingBoxes.push_back(worldBB);
@@ -1293,8 +1293,8 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     geometry.transform.setToIdentity();
     geometry.transform.translate(
         static_cast<float>(pos.x / 1000.0),
-        static_cast<float>(pos.z / 1000.0),   // Chiplet Z -> 3D Y (vertical)
-        static_cast<float>(pos.y / 1000.0));  // Chiplet Y -> 3D Z (horizontal)
+        static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y (vertical)
+        static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z (negated)
 
     // Upload layer meshes to GPU
     for (auto& layer : geometry.layers) {
@@ -1518,6 +1518,19 @@ void AssemblyView::mousePressEvent(QMouseEvent* event)
     m_isDragging = true;
     m_dragButton = event->button();
 
+    // Ctrl + Left = rubber-band zoom
+    if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ControlModifier)) {
+        m_isRubberBandZoom = true;
+        m_rubberBandOrigin = event->pos();
+        if (!m_rubberBand) {
+            m_rubberBand = new QRubberBand(QRubberBand::Rectangle, this);
+        }
+        m_rubberBand->setGeometry(QRect(m_rubberBandOrigin, QSize()));
+        m_rubberBand->show();
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton) {
         // First, check for gizmo axis picking (if a component is selected)
         if (m_gizmo.isVisible() && !m_selectedComponent.isEmpty()) {
@@ -1552,6 +1565,18 @@ void AssemblyView::mousePressEvent(QMouseEvent* event)
 
 void AssemblyView::mouseReleaseEvent(QMouseEvent* event)
 {
+    // End rubber-band zoom
+    if (m_isRubberBandZoom && m_rubberBand) {
+        m_rubberBand->hide();
+        m_isRubberBandZoom = false;
+        QRect rect = QRect(m_rubberBandOrigin, event->pos()).normalized();
+        if (rect.width() >= 5 && rect.height() >= 5) {
+            zoomToRect(rect);
+        }
+        event->accept();
+        return;
+    }
+
     // End gizmo drag and emit move request
     if (m_isDraggingGizmo && m_activeGizmoAxis != GizmoAxis::None) {
         QVector3D currentPos = m_gizmo.position();
@@ -1583,6 +1608,13 @@ void AssemblyView::mouseReleaseEvent(QMouseEvent* event)
 
 void AssemblyView::mouseMoveEvent(QMouseEvent* event)
 {
+    // Handle rubber-band zoom dragging
+    if (m_isRubberBandZoom && m_rubberBand) {
+        m_rubberBand->setGeometry(QRect(m_rubberBandOrigin, event->pos()).normalized());
+        event->accept();
+        return;
+    }
+
     // Handle gizmo dragging
     if (m_isDraggingGizmo && m_activeGizmoAxis != GizmoAxis::None) {
         // Calculate drag delta in screen space
@@ -1689,6 +1721,96 @@ void AssemblyView::mouseDoubleClickEvent(QMouseEvent* event)
     }
 
     event->accept();
+}
+
+void AssemblyView::zoomToRect(const QRect& rect)
+{
+    // Fire a ray through the rectangle center
+    int cx = rect.center().x();
+    int cy = rect.center().y();
+    auto ray = m_scene.screenToRay(cx, cy, width(), height());
+
+    Camera& cam = m_scene.camera();
+    VECTOR3D forward = cam.target() - cam.position();
+    forward.Normalize();
+
+    // Find depth along center ray: try geometry hit first, then plane fallback
+    float hitDepth = -1.0f;
+
+    ensureBVH();
+    if (m_bvh && !m_meshIndexToId.empty()) {
+        m_bvh->rayQueryClosest(
+            ray.origin, ray.direction,
+            [&](int idx) -> float {
+                if (idx < 0 || idx >= static_cast<int>(m_meshIndexToId.size()))
+                    return -1.0f;
+
+                const QString& id = m_meshIndexToId[idx];
+                if (m_useInstancing && !m_instanceGroups.empty()) {
+                    for (const auto& [sig, group] : m_instanceGroups) {
+                        for (size_t i = 0; i < group.componentIds.size(); ++i) {
+                            if (group.componentIds[i] == id) {
+                                float tMin, tMax;
+                                if (group.boundingBoxes[i].rayIntersect(
+                                        ray.origin, ray.direction, tMin, tMax)) {
+                                    if (tMin > 0 && (hitDepth < 0 || tMin < hitDepth)) {
+                                        hitDepth = tMin;
+                                    }
+                                    return tMin > 0 ? tMin : -1.0f;
+                                }
+                                return -1.0f;
+                            }
+                        }
+                    }
+                } else {
+                    auto it = m_meshes.find(id);
+                    if (it != m_meshes.end()) {
+                        float tMin, tMax;
+                        if (it->second.boundingBox().rayIntersect(
+                                ray.origin, ray.direction, tMin, tMax)) {
+                            if (tMin > 0 && (hitDepth < 0 || tMin < hitDepth)) {
+                                hitDepth = tMin;
+                            }
+                            return tMin > 0 ? tMin : -1.0f;
+                        }
+                    }
+                }
+                return -1.0f;
+            });
+    }
+
+    // Compute new target: always along the center ray
+    VECTOR3D newTarget;
+    if (hitDepth > 0) {
+        // Target the geometry surface
+        newTarget = ray.origin + ray.direction * hitDepth;
+    } else {
+        // Fallback: intersect center ray with plane through current target
+        float denom = ray.direction.DotProduct(forward);
+        if (std::abs(denom) < 1e-6f) {
+            return;
+        }
+        VECTOR3D toTarget = cam.target() - ray.origin;
+        float t = toTarget.DotProduct(forward) / denom;
+        if (t <= 0.0f) {
+            return;
+        }
+        newTarget = ray.origin + ray.direction * t;
+    }
+
+    // Scale distance by the ratio of rectangle to viewport
+    float scaleX = static_cast<float>(rect.width()) / static_cast<float>(width());
+    float scaleY = static_cast<float>(rect.height()) / static_cast<float>(height());
+    float scale = std::max(scaleX, scaleY);
+
+    // Cap so rubber-band never jumps more than 10x closer in one step
+    scale = std::max(scale, 0.1f);
+
+    float newDistance = cam.distance() * scale;
+    cam.setTarget(newTarget);
+    cam.setDistance(newDistance);
+
+    update();
 }
 
 } // namespace chiplet

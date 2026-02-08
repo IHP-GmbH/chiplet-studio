@@ -56,15 +56,18 @@ void Camera::zoom(float delta)
 {
     // Exponential zoom for smooth feel at all distances
     float factor = 1.0f - delta * m_zoomSensitivity;
+
+    // Cap factor so each scroll step changes distance by at most 30%
+    factor = std::max(0.7f, std::min(factor, 1.43f));
+
     m_distance *= factor;
 
-    // Clamp to extended range for better close-up and overview zoom
-    // Min 0.1 allows very close inspection, max 10,000,000 for large assemblies
-    m_distance = std::max(0.1f, std::min(m_distance, 10000000.0f));
+    // Min 0.00001 (10nm) for inspecting nanoscale features, max 10M for large assemblies
+    m_distance = std::max(0.00001f, std::min(m_distance, 10000000.0f));
 
-    // Dynamically adjust clip planes based on distance for close-up viewing
-    m_near = std::max(0.01f, m_distance * 0.001f);
-    m_far = m_distance * 100.0f;
+    // Clip planes: near scales with distance, far has a floor so nearby geometry is never clipped
+    m_near = std::max(m_distance * 0.01f, 1e-7f);
+    m_far = std::max(m_distance * 50.0f, 0.01f);
 }
 
 void Camera::fitToBox(const AA_BOUNDING_BOX& box)
@@ -82,9 +85,9 @@ void Camera::fitToBox(const AA_BOUNDING_BOX& box)
     float fovRad = static_cast<float>(m_fov * M_PI / 180.0);
     m_distance = (maxDim * 0.5f) / std::tan(fovRad * 0.5f) * 1.5f;
 
-    // Set reasonable clipping planes
-    m_near = m_distance * 0.01f;
-    m_far = m_distance * 100.0f;
+    // Clip planes: near scales with distance, far has a floor
+    m_near = std::max(m_distance * 0.01f, 1e-7f);
+    m_far = std::max(m_distance * 50.0f, 0.01f);
 }
 
 void Camera::reset()
@@ -166,8 +169,12 @@ void Camera::setTarget(const VECTOR3D& target)
 
 void Camera::setDistance(float distance)
 {
-    // Match zoom() range: 0.1 to 10,000,000
-    m_distance = std::max(0.1f, std::min(distance, 10000000.0f));
+    // Match zoom() range: 0.00001 (10nm) to 10,000,000
+    m_distance = std::max(0.00001f, std::min(distance, 10000000.0f));
+
+    // Clip planes: near scales with distance, far has a floor (same as zoom())
+    m_near = std::max(m_distance * 0.01f, 1e-7f);
+    m_far = std::max(m_distance * 50.0f, 0.01f);
 }
 
 void Camera::setClipPlanes(float nearPlane, float farPlane)

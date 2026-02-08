@@ -9,6 +9,7 @@
 #include <QOpenGLExtraFunctions>
 #include <QMatrix4x4>
 #include <QElapsedTimer>
+#include <QRubberBand>
 #include <map>
 #include <vector>
 #include <memory>
@@ -157,6 +158,12 @@ private:
     QPoint m_lastMousePos;
     bool m_isDragging = false;
     Qt::MouseButton m_dragButton = Qt::NoButton;
+
+    // Rubber-band zoom (Ctrl+Left drag)
+    bool m_isRubberBandZoom = false;
+    QPoint m_rubberBandOrigin;
+    QRubberBand* m_rubberBand = nullptr;
+    void zoomToRect(const QRect& rect);
 
     // Gizmo
     TransformGizmo m_gizmo;
