@@ -4,6 +4,7 @@
 
 #include "LayerStackup.h"
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
@@ -124,6 +125,177 @@ bool LayerStackup::loadFromYAML(const std::string& path)
         return false;
     }
 }
+
+bool LayerStackup::loadFromBlenderGDS(const std::string& path)
+{
+    try {
+        YAML::Node root = YAML::LoadFile(path);
+
+        clear();
+
+        // BlenderGDS format: top-level keys are layer names
+        // Each has: index, type, z, height, optional purpose
+        for (auto it = root.begin(); it != root.end(); ++it) {
+            std::string name = it->first.as<std::string>();
+            YAML::Node node = it->second;
+
+            if (!node.IsMap()) continue;
+
+            int index = node["index"].as<int>(0);
+            int type = node["type"].as<int>(0);
+            double z = node["z"].as<double>(0.0);
+            double height = node["height"].as<double>(1.0);
+
+            addLayer(index, type, z, height, name);
+        }
+
+        return !empty();
+
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// LayerColorScheme implementation
+
+bool LayerColorScheme::loadFromYAML(const std::string& path)
+{
+    try {
+        YAML::Node root = YAML::LoadFile(path);
+
+        name = root["name"].as<std::string>("");
+        description = root["description"].as<std::string>("");
+
+        layers.clear();
+
+        YAML::Node layersNode = root["layers"];
+        if (!layersNode || !layersNode.IsMap()) {
+            return false;
+        }
+
+        for (auto it = layersNode.begin(); it != layersNode.end(); ++it) {
+            std::string layerName = it->first.as<std::string>();
+            YAML::Node node = it->second;
+
+            LayerColorEntry entry;
+
+            if (node["color"] && node["color"].IsSequence() && node["color"].size() >= 4) {
+                entry.color[0] = node["color"][0].as<float>(0.5f);
+                entry.color[1] = node["color"][1].as<float>(0.5f);
+                entry.color[2] = node["color"][2].as<float>(0.5f);
+                entry.color[3] = node["color"][3].as<float>(1.0f);
+            }
+
+            entry.metallic = node["metallic"].as<float>(0.0f);
+            entry.roughness = node["roughness"].as<float>(0.5f);
+
+            layers[layerName] = entry;
+        }
+
+        return true;
+
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+const LayerColorEntry* LayerColorScheme::find(const std::string& layerName) const
+{
+    auto it = layers.find(layerName);
+    if (it != layers.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+// BlenderGDSConfigs implementation
+
+namespace BlenderGDSConfigs {
+
+static std::string s_configsDir;
+
+void setConfigsDir(const std::string& dir)
+{
+    s_configsDir = dir;
+}
+
+static std::string getConfigsDir()
+{
+    if (!s_configsDir.empty()) {
+        return s_configsDir;
+    }
+#ifdef CONFIGS_DIR
+    return CONFIGS_DIR;
+#else
+    return "";
+#endif
+}
+
+std::string stackupPath(const std::string& techId)
+{
+    std::string base = getConfigsDir();
+    if (base.empty()) return "";
+
+    std::string stackupDir = base + "/stackups/";
+
+    // Map techId patterns to YAML files
+    std::string lower = techId;
+    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (lower.find("sg13g2") != std::string::npos ||
+        (lower.find("ihp") != std::string::npos && lower.find("sg13g2") != std::string::npos)) {
+        return stackupDir + "ihp-sg13g2.yaml";
+    }
+    if (lower.find("sg13cmos5l") != std::string::npos ||
+        lower.find("sg13cmos") != std::string::npos) {
+        return stackupDir + "ihp-sg13cmos5l.yaml";
+    }
+    if (lower.find("sky130") != std::string::npos) {
+        return stackupDir + "sky130.yaml";
+    }
+    if (lower.find("gf180") != std::string::npos) {
+        return stackupDir + "gf180mcu.yaml";
+    }
+
+    // Also try direct match: if techId itself contains a known PDK name
+    if (lower.find("ihp") != std::string::npos) {
+        return stackupDir + "ihp-sg13g2.yaml";
+    }
+
+    return "";
+}
+
+std::string colorSchemePath(const std::string& techId, const std::string& scheme)
+{
+    std::string base = getConfigsDir();
+    if (base.empty()) return "";
+
+    std::string colorsDir = base + "/stackups/colors/";
+
+    // Map techId patterns to subdirectory
+    std::string lower = techId;
+    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    std::string pdkDir;
+    if (lower.find("sg13g2") != std::string::npos) {
+        pdkDir = "ihp-sg13g2";
+    } else if (lower.find("sg13cmos5l") != std::string::npos ||
+               lower.find("sg13cmos") != std::string::npos) {
+        pdkDir = "ihp-sg13cmos5l";
+    } else if (lower.find("sky130") != std::string::npos) {
+        pdkDir = "sky130";
+    } else if (lower.find("gf180") != std::string::npos) {
+        pdkDir = "gf180mcu";
+    } else if (lower.find("ihp") != std::string::npos) {
+        pdkDir = "ihp-sg13g2";
+    } else {
+        return "";
+    }
+
+    return colorsDir + pdkDir + "/" + scheme + ".yaml";
+}
+
+} // namespace BlenderGDSConfigs
 
 // Predefined stackups
 

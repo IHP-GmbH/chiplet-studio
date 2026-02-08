@@ -28,6 +28,8 @@ struct LayerMesh {
     double z_bottom = 0.0;
     double z_top = 0.0;
     bool visible = true;
+    float metallic = 0.0f;
+    float roughness = 0.5f;
 
     size_t triangleCount() const;
 };
@@ -88,6 +90,7 @@ public:
         const std::map<LayerKey, LayerPolygons>& polygons,
         const LayerStackup& stackup,
         const LayerPropertiesFile* lyp = nullptr,
+        const LayerColorScheme* colorScheme = nullptr,
         double scale = 1.0);
 
     /**

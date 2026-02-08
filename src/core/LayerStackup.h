@@ -68,8 +68,32 @@ public:
     // Load stackup from YAML file
     bool loadFromYAML(const std::string& path);
 
+    // Load from BlenderGDS-format YAML (top-level keys are layer names)
+    bool loadFromBlenderGDS(const std::string& path);
+
 private:
     std::map<LayerKey, LayerElevation> m_layers;
+};
+
+/**
+ * Color entry for a single layer (from BlenderGDS color scheme)
+ */
+struct LayerColorEntry {
+    float color[4] = {0.5f, 0.5f, 0.5f, 1.0f};  // RGBA
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+};
+
+/**
+ * Color scheme for layer rendering (loaded from BlenderGDS YAML)
+ */
+struct LayerColorScheme {
+    std::string name;
+    std::string description;
+    std::map<std::string, LayerColorEntry> layers;  // layer name -> color
+
+    bool loadFromYAML(const std::string& path);
+    const LayerColorEntry* find(const std::string& layerName) const;
 };
 
 /**
@@ -87,6 +111,23 @@ LayerStackup createInterposer();
 LayerStackup createSimple2Metal();
 
 } // namespace Stackups
+
+/**
+ * BlenderGDS config file resolution
+ */
+namespace BlenderGDSConfigs {
+
+// Resolve stackup YAML path for a technology ID
+std::string stackupPath(const std::string& techId);
+
+// Resolve color scheme YAML path
+std::string colorSchemePath(const std::string& techId,
+                            const std::string& scheme = "realistic");
+
+// Set the configs root directory (default: CONFIGS_DIR compile definition)
+void setConfigsDir(const std::string& dir);
+
+} // namespace BlenderGDSConfigs
 
 } // namespace chiplet
 

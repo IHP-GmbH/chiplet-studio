@@ -41,6 +41,7 @@ add_executable(chiplet_tests
     test_scripting.cpp
     test_tessellation.cpp
     test_integration_final.cpp
+    test_layer_stackup_blendergds.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -161,7 +162,8 @@ endif()
 
 # Fixture path for tests (absolute path, works regardless of CWD)
 target_compile_definitions(chiplet_tests PRIVATE
-    FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+    FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    CONFIGS_DIR="${CMAKE_SOURCE_DIR}/configs")
 
 # Copy test fixtures to build directory
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/fixtures

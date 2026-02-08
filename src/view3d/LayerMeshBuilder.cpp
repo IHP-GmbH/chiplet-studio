@@ -153,6 +153,7 @@ Component3DGeometry LayerMeshBuilder::build(
     const std::map<LayerKey, LayerPolygons>& polygons,
     const LayerStackup& stackup,
     const LayerPropertiesFile* lyp,
+    const LayerColorScheme* colorScheme,
     double scale)
 {
     Component3DGeometry result;
@@ -166,46 +167,11 @@ Component3DGeometry LayerMeshBuilder::build(
     double auto_z = 0.0;
     const double default_layer_thickness = 1.0;  // 1um default thickness
 
-    // =============================================================================
-    // Calculate global bounding box to center the geometry at origin
-    // =============================================================================
-    double global_min_x = std::numeric_limits<double>::max();
-    double global_min_y = std::numeric_limits<double>::max();
-    double global_max_x = std::numeric_limits<double>::lowest();
-    double global_max_y = std::numeric_limits<double>::lowest();
-    bool has_polygons = false;
-
-    for (const auto& [key, layer_polys] : polygons) {
-        for (const auto& poly : layer_polys.polygons) {
-            for (const auto& pt : poly.points) {
-                if (pt.x < global_min_x) global_min_x = pt.x;
-                if (pt.x > global_max_x) global_max_x = pt.x;
-                if (pt.y < global_min_y) global_min_y = pt.y;
-                if (pt.y > global_max_y) global_max_y = pt.y;
-                has_polygons = true;
-            }
-        }
-    }
-
-    // Calculate center offset (to center GDS at origin)
+    // No per-component centering: GDS coordinates are used as-is so that
+    // the .chiplet position (applied as a transform in AssemblyView) places
+    // each component correctly in assembly space.
     double center_offset_x = 0.0;
     double center_offset_y = 0.0;
-
-    if (has_polygons) {
-        center_offset_x = (global_min_x + global_max_x) / 2.0;
-        center_offset_y = (global_min_y + global_max_y) / 2.0;
-
-        std::cerr << "LayerMeshBuilder: GDS bounding box (um): "
-                  << "X=[" << global_min_x << ", " << global_max_x << "], "
-                  << "Y=[" << global_min_y << ", " << global_max_y << "]" << std::endl;
-        std::cerr << "LayerMeshBuilder: Centering offset (um): ("
-                  << center_offset_x << ", " << center_offset_y << ")" << std::endl;
-    }
-
-    // Store centering offset in result for reference (convert to mm)
-    result.centeringOffset = QVector2D(
-        static_cast<float>(center_offset_x / 1000.0),
-        static_cast<float>(center_offset_y / 1000.0));
 
     for (const auto& [key, layer_polys] : polygons) {
         // Find layer elevation
@@ -229,21 +195,39 @@ Component3DGeometry LayerMeshBuilder::build(
                       << " at z=" << fallback_elev.z_bottom << std::endl;
         }
 
-        // Get color from .lyp if available
+        // Color priority chain:
+        // 0: BlenderGDS color scheme (if provided and layer found)
+        // 1: .lyp file (existing behavior)
+        // 2: Default fallback
         QColor color(128, 128, 128, 200);  // Default gray
-        if (lyp) {
+        float metallic = 0.0f;
+        float roughness = 0.5f;
+
+        const LayerColorEntry* schemeColor = nullptr;
+        if (colorScheme && !elev->name.empty()) {
+            schemeColor = colorScheme->find(elev->name);
+        }
+
+        if (schemeColor) {
+            // Priority 0: BlenderGDS color scheme
+            color = QColor::fromRgbF(schemeColor->color[0], schemeColor->color[1],
+                                     schemeColor->color[2], schemeColor->color[3]);
+            metallic = schemeColor->metallic;
+            roughness = schemeColor->roughness;
+        } else if (lyp) {
+            // Priority 1: .lyp file
             const LayerStyle* style = lyp->find(key);
             if (style) {
                 color = QColor(style->fill_color.r, style->fill_color.g,
                                style->fill_color.b, style->fill_color.a);
             }
         } else {
-            // Generate a unique color based on layer number if no .lyp
+            // Priority 2: Generate a unique color based on layer number
             int hue = (key.layer * 47 + key.datatype * 31) % 360;
             color = QColor::fromHsv(hue, 200, 200, 200);
         }
 
-        // Build mesh for this layer (pass centering offset in um, before unit_scale)
+        // Build mesh for this layer
         LayerMesh layer_mesh = buildLayerMesh(
             layer_polys,
             elev->z_bottom,
@@ -256,6 +240,8 @@ Component3DGeometry LayerMeshBuilder::build(
         layer_mesh.key = key;
         layer_mesh.name = elev->name;
         layer_mesh.visible = elev->visible;
+        layer_mesh.metallic = metallic;
+        layer_mesh.roughness = roughness;
 
         if (layer_mesh.z_top > max_z) {
             max_z = layer_mesh.z_top;
@@ -358,12 +344,11 @@ void LayerMeshBuilder::addPolygonFace(
 
     // Add vertices
     // Coordinate mapping: GDS X -> 3D X, GDS Y -> 3D Z, Layer Z -> 3D Y
-    // Apply centering offset to center GDS geometry at origin
     for (const auto& pt : poly.points) {
         Vertex v;
-        v.position[0] = static_cast<float>((pt.x - center_offset_x) * scale);  // GDS X -> 3D X (centered)
+        v.position[0] = static_cast<float>((pt.x - center_offset_x) * scale);  // GDS X -> 3D X
         v.position[1] = static_cast<float>(z * scale);                          // Layer Z -> 3D Y (vertical)
-        v.position[2] = static_cast<float>((pt.y - center_offset_y) * scale);  // GDS Y -> 3D Z (centered)
+        v.position[2] = static_cast<float>(-(pt.y - center_offset_y) * scale);  // GDS Y -> 3D -Z
         v.normal[0] = 0.0f;
         v.normal[1] = ny;   // Normal points up/down in Y
         v.normal[2] = 0.0f;
@@ -411,8 +396,8 @@ void LayerMeshBuilder::addSideWalls(
         double len = std::sqrt(dx * dx + dy * dy);
         if (len < 1e-10) continue;
 
-        // Normal perpendicular to edge in X-Z plane (Y is up)
-        float nx = static_cast<float>(-dy / len);
+        // Normal perpendicular to edge in X-Z plane (Y is up, Z is negated)
+        float nx = static_cast<float>(dy / len);
         float nz = static_cast<float>(dx / len);
 
         GLuint base_idx = static_cast<GLuint>(vertices.size());
@@ -423,9 +408,9 @@ void LayerMeshBuilder::addSideWalls(
         Vertex v0, v1, v2, v3;
 
         // Bottom-left corner
-        v0.position[0] = static_cast<float>((p0.x - center_offset_x) * scale);  // GDS X -> 3D X (centered)
+        v0.position[0] = static_cast<float>((p0.x - center_offset_x) * scale);  // GDS X -> 3D X
         v0.position[1] = static_cast<float>(z_bottom * scale);                   // Layer Z -> 3D Y (vertical)
-        v0.position[2] = static_cast<float>((p0.y - center_offset_y) * scale);  // GDS Y -> 3D Z (centered)
+        v0.position[2] = static_cast<float>(-(p0.y - center_offset_y) * scale);  // GDS Y -> 3D -Z
         v0.normal[0] = nx;
         v0.normal[1] = 0.0f;
         v0.normal[2] = nz;
@@ -433,7 +418,7 @@ void LayerMeshBuilder::addSideWalls(
         // Bottom-right corner
         v1.position[0] = static_cast<float>((p1.x - center_offset_x) * scale);
         v1.position[1] = static_cast<float>(z_bottom * scale);
-        v1.position[2] = static_cast<float>((p1.y - center_offset_y) * scale);
+        v1.position[2] = static_cast<float>(-(p1.y - center_offset_y) * scale);  // GDS Y -> 3D -Z
         v1.normal[0] = nx;
         v1.normal[1] = 0.0f;
         v1.normal[2] = nz;
@@ -441,7 +426,7 @@ void LayerMeshBuilder::addSideWalls(
         // Top-right corner
         v2.position[0] = static_cast<float>((p1.x - center_offset_x) * scale);
         v2.position[1] = static_cast<float>(z_top * scale);
-        v2.position[2] = static_cast<float>((p1.y - center_offset_y) * scale);
+        v2.position[2] = static_cast<float>(-(p1.y - center_offset_y) * scale);  // GDS Y -> 3D -Z
         v2.normal[0] = nx;
         v2.normal[1] = 0.0f;
         v2.normal[2] = nz;
@@ -449,7 +434,7 @@ void LayerMeshBuilder::addSideWalls(
         // Top-left corner
         v3.position[0] = static_cast<float>((p0.x - center_offset_x) * scale);
         v3.position[1] = static_cast<float>(z_top * scale);
-        v3.position[2] = static_cast<float>((p0.y - center_offset_y) * scale);
+        v3.position[2] = static_cast<float>(-(p0.y - center_offset_y) * scale);  // GDS Y -> 3D -Z
         v3.normal[0] = nx;
         v3.normal[1] = 0.0f;
         v3.normal[2] = nz;

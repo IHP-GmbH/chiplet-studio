@@ -52,7 +52,7 @@ ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp,
     float d = static_cast<float>(dims.thickness / 1000.0);
     float x = static_cast<float>(pos.x / 1000.0);
     float y = static_cast<float>(pos.z / 1000.0);   // Chiplet Z elevation -> 3D Y (vertical)
-    float z = static_cast<float>(pos.y / 1000.0);   // Chiplet Y -> 3D Z (horizontal)
+    float z = static_cast<float>(-pos.y / 1000.0);   // Chiplet Y -> 3D -Z (horizontal, negated for correct orientation)
 
     // Build box with dimensions: (width, thickness, height) for (3D X, 3D Y, 3D Z)
     // w = chiplet width -> 3D X, d = chiplet thickness -> 3D Y (vertical), h = chiplet height -> 3D Z
@@ -96,41 +96,41 @@ ComponentMesh MeshBuilder::buildBox(float width, float height, float depth,
     float hh = height * 0.5f;
 
     // Box vertices with normals
-    // Bottom is at offsetZ, top is at offsetZ + depth
+    // Box spans [offsetZ - depth, offsetZ] in Z (depth extends in -Z direction)
     std::vector<Vertex> vertices = {
         // Front face (normal: +Y)
-        {{offsetX - hw, offsetY + hh, offsetZ + depth}, {0, 1, 0}},
-        {{offsetX + hw, offsetY + hh, offsetZ + depth}, {0, 1, 0}},
+        {{offsetX - hw, offsetY + hh, offsetZ - depth}, {0, 1, 0}},
+        {{offsetX + hw, offsetY + hh, offsetZ - depth}, {0, 1, 0}},
         {{offsetX + hw, offsetY + hh, offsetZ}, {0, 1, 0}},
         {{offsetX - hw, offsetY + hh, offsetZ}, {0, 1, 0}},
 
         // Back face (normal: -Y)
-        {{offsetX + hw, offsetY - hh, offsetZ + depth}, {0, -1, 0}},
-        {{offsetX - hw, offsetY - hh, offsetZ + depth}, {0, -1, 0}},
+        {{offsetX + hw, offsetY - hh, offsetZ - depth}, {0, -1, 0}},
+        {{offsetX - hw, offsetY - hh, offsetZ - depth}, {0, -1, 0}},
         {{offsetX - hw, offsetY - hh, offsetZ}, {0, -1, 0}},
         {{offsetX + hw, offsetY - hh, offsetZ}, {0, -1, 0}},
 
-        // Top face (normal: +Z)
-        {{offsetX - hw, offsetY - hh, offsetZ + depth}, {0, 0, 1}},
-        {{offsetX + hw, offsetY - hh, offsetZ + depth}, {0, 0, 1}},
-        {{offsetX + hw, offsetY + hh, offsetZ + depth}, {0, 0, 1}},
-        {{offsetX - hw, offsetY + hh, offsetZ + depth}, {0, 0, 1}},
+        // Top face (normal: -Z) - faces outward in -Z direction
+        {{offsetX - hw, offsetY - hh, offsetZ - depth}, {0, 0, -1}},
+        {{offsetX + hw, offsetY - hh, offsetZ - depth}, {0, 0, -1}},
+        {{offsetX + hw, offsetY + hh, offsetZ - depth}, {0, 0, -1}},
+        {{offsetX - hw, offsetY + hh, offsetZ - depth}, {0, 0, -1}},
 
-        // Bottom face (normal: -Z)
-        {{offsetX - hw, offsetY + hh, offsetZ}, {0, 0, -1}},
-        {{offsetX + hw, offsetY + hh, offsetZ}, {0, 0, -1}},
-        {{offsetX + hw, offsetY - hh, offsetZ}, {0, 0, -1}},
-        {{offsetX - hw, offsetY - hh, offsetZ}, {0, 0, -1}},
+        // Bottom face (normal: +Z) - faces outward in +Z direction
+        {{offsetX - hw, offsetY + hh, offsetZ}, {0, 0, 1}},
+        {{offsetX + hw, offsetY + hh, offsetZ}, {0, 0, 1}},
+        {{offsetX + hw, offsetY - hh, offsetZ}, {0, 0, 1}},
+        {{offsetX - hw, offsetY - hh, offsetZ}, {0, 0, 1}},
 
         // Right face (normal: +X)
-        {{offsetX + hw, offsetY - hh, offsetZ + depth}, {1, 0, 0}},
-        {{offsetX + hw, offsetY + hh, offsetZ + depth}, {1, 0, 0}},
+        {{offsetX + hw, offsetY - hh, offsetZ - depth}, {1, 0, 0}},
+        {{offsetX + hw, offsetY + hh, offsetZ - depth}, {1, 0, 0}},
         {{offsetX + hw, offsetY + hh, offsetZ}, {1, 0, 0}},
         {{offsetX + hw, offsetY - hh, offsetZ}, {1, 0, 0}},
 
         // Left face (normal: -X)
-        {{offsetX - hw, offsetY + hh, offsetZ + depth}, {-1, 0, 0}},
-        {{offsetX - hw, offsetY - hh, offsetZ + depth}, {-1, 0, 0}},
+        {{offsetX - hw, offsetY + hh, offsetZ - depth}, {-1, 0, 0}},
+        {{offsetX - hw, offsetY - hh, offsetZ - depth}, {-1, 0, 0}},
         {{offsetX - hw, offsetY - hh, offsetZ}, {-1, 0, 0}},
         {{offsetX - hw, offsetY + hh, offsetZ}, {-1, 0, 0}},
     };
