@@ -1898,10 +1898,13 @@ void AssemblyView::updateTransforms()
         auto it = m_layerGeometry.find(compId);
         if (it != m_layerGeometry.end()) {
             const auto& pos = comp->position();
+            // Z offset only applies to dies, not interposers/substrates
+            double zOff = (comp->type() == ComponentType::Interposer ||
+                           comp->type() == ComponentType::Substrate) ? 0.0 : m_globalZOffset;
             it->second.transform.setToIdentity();
             it->second.transform.translate(
                 static_cast<float>(pos.x / 1000.0),
-                static_cast<float>((pos.z + m_globalZOffset) / 1000.0),
+                static_cast<float>((pos.z + zOff) / 1000.0),
                 static_cast<float>(-pos.y / 1000.0));
         }
     }
@@ -1914,18 +1917,20 @@ void AssemblyView::updateTransforms()
             if (!comp) continue;
 
             const auto& pos = comp->position();
+            double zOff = (comp->type() == ComponentType::Interposer ||
+                           comp->type() == ComponentType::Substrate) ? 0.0 : m_globalZOffset;
             QMatrix4x4 transform;
             transform.setToIdentity();
             transform.translate(
                 static_cast<float>(pos.x / 1000.0),
-                static_cast<float>((pos.z + m_globalZOffset) / 1000.0),
+                static_cast<float>((pos.z + zOff) / 1000.0),
                 static_cast<float>(-pos.y / 1000.0));
             group.transforms[i] = transform;
 
             // Update bounding box
             AA_BOUNDING_BOX localBB = group.mesh.boundingBox();
             VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
-                           static_cast<float>((pos.z + m_globalZOffset) / 1000.0),
+                           static_cast<float>((pos.z + zOff) / 1000.0),
                            static_cast<float>(-pos.y / 1000.0));
             group.boundingBoxes[i].mins = localBB.mins + offset;
             group.boundingBoxes[i].maxes = localBB.maxes + offset;
