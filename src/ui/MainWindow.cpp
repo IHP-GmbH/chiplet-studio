@@ -105,6 +105,12 @@ void MainWindow::setupMenus()
             m_commandProcessor->redo();
         }
     });
+
+    // Window icon
+    QPixmap logo(":/images/resources/ihp_logo.png");
+    if (!logo.isNull()) {
+        setWindowIcon(QIcon(logo));
+    }
 }
 
 void MainWindow::setupPanels()
