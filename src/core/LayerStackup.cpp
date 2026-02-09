@@ -346,15 +346,16 @@ LayerStackup createInterposer()
 {
     LayerStackup stackup;
 
-    // Generic interposer stackup (RDL layers)
-    stackup.addLayer(1, 0, 0.0, 50.0, "Substrate");
-    stackup.addLayer(10, 0, 50.0, 2.0, "RDL1");
-    stackup.addLayer(20, 0, 52.0, 2.0, "Via1");
-    stackup.addLayer(30, 0, 54.0, 2.0, "RDL2");
-    stackup.addLayer(40, 0, 56.0, 2.0, "Via2");
-    stackup.addLayer(50, 0, 58.0, 3.0, "RDL3");
-    stackup.addLayer(60, 0, 61.0, 5.0, "UBM");
-    stackup.addLayer(70, 0, 66.0, 30.0, "Bumps");
+    // IHP SG13G2 interposer stackup - top metal layers used for RDL routing
+    // Layer numbers match the IHP PDK GDS layers actually present in interposer designs
+    // Heights from SG13G2 process (um), same as createSG13G2() for these layers
+    stackup.addLayer(50, 0, 3.2, 0.5, "Metal4");
+    stackup.addLayer(66, 0, 3.7, 0.5, "Via4");
+    stackup.addLayer(67, 0, 4.2, 0.8, "Metal5");
+    stackup.addLayer(125, 0, 5.0, 0.6, "TopVia1");
+    stackup.addLayer(126, 0, 5.6, 2.0, "TopMetal1");
+    stackup.addLayer(133, 0, 7.6, 1.0, "TopVia2");
+    stackup.addLayer(134, 0, 8.6, 3.0, "TopMetal2");
 
     return stackup;
 }
