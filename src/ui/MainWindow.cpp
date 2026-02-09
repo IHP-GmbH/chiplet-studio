@@ -729,6 +729,27 @@ void MainWindow::setupRenderModeToolbar()
             m_assemblyView->setRenderMode(static_cast<RenderMode>(id));
         }
     });
+
+    // Z offset control
+    renderToolbar->addSeparator();
+    QLabel* zLabel = new QLabel("Z Offset (um):", this);
+    renderToolbar->addWidget(zLabel);
+
+    m_zOffsetSpinBox = new QDoubleSpinBox(this);
+    m_zOffsetSpinBox->setRange(-10000.0, 10000.0);
+    m_zOffsetSpinBox->setSingleStep(1.0);
+    m_zOffsetSpinBox->setDecimals(1);
+    m_zOffsetSpinBox->setValue(0.0);
+    m_zOffsetSpinBox->setToolTip("Global Z offset for all components (micrometers)");
+    m_zOffsetSpinBox->setFixedWidth(90);
+    renderToolbar->addWidget(m_zOffsetSpinBox);
+
+    connect(m_zOffsetSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double value) {
+        if (m_assemblyView) {
+            m_assemblyView->setGlobalZOffset(value);
+        }
+    });
 }
 
 void MainWindow::setupScriptConsole()
