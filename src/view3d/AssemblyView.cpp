@@ -1878,4 +1878,67 @@ void AssemblyView::zoomToRect(const QRect& rect)
     update();
 }
 
+void AssemblyView::setGlobalZOffset(double offset_um)
+{
+    if (m_globalZOffset == offset_um) return;
+    m_globalZOffset = offset_um;
+    updateTransforms();
+}
+
+void AssemblyView::updateTransforms()
+{
+    if (!m_assembly || !m_initialized) return;
+
+    const auto& components = m_assembly->components();
+
+    // Update layer geometry transforms (LayerMode)
+    for (const auto& comp : components) {
+        if (!comp) continue;
+        QString compId = QString::fromStdString(comp->id());
+        auto it = m_layerGeometry.find(compId);
+        if (it != m_layerGeometry.end()) {
+            const auto& pos = comp->position();
+            it->second.transform.setToIdentity();
+            it->second.transform.translate(
+                static_cast<float>(pos.x / 1000.0),
+                static_cast<float>((pos.z + m_globalZOffset) / 1000.0),
+                static_cast<float>(-pos.y / 1000.0));
+        }
+    }
+
+    // Update instanced transforms (BoxMode)
+    for (auto& [sig, group] : m_instanceGroups) {
+        for (size_t i = 0; i < group.componentIds.size(); ++i) {
+            std::string id = group.componentIds[i].toStdString();
+            const Component* comp = m_assembly->component(id);
+            if (!comp) continue;
+
+            const auto& pos = comp->position();
+            QMatrix4x4 transform;
+            transform.setToIdentity();
+            transform.translate(
+                static_cast<float>(pos.x / 1000.0),
+                static_cast<float>((pos.z + m_globalZOffset) / 1000.0),
+                static_cast<float>(-pos.y / 1000.0));
+            group.transforms[i] = transform;
+
+            // Update bounding box
+            AA_BOUNDING_BOX localBB = group.mesh.boundingBox();
+            VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
+                           static_cast<float>((pos.z + m_globalZOffset) / 1000.0),
+                           static_cast<float>(-pos.y / 1000.0));
+            group.boundingBoxes[i].mins = localBB.mins + offset;
+            group.boundingBoxes[i].maxes = localBB.maxes + offset;
+        }
+
+        makeCurrent();
+        group.updateInstanceBuffer();
+        doneCurrent();
+    }
+
+    m_bvhDirty = true;
+    updateSceneBounds();
+    update();
+}
+
 } // namespace chiplet

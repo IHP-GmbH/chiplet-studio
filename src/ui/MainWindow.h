@@ -134,6 +134,7 @@ private:
 
     // Render mode toolbar
     QButtonGroup* m_renderModeGroup = nullptr;
+    QDoubleSpinBox* m_zOffsetSpinBox = nullptr;
 
     // Async loading state
     struct LoadResult {

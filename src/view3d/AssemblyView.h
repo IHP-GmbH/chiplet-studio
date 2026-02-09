@@ -217,6 +217,14 @@ public:
     float fps() const { return m_fps; }
     int drawCallCount() const { return m_drawCallCount; }
     void setShowDebugStats(bool show) { m_showDebugStats = show; }
+
+    // Global Z offset for all components (in micrometers)
+    void setGlobalZOffset(double offset_um);
+    double globalZOffset() const { return m_globalZOffset; }
+
+private:
+    void updateTransforms();
+    double m_globalZOffset = 0.0;
 };
 
 } // namespace chiplet
