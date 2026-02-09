@@ -195,6 +195,12 @@ qt_add_resources(chiplet-studio "shaders"
     FILES ${SHADER_SOURCES}
 )
 
+# Embed logo and other images
+qt_add_resources(chiplet-studio "images"
+    PREFIX "/images"
+    FILES resources/ihp_logo.png
+)
+
 target_link_libraries(chiplet-studio
     Qt6::Core
     Qt6::Gui
