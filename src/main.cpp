@@ -17,6 +17,8 @@ namespace py = pybind11;
 
 #include <QApplication>
 #include <QStandardPaths>
+#include <QTimer>
+#include <QFile>
 #include "ui/MainWindow.h"
 #include "ui/CrashRecoveryDialog.h"
 #include "core/CommandFactory.h"
@@ -92,6 +94,17 @@ int main(int argc, char *argv[])
     }
 
     window.show();
+
+    // Open file passed as command-line argument (e.g., ./chiplet-studio file.chiplet)
+    if (argc > 1) {
+        QString filePath = QString::fromLocal8Bit(argv[1]);
+        if (QFile::exists(filePath)) {
+            // Use a single-shot timer to open after the event loop starts
+            QTimer::singleShot(0, &window, [&window, filePath]() {
+                window.openFile(filePath);
+            });
+        }
+    }
 
     return app.exec();
 }

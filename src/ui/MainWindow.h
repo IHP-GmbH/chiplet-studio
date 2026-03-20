@@ -51,6 +51,11 @@ public:
      */
     void setRecoveredAssembly(std::unique_ptr<Assembly> assembly);
 
+    /**
+     * Open a .chiplet file programmatically (for CLI argument support).
+     */
+    void openFile(const QString& path);
+
 signals:
     /**
      * Emitted when async loading starts (for testing)

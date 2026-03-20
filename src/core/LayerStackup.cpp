@@ -256,6 +256,10 @@ std::string stackupPath(const std::string& techId)
     if (lower.find("gf180") != std::string::npos) {
         return stackupDir + "gf180mcu.yaml";
     }
+    if (lower.find("interposer") != std::string::npos ||
+        lower.find("rdl") != std::string::npos) {
+        return stackupDir + "ihp-interposer.yaml";
+    }
 
     // Also try direct match: if techId itself contains a known PDK name
     if (lower.find("ihp") != std::string::npos) {
