@@ -97,6 +97,7 @@ void PropertiesPanel::createGroupBoxes()
     addPropertyRow(compLayout, "ID:", m_idLabel);
     addPropertyRow(compLayout, "Type:", m_typeLabel);
     addPropertyRow(compLayout, "Technology:", m_techLabel);
+    addPropertyRow(compLayout, "Connection:", m_connectionLabel);
     m_mainLayout->addWidget(m_componentGroup);
 
     // Position Group
@@ -201,6 +202,7 @@ void PropertiesPanel::clearSelection()
     m_idLabel->setText("-");
     m_typeLabel->setText("-");
     m_techLabel->setText("-");
+    m_connectionLabel->setText("-");
     m_posXLabel->setText("-");
     m_posYLabel->setText("-");
     m_posZLabel->setText("-");
@@ -274,6 +276,8 @@ void PropertiesPanel::updateComponentGroup()
     m_typeLabel->setText(typeToString(comp->type()));
     m_techLabel->setText(comp->technology().empty() ?
                          "-" : QString::fromStdString(comp->technology()));
+    m_connectionLabel->setText(comp->connection().empty() ?
+                         "-" : QString::fromStdString(comp->connection()));
 }
 
 void PropertiesPanel::updatePositionGroup()
@@ -284,7 +288,11 @@ void PropertiesPanel::updatePositionGroup()
     const Position3D& pos = comp->position();
     m_posXLabel->setText(formatValue(pos.x));
     m_posYLabel->setText(formatValue(pos.y));
-    m_posZLabel->setText(formatValue(pos.z));
+    QString zText = formatValue(pos.z);
+    if (!comp->connection().empty()) {
+        zText += " (auto)";
+    }
+    m_posZLabel->setText(zText);
     m_rotZLabel->setText(formatDegrees(comp->rotation().z));
 }
 
