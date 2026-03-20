@@ -48,6 +48,16 @@ const Component::string_type& Component::technology() const
     return m_technology;
 }
 
+void Component::set_connection(const string_type& connectionId)
+{
+    m_connection = connectionId;
+}
+
+const Component::string_type& Component::connection() const
+{
+    return m_connection;
+}
+
 void Component::set_layout_path(const string_type& path)
 {
     m_layoutPath = path;
