@@ -72,8 +72,10 @@ private:
     // Parsing helpers (throw on error)
     void parse_assembly_metadata(const YAML::Node& node, Assembly& assembly);
     void parse_technologies(const YAML::Node& node, Assembly& assembly);
+    void parse_connection_stacks(const YAML::Node& node, Assembly& assembly);
     void parse_components(const YAML::Node& node, Assembly& assembly);
     void parse_component(const YAML::Node& node, Assembly& assembly);
+    void auto_calculate_z(Assembly& assembly);
 
     // Utility
     string_type resolve_path(const string_type& relativePath) const;

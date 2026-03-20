@@ -1,0 +1,47 @@
+format_version: "1.0"
+
+assembly:
+  name: "Test Assembly with Connection Stacks"
+  description: "Tests connection stack parsing and auto-z calculation"
+  units: "um"
+
+technologies:
+  test_tech:
+    description: "Test technology"
+    layer_properties: "./tech/test.lyp"
+    dbu: 0.001
+
+connection_stacks:
+  cupillar_opt1:
+    description: "PacTech Cu Pillar, Table 6.1 Option 1 (35um opening)"
+    layers:
+      - {name: CuPillar, material: Cu, height: 28.0, diameter: 44.0}
+      - {name: SnAgCap, material: SnAg, height: 16.0, diameter: 44.0}
+  sbump_sac305:
+    description: "PacTech SAC305 solder bump (80um ball)"
+    layers:
+      - {name: SolderBall, material: SAC305, height: 80.0, diameter: 80.0}
+
+components:
+  - id: interposer
+    type: interposer
+    technology: test_tech
+    dimensions: {width: 8000, height: 8000, thickness: 13.83}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: die_a
+    type: die
+    technology: test_tech
+    connection: cupillar_opt1
+    position: {x: 1000, y: 1000, z: 0}
+
+  - id: die_b
+    type: die
+    technology: test_tech
+    connection: sbump_sac305
+    position: {x: 4000, y: 1000, z: 0}
+
+  - id: die_c
+    type: die
+    technology: test_tech
+    position: {x: 6000, y: 1000, z: 100}

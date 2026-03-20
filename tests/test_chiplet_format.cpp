@@ -184,5 +184,111 @@ TEST(ChipletFormat, TypeConversion)
     EXPECT_EQ(component_type_to_string(ComponentType::Substrate), "substrate");
 }
 
+// Test parsing connection_stacks section
+TEST(ChipletFormat, LoadConnectionStacks)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_connection_stacks.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_EQ(assembly->name(), "Test Assembly with Connection Stacks");
+
+    // Verify connection stacks parsed
+    EXPECT_EQ(assembly->connection_stacks().size(), 2u);
+
+    auto cupillar = assembly->connection_stack("cupillar_opt1");
+    ASSERT_NE(cupillar, nullptr);
+    EXPECT_EQ(cupillar->description, "PacTech Cu Pillar, Table 6.1 Option 1 (35um opening)");
+    EXPECT_EQ(cupillar->layers.size(), 2u);
+    EXPECT_EQ(cupillar->layers[0].name, "CuPillar");
+    EXPECT_EQ(cupillar->layers[0].material, "Cu");
+    EXPECT_DOUBLE_EQ(cupillar->layers[0].height, 28.0);
+    EXPECT_DOUBLE_EQ(cupillar->layers[0].diameter, 44.0);
+    EXPECT_DOUBLE_EQ(cupillar->total_height(), 44.0);
+
+    auto sbump = assembly->connection_stack("sbump_sac305");
+    ASSERT_NE(sbump, nullptr);
+    EXPECT_DOUBLE_EQ(sbump->total_height(), 80.0);
+}
+
+// Test auto-z calculation from interposer thickness + connection stack
+TEST(ChipletFormat, AutoZCalculation)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_connection_stacks.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+
+    // die_a has connection=cupillar_opt1, z was 0 -> auto-calculated
+    // interposer thickness=13.83, cupillar total=44.0 -> z=57.83
+    auto die_a = assembly->component("die_a");
+    ASSERT_NE(die_a, nullptr);
+    EXPECT_NEAR(die_a->position().z, 57.83, 0.01);
+
+    // die_b has connection=sbump_sac305, z was 0 -> auto-calculated
+    // interposer thickness=13.83, sbump total=80.0 -> z=93.83
+    auto die_b = assembly->component("die_b");
+    ASSERT_NE(die_b, nullptr);
+    EXPECT_NEAR(die_b->position().z, 93.83, 0.01);
+
+    // die_c has no connection and explicit z=100 -> unchanged
+    auto die_c = assembly->component("die_c");
+    ASSERT_NE(die_c, nullptr);
+    EXPECT_DOUBLE_EQ(die_c->position().z, 100.0);
+}
+
+// Test backward compatibility: files without connection_stacks still load
+TEST(ChipletFormat, BackwardCompatNoConnectionStacks)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_components.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_TRUE(assembly->connection_stacks().empty());
+
+    // Components retain their original z values
+    auto logic = assembly->component("logic_die");
+    ASSERT_NE(logic, nullptr);
+    EXPECT_DOUBLE_EQ(logic->position().z, 650.0);
+}
+
+// Test round-trip preserves connection stack data
+TEST(ChipletFormat, RoundTripConnectionStacks)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_connection_stacks.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+
+    // Save to temporary file
+    std::string tempPath = "test_connection_stacks_output.chiplet";
+    EXPECT_NO_THROW(format.save(*assembly, tempPath));
+
+    // Load back
+    ChipletFormat format2;
+    auto assembly2 = format2.load(tempPath);
+
+    ASSERT_NE(assembly2, nullptr);
+
+    // Connection stacks preserved
+    EXPECT_EQ(assembly2->connection_stacks().size(), 2u);
+    auto cupillar = assembly2->connection_stack("cupillar_opt1");
+    ASSERT_NE(cupillar, nullptr);
+    EXPECT_DOUBLE_EQ(cupillar->total_height(), 44.0);
+    EXPECT_EQ(cupillar->layers.size(), 2u);
+
+    // Component connection field preserved
+    auto die_a = assembly2->component("die_a");
+    ASSERT_NE(die_a, nullptr);
+    EXPECT_EQ(die_a->connection(), "cupillar_opt1");
+
+    // z was auto-calculated on first load and saved explicitly,
+    // so on reload it stays as-is (not re-calculated since z != 0)
+    EXPECT_NEAR(die_a->position().z, 57.83, 0.01);
+
+    // Cleanup
+    std::filesystem::remove(tempPath);
+}
+
 } // namespace
 } // namespace chiplet

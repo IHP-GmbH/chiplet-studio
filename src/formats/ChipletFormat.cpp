@@ -4,6 +4,7 @@
 
 #include "ChipletFormat.h"
 #include "core/Technology.h"
+#include "core/ConnectionStack.h"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 #include <filesystem>
@@ -118,9 +119,16 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         parse_technologies(root["technologies"], *assembly);
     }
 
+    if (root["connection_stacks"]) {
+        parse_connection_stacks(root["connection_stacks"], *assembly);
+    }
+
     if (root["components"]) {
         parse_components(root["components"], *assembly);
     }
+
+    // Auto-calculate z for components with connection stacks and z == 0.0
+    auto_calculate_z(*assembly);
 
     // interfaces, netlist, design_rules, default_views - skipped for now (future extension)
 
@@ -231,6 +239,11 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
         component->set_technology(node["technology"].as<std::string>());
     }
 
+    // Connection stack reference
+    if (node["connection"]) {
+        component->set_connection(node["connection"].as<std::string>());
+    }
+
     // Layout file
     if (node["layout"]) {
         std::string layoutPath = node["layout"].as<std::string>();
@@ -312,6 +325,51 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
     assembly.add_component(std::move(component));
 }
 
+void ChipletFormat::parse_connection_stacks(const YAML::Node& node, Assembly& assembly)
+{
+    if (!node.IsMap()) {
+        throw ChipletFormatException("Expected a map", 0, "connection_stacks");
+    }
+
+    for (const auto& item : node) {
+        ConnectionStack stack;
+        stack.id = item.first.as<std::string>();
+        const YAML::Node& stackNode = item.second;
+
+        if (stackNode["description"]) {
+            stack.description = stackNode["description"].as<std::string>();
+        }
+
+        if (stackNode["layers"] && stackNode["layers"].IsSequence()) {
+            for (const auto& layerNode : stackNode["layers"]) {
+                ConnectionStackLayer layer;
+                if (layerNode["name"]) layer.name = layerNode["name"].as<std::string>();
+                if (layerNode["material"]) layer.material = layerNode["material"].as<std::string>();
+                if (layerNode["height"]) layer.height = layerNode["height"].as<double>();
+                if (layerNode["diameter"]) layer.diameter = layerNode["diameter"].as<double>();
+                stack.layers.push_back(layer);
+            }
+        }
+
+        assembly.add_connection_stack(stack);
+    }
+}
+
+void ChipletFormat::auto_calculate_z(Assembly& assembly)
+{
+    for (const auto& comp : assembly.components()) {
+        if (comp->connection().empty()) continue;
+        if (comp->position().z != 0.0) continue;
+
+        double z = assembly.calculate_component_z(comp->id());
+        if (z > 0.0) {
+            Position3D pos = comp->position();
+            pos.z = z;
+            comp->set_position(pos);
+        }
+    }
+}
+
 void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 {
     YAML::Emitter out;
@@ -361,6 +419,36 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
         out << YAML::EndMap;
     }
 
+    // Connection stacks
+    if (!assembly.connection_stacks().empty()) {
+        out << YAML::Key << "connection_stacks" << YAML::Value << YAML::BeginMap;
+
+        for (const auto& [stackId, stack] : assembly.connection_stacks()) {
+            out << YAML::Key << stackId << YAML::Value << YAML::BeginMap;
+
+            if (!stack.description.empty()) {
+                out << YAML::Key << "description" << YAML::Value << stack.description;
+            }
+
+            if (!stack.layers.empty()) {
+                out << YAML::Key << "layers" << YAML::Value << YAML::BeginSeq;
+                for (const auto& layer : stack.layers) {
+                    out << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "name" << YAML::Value << layer.name;
+                    out << YAML::Key << "material" << YAML::Value << layer.material;
+                    out << YAML::Key << "height" << YAML::Value << layer.height;
+                    out << YAML::Key << "diameter" << YAML::Value << layer.diameter;
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
+
+            out << YAML::EndMap;
+        }
+
+        out << YAML::EndMap;
+    }
+
     // Components
     if (!assembly.components().empty()) {
         out << YAML::Key << "components" << YAML::Value << YAML::BeginSeq;
@@ -372,6 +460,10 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 
             if (!comp->technology().empty()) {
                 out << YAML::Key << "technology" << YAML::Value << comp->technology();
+            }
+
+            if (!comp->connection().empty()) {
+                out << YAML::Key << "connection" << YAML::Value << comp->connection();
             }
 
             if (!comp->layout_path().empty()) {
