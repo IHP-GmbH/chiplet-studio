@@ -121,6 +121,7 @@ private:
     QLabel* m_idLabel = nullptr;
     QLabel* m_typeLabel = nullptr;
     QLabel* m_techLabel = nullptr;
+    QLabel* m_connectionLabel = nullptr;
 
     // Value labels - Position
     QLabel* m_posXLabel = nullptr;
