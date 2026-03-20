@@ -3,6 +3,7 @@
  */
 
 #include "Assembly.h"
+#include "LayerStackup.h"
 #include <algorithm>
 #include <filesystem>
 
@@ -172,6 +173,68 @@ Technology* Assembly::technology(const string_type& id) const
 const Assembly::technology_list_type& Assembly::technologies() const
 {
     return m_technologies;
+}
+
+// Connection stacks
+
+void Assembly::add_connection_stack(const ConnectionStack& stack)
+{
+    m_connectionStacks[stack.id] = stack;
+}
+
+const ConnectionStack* Assembly::connection_stack(const string_type& id) const
+{
+    auto it = m_connectionStacks.find(id);
+    return (it != m_connectionStacks.end()) ? &it->second : nullptr;
+}
+
+const Assembly::connection_stack_map_type& Assembly::connection_stacks() const
+{
+    return m_connectionStacks;
+}
+
+double Assembly::calculate_component_z(const ComponentID& id) const
+{
+    Component* comp = component(id);
+    if (!comp || comp->connection().empty()) {
+        return 0.0;
+    }
+
+    const ConnectionStack* stack = connection_stack(comp->connection());
+    if (!stack) {
+        return 0.0;
+    }
+
+    // Find the interposer component and get its stackup top
+    double interposer_top = 0.0;
+    for (const auto& c : m_components) {
+        if (c->type() == ComponentType::Interposer) {
+            // Use interposer thickness as the mounting surface height
+            interposer_top = c->dimensions().thickness;
+            // If we have a technology with a stackup, use that instead
+            const std::string& techId = c->technology();
+            if (!techId.empty()) {
+                std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
+                if (!stackupYaml.empty()) {
+                    LayerStackup stackup;
+                    if (stackup.loadFromBlenderGDS(stackupYaml)) {
+                        double max_z = 0.0;
+                        for (const auto& layer : stackup.sortedLayers()) {
+                            if (layer.z_top() > max_z) {
+                                max_z = layer.z_top();
+                            }
+                        }
+                        if (max_z > 0.0) {
+                            interposer_top = max_z;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    return interposer_top + stack->total_height();
 }
 
 // Validation

@@ -88,6 +88,10 @@ public:
     void set_technology(const string_type& techId);
     const string_type& technology() const;
 
+    // Getters/Setters - connection stack reference
+    void set_connection(const string_type& connectionId);
+    const string_type& connection() const;
+
     // Getters/Setters - layout
     void set_layout_path(const string_type& path);
     const string_type& layout_path() const;
@@ -127,6 +131,7 @@ private:
     string_type m_name;  // User-editable display name, defaults to id
     ComponentType m_type;
     string_type m_technology;
+    string_type m_connection;
     string_type m_layoutPath;
     std::vector<string_type> m_cells;  // List of cells to visualize (replaces m_topCell)
     position_type m_position;

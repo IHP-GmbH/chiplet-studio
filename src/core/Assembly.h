@@ -7,12 +7,15 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include "ComponentID.h"
 #include "Component.h"
+#include "ConnectionStack.h"
 #include "Interface.h"
 #include "Technology.h"
+#include "Netlist.h"
 
 namespace chiplet {
 
@@ -55,6 +58,7 @@ public:
     typedef std::vector<std::unique_ptr<Component>> component_list_type;
     typedef std::vector<std::unique_ptr<Interface>> interface_list_type;
     typedef std::vector<std::unique_ptr<Technology>> technology_list_type;
+    typedef std::map<std::string, ConnectionStack> connection_stack_map_type;
 
     // Constructors and destructor
     Assembly();
@@ -101,6 +105,18 @@ public:
     Technology* technology(const string_type& id) const;
     const technology_list_type& technologies() const;
 
+    // Connection stacks
+    void add_connection_stack(const ConnectionStack& stack);
+    const ConnectionStack* connection_stack(const string_type& id) const;
+    const connection_stack_map_type& connection_stacks() const;
+
+    /**
+     * Calculate z-position for a component from interposer stackup + connection stack.
+     * Returns the sum of interposer top z and connection stack total height,
+     * or 0.0 if the component has no connection or the interposer stackup is unavailable.
+     */
+    double calculate_component_z(const ComponentID& id) const;
+
     // Validation
     /**
      * Resolve a component's technology reference to a Technology object.
@@ -135,6 +151,7 @@ private:
     std::unordered_map<ComponentID, Component*> m_component_index;  // O(1) lookup
     interface_list_type m_interfaces;
     technology_list_type m_technologies;
+    connection_stack_map_type m_connectionStacks;
 };
 
 } // namespace chiplet
