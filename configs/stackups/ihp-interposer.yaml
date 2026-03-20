@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# IHP SG13G2 Interposer stackup with cu-pillar connection stack
+#
+# Based on SG13G2 process spec Rev 1.2 (BEOL thicknesses) and
+# SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 1 (cu-pillar dimensions).
+#
+# Layers 500+ are 3D visualization/simulation auxiliary layers.
+# They represent post-passivation physical volumes and are NOT
+# fabrication layers. See interposer PDK layers_def.drc for details.
+
+# --- Interposer RDL routing layers (Metal4 through TopMetal2) ---
+
+Metal4:
+  index: 50
+  type: 0
+  z: 3.66
+  height: 0.49
+Via4:
+  index: 66
+  type: 0
+  z: 4.15
+  height: 0.54
+Metal5:
+  index: 67
+  type: 0
+  z: 4.69
+  height: 0.49
+TopVia1:
+  index: 125
+  type: 0
+  z: 5.18
+  height: 0.85
+TopMetal1:
+  index: 126
+  type: 0
+  z: 6.03
+  height: 2.00
+TopVia2:
+  index: 133
+  type: 0
+  z: 8.03
+  height: 2.80
+TopMetal2:
+  index: 134
+  type: 0
+  z: 10.83
+  height: 3.00
+
+# --- Passivation (1500nm oxide + 400nm SiN = 1.9um total) ---
+# Note: Passiv:pillar (9/35) openings are holes in this layer.
+# The 3D viewer extrudes this as a solid; the openings in the
+# passivation are not rendered as cutouts (limitation of 2.5D extrusion).
+
+Passiv:
+  index: 9
+  type: 0
+  z: 13.83
+  height: 1.90
+
+# --- Cu-Pillar connection stack (Table 6.1 Option 1, 35um opening) ---
+# Physical stack above passivation opening:
+#   Cu pillar body: 28 um height, 44 um diameter
+#   SnAg cap:       16 um height, 44 um diameter
+
+CuPillar:
+  index: 500
+  type: 35
+  z: 13.83
+  height: 28.00
+
+SnAgCap:
+  index: 501
+  type: 35
+  z: 41.83
+  height: 16.00
+
+# --- Solder bump (Section 6.9.1, 80um ball on 60um opening) ---
+# SAC305 solder ball, approximately spherical but extruded as cylinder
+# Height approximated as ball diameter (80um) for visualization
+
+SolderBall:
+  index: 502
+  type: 36
+  z: 13.83
+  height: 80.00

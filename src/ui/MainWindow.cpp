@@ -264,6 +264,37 @@ void MainWindow::onFileNew()
     }
 }
 
+void MainWindow::openFile(const QString& path)
+{
+    if (path.isEmpty() || !QFile::exists(path)) {
+        return;
+    }
+
+    m_pendingLoadPath = path;
+    m_loadCanceled = false;
+    emit loadingStarted(path);
+
+    m_loadProgress = new QProgressDialog("Loading Assembly...", "Cancel", 0, 0, this);
+    m_loadProgress->setWindowTitle("Loading");
+    m_loadProgress->setWindowModality(Qt::WindowModal);
+    m_loadProgress->setMinimumDuration(0);
+    m_loadProgress->setValue(0);
+    connect(m_loadProgress, &QProgressDialog::canceled,
+            this, &MainWindow::onLoadCanceled);
+
+    QFuture<LoadResult> future = QtConcurrent::run([path]() -> LoadResult {
+        LoadResult result;
+        try {
+            ChipletFormat format;
+            result.assembly = format.load(path.toStdString());
+        } catch (const std::exception& e) {
+            result.error = QString::fromStdString(e.what());
+        }
+        return result;
+    });
+    m_loadWatcher->setFuture(future);
+}
+
 void MainWindow::onFileOpen()
 {
     QString path = QFileDialog::getOpenFileName(

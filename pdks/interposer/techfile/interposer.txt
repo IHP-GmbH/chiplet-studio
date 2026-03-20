@@ -1,5 +1,6 @@
 # GDS3D Techfile for Interposer
-# Derived from IHP SG13G2 - Upper metals only
+# Derived from IHP SG13G2 - Upper metals + cu-pillar connection stack
+# Cu-pillar dimensions from SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 1
 # Author: Chiplet Studio
 # Date: 2025
 
@@ -89,6 +90,58 @@ Thickness: 3000
 Red: 1.00
 Green: 0.50
 Blue: 0.00
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd
+
+LayerStart: Passiv
+Layer: 9
+Datatype: 0
+Height: 13830
+Thickness: 1900
+Red: 0.80
+Green: 0.80
+Blue: 0.80
+Filter: 0.5
+Metal: 0
+Show: 1
+LayerEnd
+
+LayerStart: CuPillar
+Layer: 500
+Datatype: 35
+Height: 13830
+Thickness: 28000
+Red: 0.72
+Green: 0.45
+Blue: 0.20
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd
+
+LayerStart: SnAgCap
+Layer: 501
+Datatype: 35
+Height: 41830
+Thickness: 16000
+Red: 0.75
+Green: 0.75
+Blue: 0.75
+Filter: 0.0
+Metal: 1
+Show: 1
+LayerEnd
+
+LayerStart: SolderBall
+Layer: 502
+Datatype: 36
+Height: 13830
+Thickness: 80000
+Red: 0.50
+Green: 0.50
+Blue: 0.50
 Filter: 0.0
 Metal: 1
 Show: 1
