@@ -290,5 +290,90 @@ TEST(ChipletFormat, RoundTripConnectionStacks)
     std::filesystem::remove(tempPath);
 }
 
+// Test loading file with flow section
+TEST(ChipletFormat, LoadWithFlow)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_flow.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_EQ(assembly->name(), "Flow Test Assembly");
+
+    // Flow definition should be populated
+    EXPECT_TRUE(assembly->has_flow());
+    const auto& def = assembly->flow_definition();
+    EXPECT_EQ(def.step_count(), 2u);
+    EXPECT_EQ(def.working_directory, "/tmp/flow_test");
+
+    // Check environment
+    ASSERT_EQ(def.environment.size(), 2u);
+    EXPECT_EQ(def.environment.at("PDK_ROOT"), "/opt/pdk");
+    EXPECT_EQ(def.environment.at("DEBUG"), "1");
+
+    // Check steps
+    EXPECT_EQ(def.steps[0].id, "step_hello");
+    EXPECT_EQ(def.steps[0].name, "Hello World");
+    EXPECT_EQ(def.steps[0].tool_path, "/bin/echo");
+    ASSERT_EQ(def.steps[0].args.size(), 2u);
+    EXPECT_EQ(def.steps[0].args[0], "hello");
+    EXPECT_EQ(def.steps[0].args[1], "Flow Test Assembly");  // ${assembly.name} resolved
+
+    EXPECT_EQ(def.steps[1].id, "step_goodbye");
+    ASSERT_EQ(def.steps[1].depends_on.size(), 1u);
+    EXPECT_EQ(def.steps[1].depends_on[0], "step_hello");
+}
+
+// Test backward compatibility: files without flow section
+TEST(ChipletFormat, BackwardCompatNoFlow)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("minimal.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_FALSE(assembly->has_flow());
+    EXPECT_TRUE(assembly->flow_definition().empty());
+}
+
+// Test round-trip preserves flow definition
+TEST(ChipletFormat, RoundTripFlow)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_flow.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_TRUE(assembly->has_flow());
+
+    // Save to temporary file
+    std::string tempPath = "test_flow_roundtrip.chiplet";
+    EXPECT_NO_THROW(format.save(*assembly, tempPath));
+
+    // Load back
+    ChipletFormat format2;
+    auto assembly2 = format2.load(tempPath);
+
+    ASSERT_NE(assembly2, nullptr);
+    EXPECT_TRUE(assembly2->has_flow());
+
+    const auto& def1 = assembly->flow_definition();
+    const auto& def2 = assembly2->flow_definition();
+
+    EXPECT_EQ(def2.working_directory, def1.working_directory);
+    EXPECT_EQ(def2.environment.size(), def1.environment.size());
+    EXPECT_EQ(def2.step_count(), def1.step_count());
+
+    // Verify step data survived round-trip
+    EXPECT_EQ(def2.steps[0].id, "step_hello");
+    EXPECT_EQ(def2.steps[0].name, "Hello World");
+    ASSERT_EQ(def2.steps[0].args.size(), 2u);
+    EXPECT_EQ(def2.steps[0].args[1], "Flow Test Assembly");
+
+    EXPECT_EQ(def2.steps[1].id, "step_goodbye");
+    ASSERT_EQ(def2.steps[1].depends_on.size(), 1u);
+    EXPECT_EQ(def2.steps[1].depends_on[0], "step_hello");
+
+    // Cleanup
+    std::filesystem::remove(tempPath);
+}
+
 } // namespace
 } // namespace chiplet
