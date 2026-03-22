@@ -34,6 +34,8 @@ class KLayout2DView;
 class DrillDownPanel;
 class ScriptConsole;
 class ScriptEngine;
+class FlowEngine;
+class FlowPanel;
 
 /**
  * MainWindow is the main application window.
@@ -101,6 +103,8 @@ private:
     void setupSnapToolbar();
     void setupViewModeToolbar();
     void setupScriptConsole();
+    void setupFlowPanel();
+    void loadFlowFromFile(const QString& path);
 
     std::unique_ptr<Assembly> m_assembly;
     HierarchyPanel* m_hierarchyPanel = nullptr;
@@ -117,6 +121,11 @@ private:
     std::unique_ptr<ScriptEngine> m_scriptEngine;
     ScriptConsole* m_scriptConsole = nullptr;
     QDockWidget* m_scriptConsoleDock = nullptr;
+
+    // Flow pipeline
+    FlowEngine* m_flowEngine = nullptr;
+    FlowPanel* m_flowPanel = nullptr;
+    QDockWidget* m_flowPanelDock = nullptr;
 
     // Clip plane toolbar widgets
     QToolBar* m_clipToolbar = nullptr;

@@ -1,0 +1,44 @@
+format_version: "1.0"
+
+assembly:
+  name: "Flow Panel Visual Test"
+  description: "Assembly with flow pipeline for visual verification"
+  units: "um"
+
+components:
+  - id: substrate
+    type: substrate
+    dimensions: {width: 12000, height: 12000, thickness: 500}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: die_0
+    type: die
+    dimensions: {width: 5000, height: 5000, thickness: 200}
+    position: {x: 3500, y: 3500, z: 500}
+
+flow:
+  working_directory: /tmp
+  steps:
+    - id: check_env
+      name: "Check Environment"
+      tool: /bin/echo
+      args: ["Environment OK - all tools available"]
+
+    - id: run_script
+      name: "Run Analysis Script"
+      tool: python3
+      script: "-c"
+      args:
+        - "import sys; print('Analysis started'); print('Processing 4 components...'); print('Found 12 connections'); print('Analysis complete'); sys.exit(0)"
+      depends_on: [check_env]
+
+    - id: will_fail
+      name: "Intentional Failure"
+      tool: /bin/false
+      depends_on: [run_script]
+
+    - id: final_step
+      name: "Generate Report"
+      tool: /bin/echo
+      args: ["Report generated successfully"]
+      depends_on: [run_script]
