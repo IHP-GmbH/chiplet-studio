@@ -46,6 +46,7 @@ add_executable(chiplet_tests
     test_layer_stackup_blendergds.cpp
     test_flow_engine.cpp
     test_flow_config.cpp
+    test_render_mode.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
