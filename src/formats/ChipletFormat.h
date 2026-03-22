@@ -75,6 +75,7 @@ private:
     void parse_connection_stacks(const YAML::Node& node, Assembly& assembly);
     void parse_components(const YAML::Node& node, Assembly& assembly);
     void parse_component(const YAML::Node& node, Assembly& assembly);
+    void parse_interfaces(const YAML::Node& node, Assembly& assembly);
     void auto_calculate_z(Assembly& assembly);
 
     // Utility
@@ -86,6 +87,9 @@ private:
 // Helper functions for type conversion
 ComponentType string_to_component_type(const std::string& s);
 std::string component_type_to_string(ComponentType t);
+
+InterfaceType interface_type_from_string(const std::string& s);
+std::string interface_type_to_string(InterfaceType t);
 
 } // namespace chiplet
 
