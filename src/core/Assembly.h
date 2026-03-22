@@ -100,6 +100,12 @@ public:
     Interface* interface(const string_type& id) const;
     const interface_list_type& interfaces() const;
 
+    // Netlist
+    void set_netlist(const Netlist& netlist);
+    void set_netlist(Netlist&& netlist);
+    const Netlist& netlist() const;
+    Netlist& netlist();
+
     // Technologies
     void add_technology(std::unique_ptr<Technology> tech);
     Technology* technology(const string_type& id) const;
@@ -150,6 +156,7 @@ private:
     component_list_type m_components;
     std::unordered_map<ComponentID, Component*> m_component_index;  // O(1) lookup
     interface_list_type m_interfaces;
+    Netlist m_netlist;
     technology_list_type m_technologies;
     connection_stack_map_type m_connectionStacks;
 };

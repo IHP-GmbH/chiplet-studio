@@ -153,6 +153,28 @@ const Assembly::interface_list_type& Assembly::interfaces() const
     return m_interfaces;
 }
 
+// Netlist
+
+void Assembly::set_netlist(const Netlist& netlist)
+{
+    m_netlist = netlist;
+}
+
+void Assembly::set_netlist(Netlist&& netlist)
+{
+    m_netlist = std::move(netlist);
+}
+
+const Netlist& Assembly::netlist() const
+{
+    return m_netlist;
+}
+
+Netlist& Assembly::netlist()
+{
+    return m_netlist;
+}
+
 // Technologies
 
 void Assembly::add_technology(std::unique_ptr<Technology> tech)
