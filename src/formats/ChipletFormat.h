@@ -76,6 +76,7 @@ private:
     void parse_components(const YAML::Node& node, Assembly& assembly);
     void parse_component(const YAML::Node& node, Assembly& assembly);
     void parse_interfaces(const YAML::Node& node, Assembly& assembly);
+    void parse_netlist(const YAML::Node& node, Assembly& assembly);
     void auto_calculate_z(Assembly& assembly);
 
     // Utility

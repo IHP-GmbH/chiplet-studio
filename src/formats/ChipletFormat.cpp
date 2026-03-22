@@ -154,7 +154,11 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         parse_interfaces(root["interfaces"], *assembly);
     }
 
-    // netlist, design_rules, default_views - skipped for now (future extension)
+    if (root["netlist"]) {
+        parse_netlist(root["netlist"], *assembly);
+    }
+
+    // design_rules, default_views - skipped for now (future extension)
 
     return assembly;
 }
@@ -429,6 +433,49 @@ void ChipletFormat::parse_interfaces(const YAML::Node& node, Assembly& assembly)
     }
 }
 
+void ChipletFormat::parse_netlist(const YAML::Node& node, Assembly& assembly)
+{
+    Netlist netlist;
+
+    if (node["nets"] && node["nets"].IsSequence()) {
+        for (const auto& netNode : node["nets"]) {
+            if (!netNode["name"]) {
+                throw ChipletFormatException("Missing required field", 0, "netlist.nets[].name");
+            }
+
+            std::string name = netNode["name"].as<std::string>();
+            std::string classStr = netNode["class"] ? netNode["class"].as<std::string>() : "signal";
+            NetClass nc = string_to_net_class(classStr);
+
+            Net net(name, nc);
+
+            if (netNode["connections"] && netNode["connections"].IsSequence()) {
+                for (const auto& connNode : netNode["connections"]) {
+                    NetConnection conn;
+                    if (connNode["component"]) {
+                        conn.component = connNode["component"].as<std::string>();
+                    }
+                    if (connNode["pin"]) {
+                        conn.pin = connNode["pin"].as<std::string>();
+                    }
+                    if (connNode["layer"]) {
+                        conn.layer = connNode["layer"].as<std::string>();
+                    }
+                    net.add_connection(conn);
+                }
+            }
+
+            netlist.add_net(std::move(net));
+        }
+    }
+
+    if (node["external_netlist"]) {
+        netlist.set_external_netlist_path(node["external_netlist"].as<std::string>());
+    }
+
+    assembly.set_netlist(std::move(netlist));
+}
+
 void ChipletFormat::auto_calculate_z(Assembly& assembly)
 {
     for (const auto& comp : assembly.components()) {
@@ -668,6 +715,46 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
         }
 
         out << YAML::EndSeq;
+    }
+
+    // Netlist
+    if (!assembly.netlist().empty()) {
+        out << YAML::Key << "netlist" << YAML::Value << YAML::BeginMap;
+
+        const auto& nl = assembly.netlist();
+        if (nl.net_count() > 0) {
+            out << YAML::Key << "nets" << YAML::Value << YAML::BeginSeq;
+
+            for (const auto& net : nl.nets()) {
+                out << YAML::BeginMap;
+                out << YAML::Key << "name" << YAML::Value << net.name();
+                out << YAML::Key << "class" << YAML::Value << net_class_to_string(net.net_class());
+
+                if (net.connection_count() > 0) {
+                    out << YAML::Key << "connections" << YAML::Value << YAML::BeginSeq;
+                    for (const auto& conn : net.connections()) {
+                        out << YAML::Flow << YAML::BeginMap;
+                        out << YAML::Key << "component" << YAML::Value << conn.component;
+                        out << YAML::Key << "pin" << YAML::Value << conn.pin;
+                        if (!conn.layer.empty()) {
+                            out << YAML::Key << "layer" << YAML::Value << conn.layer;
+                        }
+                        out << YAML::EndMap;
+                    }
+                    out << YAML::EndSeq;
+                }
+
+                out << YAML::EndMap;
+            }
+
+            out << YAML::EndSeq;
+        }
+
+        if (!nl.external_netlist_path().empty()) {
+            out << YAML::Key << "external_netlist" << YAML::Value << nl.external_netlist_path();
+        }
+
+        out << YAML::EndMap;
     }
 
     out << YAML::EndMap;
