@@ -138,6 +138,7 @@ private:
     // Nav bar
     QPushButton* m_backButton = nullptr;
     QLabel* m_contextLabel = nullptr;
+    QLabel* m_cellNavLabel = nullptr;
     QComboBox* m_cellCombo = nullptr;
     QToolButton* m_layerToggle = nullptr;
     QToolButton* m_hierToggle = nullptr;
