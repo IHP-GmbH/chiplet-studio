@@ -10,6 +10,7 @@
 
 #include <QWidget>
 #include <QString>
+#include <memory>
 
 class QLabel;
 class QComboBox;
@@ -24,7 +25,9 @@ class QTreeWidgetItem;
 
 namespace chiplet {
 
+class Assembly;
 class KLayout2DView;
+class CellComponentMapper;
 
 /**
  * DrillDownPanel provides a complete 2D drill-down interface.
@@ -42,6 +45,8 @@ class DrillDownPanel : public QWidget {
     Q_OBJECT
 
 public:
+    enum class PanelMode { Empty, Assembly, DrillDown };
+
     explicit DrillDownPanel(QWidget* parent = nullptr);
     ~DrillDownPanel();
 
@@ -49,6 +54,27 @@ public:
      * @brief Access the embedded KLayout2DView
      */
     KLayout2DView* view2d() const { return m_view2d; }
+
+    /**
+     * @brief Load the assembly GDS for the default 2D view
+     */
+    void setAssemblyGds(const QString& gdsPath, const QString& lypPath,
+                        const Assembly& assembly);
+
+    /**
+     * @brief Return to assembly view from drill-down
+     */
+    void returnToAssembly();
+
+    /**
+     * @brief Current panel mode
+     */
+    PanelMode panelMode() const { return m_panelMode; }
+
+    /**
+     * @brief Access the cell-to-component mapper
+     */
+    const CellComponentMapper& cellMapper() const { return *m_cellMapper; }
 
     /**
      * @brief Set navigation context after loading a layout
@@ -89,6 +115,11 @@ signals:
      * @brief User selected a different cell in the combo box
      */
     void cellSelected(const QString& cellName);
+
+    /**
+     * @brief User navigated to a wrapper cell in assembly 2D view
+     */
+    void componentNavigated(const QString& componentId);
 
 private slots:
     void onCellComboChanged(int index);
@@ -131,6 +162,12 @@ private:
     bool m_blockLayerSync = false;
     bool m_layerPanelVisible = true;
     bool m_hierPanelVisible = false;
+
+    // Assembly mode state
+    PanelMode m_panelMode = PanelMode::Empty;
+    QString m_assemblyGdsPath;
+    QString m_assemblyLypPath;
+    std::unique_ptr<CellComponentMapper> m_cellMapper;
 };
 
 } // namespace chiplet

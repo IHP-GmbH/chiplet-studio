@@ -158,6 +158,7 @@ set(VIEW2D_SOURCES
     src/view2d/LayerProperties.cpp
     src/view2d/KLayout2DView.cpp
     src/view2d/EmbeddedDispatcher.cpp
+    src/view2d/CellComponentMapper.cpp
 )
 
 set(UI_SOURCES
