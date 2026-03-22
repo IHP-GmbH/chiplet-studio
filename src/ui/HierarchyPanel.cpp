@@ -116,22 +116,7 @@ void HierarchyPanel::refresh()
 void HierarchyPanel::setupContextMenu()
 {
     m_contextMenu = new QMenu(this);
-
-    QAction* zoomAction = m_contextMenu->addAction("Zoom To");
-    connect(zoomAction, &QAction::triggered, this, [this]() {
-        QTreeWidgetItem* item = m_tree->currentItem();
-        if (item && item->parent()) {
-            emit zoomToComponentRequested(item->data(0, Qt::UserRole).toString());
-        }
-    });
-
-    QAction* propsAction = m_contextMenu->addAction("Properties");
-    connect(propsAction, &QAction::triggered, this, [this]() {
-        QTreeWidgetItem* item = m_tree->currentItem();
-        if (item && item->parent()) {
-            emit showPropertiesRequested(item->data(0, Qt::UserRole).toString());
-        }
-    });
+    // Menu is built dynamically in onCustomContextMenu
 }
 
 void HierarchyPanel::onItemClicked(QTreeWidgetItem* item, int /*column*/)
@@ -159,7 +144,47 @@ void HierarchyPanel::onItemDoubleClicked(QTreeWidgetItem* item, int /*column*/)
 void HierarchyPanel::onCustomContextMenu(const QPoint& pos)
 {
     QTreeWidgetItem* item = m_tree->itemAt(pos);
-    if (item && item->parent()) {
+    if (item && item->parent() && m_assembly) {
+        QString componentId = item->data(0, Qt::UserRole).toString();
+        Component* comp = m_assembly->component(componentId.toStdString());
+
+        // Rebuild context menu with render mode submenu
+        m_contextMenu->clear();
+
+        QAction* zoomAction = m_contextMenu->addAction("Zoom To");
+        connect(zoomAction, &QAction::triggered, this, [this, componentId]() {
+            emit zoomToComponentRequested(componentId);
+        });
+
+        QAction* propsAction = m_contextMenu->addAction("Properties");
+        connect(propsAction, &QAction::triggered, this, [this, componentId]() {
+            emit showPropertiesRequested(componentId);
+        });
+
+        if (comp) {
+            m_contextMenu->addSeparator();
+            QMenu* modeMenu = m_contextMenu->addMenu("Render Mode");
+            RenderMode currentMode = comp->render_mode();
+
+            struct ModeEntry { RenderMode mode; const char* label; };
+            ModeEntry modes[] = {
+                {RenderMode::Wireframe,   "Wireframe"},
+                {RenderMode::Transparent, "Transparent"},
+                {RenderMode::Solid,       "Solid"},
+                {RenderMode::Detailed,    "Detailed"},
+            };
+
+            for (const auto& entry : modes) {
+                QAction* action = modeMenu->addAction(entry.label);
+                action->setCheckable(true);
+                action->setChecked(entry.mode == currentMode);
+                RenderMode targetMode = entry.mode;
+                connect(action, &QAction::triggered, this, [this, componentId, targetMode]() {
+                    emit renderModeChangeRequested(componentId, targetMode);
+                });
+            }
+        }
+
         m_contextMenu->exec(m_tree->viewport()->mapToGlobal(pos));
     }
 }

@@ -243,8 +243,8 @@ void MainWindow::setupPanels()
                 m_assemblyView->update();
             });
 
-    // 3D View render mode change request -> CommandProcessor
-    connect(m_assemblyView, &AssemblyView::renderModeChangeRequested,
+    // Hierarchy panel render mode change request -> CommandProcessor
+    connect(m_hierarchyPanel, &HierarchyPanel::renderModeChangeRequested,
             this, [this](const QString& componentId, RenderMode newMode) {
                 if (!m_commandProcessor || !m_assembly) {
                     return;

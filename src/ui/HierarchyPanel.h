@@ -73,6 +73,11 @@ signals:
      */
     void componentVisibilityChanged(const QString& componentId, bool visible);
 
+    /**
+     * Emitted when user selects a render mode from the context menu
+     */
+    void renderModeChangeRequested(const QString& componentId, RenderMode mode);
+
 private slots:
     void onItemClicked(QTreeWidgetItem* item, int column);
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
