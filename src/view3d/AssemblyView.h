@@ -91,6 +91,9 @@ public:
     ViewMode viewMode() const { return m_viewMode; }
     void setViewMode(ViewMode mode);
 
+    // Per-component render mode change notification
+    void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
+
 signals:
     void viewModeChanged(ViewMode mode);
     void clipPlaneChanged();
@@ -100,6 +103,7 @@ signals:
 
     // Command system signals (emitted when user requests actions)
     void moveComponentRequested(const QString& componentId, double dx, double dy, double dz);
+    void renderModeChangeRequested(const QString& componentId, RenderMode mode);
 
 protected:
     // OpenGL lifecycle
@@ -113,6 +117,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     void buildMeshes();
@@ -196,6 +201,14 @@ private:
 
     // Render layers for a component
     void renderLayerGeometry();
+
+    // Multi-pass rendering helpers
+    void renderOpaquePass(const std::vector<QString>& ids);
+    void renderTransparentPass(const std::vector<QString>& ids);
+    void renderWireframePass(const std::vector<QString>& ids);
+    void sortBackToFront(std::vector<QString>& ids);
+    VECTOR3D getComponentCenter(const QString& id) const;
+    void setupShaderUniforms();
 
     // BVH for spatial acceleration
     std::unique_ptr<BVH> m_bvh;

@@ -9,9 +9,13 @@
 #include "view2d/KLayoutBridge.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QContextMenuEvent>
+#include <QMenu>
+#include <QAction>
 #include <QDebug>
 #include <set>
 #include <cmath>
+#include <algorithm>
 
 namespace chiplet {
 
@@ -751,19 +755,46 @@ void AssemblyView::buildMeshes()
     m_stackups.clear();
 
     if (!m_assembly) {
+        m_needsRebuild = false;
         return;
     }
 
     const auto& components = m_assembly->components();
+    if (components.empty()) {
+        m_needsRebuild = false;
+        return;
+    }
 
-    // Track which components have layer geometry (to build fallback boxes for others)
-    std::set<QString> componentsWithLayerGeometry;
+    // Always build non-instanced box meshes for ALL components.
+    // Box meshes are used for Wireframe, Transparent, Solid modes and as
+    // fallback for Detailed when GDS extraction fails.
+    for (const auto& comp : components) {
+        if (!comp) continue;
 
-    // In LayerMode, try to build layer geometry for components with GDS layouts
-    if (m_viewMode == ViewMode::LayerMode) {
-        for (const auto& comp : components) {
-            if (!comp) continue;
+        const LayerPropertiesFile* lyp = nullptr;
+        const std::string& techId = comp->technology();
+        if (!techId.empty()) {
+            auto it = m_layerProps.find(techId);
+            if (it != m_layerProps.end()) {
+                lyp = &(it->second);
+            }
+        }
 
+        ComponentMesh mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
+        mesh.upload();
+        m_meshes.emplace(QString::fromStdString(comp->id()), std::move(mesh));
+    }
+
+    qDebug() << "Built" << m_meshes.size() << "box meshes for all components";
+
+    // Build layer geometry for Detailed components or when in global LayerMode
+    for (const auto& comp : components) {
+        if (!comp) continue;
+
+        bool needsDetail = (comp->render_mode() == RenderMode::Detailed)
+                        || (m_viewMode == ViewMode::LayerMode);
+
+        if (needsDetail) {
             const LayerPropertiesFile* lyp = nullptr;
             const std::string& techId = comp->technology();
             if (!techId.empty()) {
@@ -772,165 +803,16 @@ void AssemblyView::buildMeshes()
                     lyp = &(it->second);
                 }
             }
-
-            // Try to build layer geometry (will fall back to box mode if no GDS)
             buildLayerGeometry(*comp, lyp);
-
-            // Track if this component got layer geometry
-            QString compId = QString::fromStdString(comp->id());
-            if (m_layerGeometry.count(compId)) {
-                componentsWithLayerGeometry.insert(compId);
-            }
         }
-
-        qDebug() << "Built layer geometry for" << m_layerGeometry.size() << "components";
-
-        // Build box meshes for components WITHOUT layer geometry (fallback)
-        // This ensures all components are visible even if GDS extraction fails
-        std::vector<const Component*> fallbackComponents;
-        for (const auto& comp : components) {
-            if (!comp) continue;
-            QString compId = QString::fromStdString(comp->id());
-            if (componentsWithLayerGeometry.find(compId) == componentsWithLayerGeometry.end()) {
-                fallbackComponents.push_back(comp.get());
-                qDebug() << "Component" << compId << "needs fallback box mesh (no layer geometry)";
-            }
-        }
-
-        // Build fallback boxes if needed
-        if (!fallbackComponents.empty()) {
-            for (const Component* comp : fallbackComponents) {
-                const LayerPropertiesFile* lyp = nullptr;
-                const std::string& techId = comp->technology();
-                if (!techId.empty()) {
-                    auto it = m_layerProps.find(techId);
-                    if (it != m_layerProps.end()) {
-                        lyp = &(it->second);
-                    }
-                }
-
-                ComponentMesh mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
-                mesh.upload();
-                m_meshes.emplace(QString::fromStdString(comp->id()), std::move(mesh));
-            }
-            qDebug() << "Built" << m_meshes.size() << "fallback box meshes";
-        }
-
-        m_needsRebuild = false;
-        m_bvhDirty = true;
-        return;
     }
 
-    if (m_useInstancing) {
-        // Instanced rendering: group components by signature
-        // First pass: collect all instances per signature
-        std::map<QString, std::vector<const Component*>> groups;
-        for (const auto& comp : components) {
-            if (comp) {
-                QString sig = getMeshSignature(comp.get());
-                groups[sig].push_back(comp.get());
-            }
-        }
-
-        // Second pass: create mesh for each group and collect instance data
-        for (auto& [sig, comps] : groups) {
-            if (comps.empty()) continue;
-
-            // Use first component to build the shared mesh (geometry only)
-            const Component* firstComp = comps[0];
-            const LayerPropertiesFile* lyp = nullptr;
-            const std::string& techId = firstComp->technology();
-            if (!techId.empty()) {
-                auto it = m_layerProps.find(techId);
-                if (it != m_layerProps.end()) {
-                    lyp = &(it->second);
-                }
-            }
-
-            MeshInstanceGroup group;
-            // Use mesh at origin for instancing - position applied via transform
-            group.mesh = MeshBuilder::buildComponentMeshAtOrigin(*firstComp, lyp);
-            group.mesh.upload();
-
-            // Collect per-instance data
-            group.transforms.reserve(comps.size());
-            group.colors.reserve(comps.size());
-            group.selected.reserve(comps.size());
-            group.componentIds.reserve(comps.size());
-            group.boundingBoxes.reserve(comps.size());
-
-            for (const Component* comp : comps) {
-                QString compId = QString::fromStdString(comp->id());
-                group.componentIds.push_back(compId);
-
-                // Create transform matrix from component position
-                // Convert position from micrometers to mm (same as MeshBuilder)
-                // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z -> 3D Y
-                QMatrix4x4 transform;
-                transform.setToIdentity();
-                const auto& pos = comp->position();
-                transform.translate(static_cast<float>(pos.x / 1000.0),
-                                   static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y (vertical)
-                                   static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z (negated)
-
-                group.transforms.push_back(transform);
-
-                // Get color from mesh builder (uses layer properties)
-                QColor color = group.mesh.color();
-                group.colors.push_back(color);
-
-                // Selection state (default false)
-                group.selected.push_back(m_selectedComponent == compId);
-
-                // Calculate world-space bounding box for this instance
-                // Position converted from µm to mm (same as transform above)
-                // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z -> 3D Y
-                AA_BOUNDING_BOX localBB = group.mesh.boundingBox();
-                AA_BOUNDING_BOX worldBB;
-                VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
-                               static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y
-                               static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z
-                worldBB.mins = localBB.mins + offset;
-                worldBB.maxes = localBB.maxes + offset;
-                group.boundingBoxes.push_back(worldBB);
-            }
-
-            // Upload instance data to GPU
-            group.updateInstanceBuffer();
-
-            m_instanceGroups.emplace(sig, std::move(group));
-        }
-
-        if (m_showDebugStats) {
-            size_t totalInstances = 0;
-            for (const auto& [sig, g] : m_instanceGroups) {
-                totalInstances += g.componentIds.size();
-            }
-            qDebug() << "Instanced rendering:" << m_instanceGroups.size() << "groups,"
-                     << totalInstances << "total instances";
-        }
-    } else {
-        // Fallback: non-instanced rendering (one mesh per component)
-        for (const auto& comp : components) {
-            if (comp) {
-                const LayerPropertiesFile* lyp = nullptr;
-                const std::string& techId = comp->technology();
-                if (!techId.empty()) {
-                    auto it = m_layerProps.find(techId);
-                    if (it != m_layerProps.end()) {
-                        lyp = &(it->second);
-                    }
-                }
-
-                ComponentMesh mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
-                mesh.upload();
-                m_meshes.emplace(QString::fromStdString(comp->id()), std::move(mesh));
-            }
-        }
+    if (!m_layerGeometry.empty()) {
+        qDebug() << "Built layer geometry for" << m_layerGeometry.size() << "components";
     }
 
     m_needsRebuild = false;
-    m_bvhDirty = true;  // Mark BVH for rebuild
+    m_bvhDirty = true;
 }
 
 void AssemblyView::ensureBVH()
@@ -981,14 +863,58 @@ void AssemblyView::ensureBVH()
 
 void AssemblyView::renderComponents()
 {
-    // Render layer geometry if available
-    if (!m_layerGeometry.empty()) {
-        renderLayerGeometry();
+    if (!m_assembly || m_meshes.empty() || !m_componentShader.isValid()) {
+        return;
     }
 
-    // Also render fallback box meshes for components without layer geometry
-    // (This handles mixed mode: some components with GDS, some without)
+    // Classify components by render mode
+    std::vector<QString> opaqueIds;
+    std::vector<QString> transparentIds;
+    std::vector<QString> wireframeIds;
 
+    for (auto& [id, mesh] : m_meshes) {
+        if (!isComponentVisible(id)) continue;
+
+        Component* comp = m_assembly->component(id.toStdString());
+        if (!comp) continue;
+
+        RenderMode mode = comp->render_mode();
+        if (mode == RenderMode::Hidden) continue;
+
+        switch (mode) {
+            case RenderMode::Wireframe:
+                wireframeIds.push_back(id);
+                break;
+            case RenderMode::Transparent:
+                transparentIds.push_back(id);
+                break;
+            case RenderMode::Solid:
+            case RenderMode::Detailed:
+                opaqueIds.push_back(id);
+                break;
+            default:
+                break;
+        }
+    }
+
+    // Pass 1: Opaque objects (depth write ON)
+    glDepthMask(GL_TRUE);
+    renderOpaquePass(opaqueIds);
+
+    // Pass 2: Transparent objects (depth write OFF, sorted back-to-front)
+    glDepthMask(GL_FALSE);
+    sortBackToFront(transparentIds);
+    renderTransparentPass(transparentIds);
+
+    // Pass 3: Wireframe overlays (depth write OFF)
+    renderWireframePass(wireframeIds);
+
+    // Restore depth write
+    glDepthMask(GL_TRUE);
+}
+
+void AssemblyView::setupShaderUniforms()
+{
     float aspect = static_cast<float>(width()) / height();
     MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
     MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
@@ -1000,79 +926,209 @@ void AssemblyView::renderComponents()
         projection.data()[i] = projMat.GetEntry(i);
     }
 
-    if (m_useInstancing && !m_instanceGroups.empty() && m_componentShaderInstanced.isValid()) {
-        // Instanced rendering path
-        QMatrix4x4 viewProjection = projection * view;
+    QMatrix4x4 mvp = projection * view;
+    QMatrix3x3 normalMat = view.normalMatrix();
+    QMatrix4x4 model;
+    model.setToIdentity();
 
-        m_componentShaderInstanced.bind();
-        m_componentShaderInstanced.setUniformMat4("viewProjection", viewProjection);
-        m_componentShaderInstanced.setUniformMat4("view", view);
-        m_componentShaderInstanced.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
-        m_componentShaderInstanced.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
+    m_componentShader.setUniformMat4("modelViewProjection", mvp);
+    m_componentShader.setUniformMat4("modelView", view);
+    m_componentShader.setUniformMat4("model", model);
+    m_componentShader.setUniformMat3("normalMatrix", normalMat);
+    m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+    m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
-        // Clip plane uniforms
-        m_componentShaderInstanced.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
-        if (m_clipPlane.isEnabled()) {
-            QVector4D plane = m_clipPlane.planeEquation();
-            m_componentShaderInstanced.setUniformVec4("clipPlane", plane);
-        }
+    m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
+    if (m_clipPlane.isEnabled()) {
+        QVector4D plane = m_clipPlane.planeEquation();
+        m_componentShader.setUniformVec4("clipPlane", plane);
+    }
 
-        // Pattern uniforms (disabled by default for instanced rendering)
-        m_componentShaderInstanced.setUniformBool("usePattern", false);
-        m_componentShaderInstanced.setUniformFloat("patternScale", 16.0f);
+    m_componentShader.setUniformBool("usePattern", false);
+    m_componentShader.setUniformFloat("patternScale", 16.0f);
+}
 
-        // Render each instance group with a single draw call
-        for (auto& [sig, group] : m_instanceGroups) {
-            group.mesh.renderInstanced();
-            m_drawCallCount++;
-        }
+void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
+{
+    if (ids.empty()) return;
 
-        m_componentShaderInstanced.release();
-    } else if (!m_meshes.empty() && m_componentShader.isValid()) {
-        // Fallback: non-instanced rendering
-        QMatrix4x4 mvp = projection * view;
-        QMatrix3x3 normalMat = view.normalMatrix();
+    m_componentShader.bind();
+    setupShaderUniforms();
 
-        // Model matrix is identity (meshes are pre-transformed)
-        QMatrix4x4 model;
-        model.setToIdentity();
+    for (const QString& id : ids) {
+        Component* comp = m_assembly->component(id.toStdString());
+        if (!comp) continue;
 
-        m_componentShader.bind();
-        m_componentShader.setUniformMat4("modelViewProjection", mvp);
-        m_componentShader.setUniformMat4("modelView", view);
-        m_componentShader.setUniformMat4("model", model);
-        m_componentShader.setUniformMat3("normalMatrix", normalMat);
-        m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
-        m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
+        bool isSelected = (id == m_selectedComponent);
 
-        // Clip plane uniforms
-        m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
-        if (m_clipPlane.isEnabled()) {
-            QVector4D plane = m_clipPlane.planeEquation();
-            m_componentShader.setUniformVec4("clipPlane", plane);
-        }
+        // If Detailed and has layer geometry, render that
+        if (comp->render_mode() == RenderMode::Detailed && m_layerGeometry.count(id)) {
+            auto& geometry = m_layerGeometry[id];
 
-        // Pattern uniforms (disabled by default)
-        m_componentShader.setUniformBool("usePattern", false);
-        m_componentShader.setUniformFloat("patternScale", 16.0f);
-
-        for (auto& [id, mesh] : m_meshes) {
-            // Skip invisible components
-            if (!isComponentVisible(id)) {
-                continue;
+            float aspect = static_cast<float>(width()) / height();
+            MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
+            MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
+            QMatrix4x4 view, projection;
+            for (int i = 0; i < 16; ++i) {
+                view.data()[i] = viewMat.GetEntry(i);
+                projection.data()[i] = projMat.GetEntry(i);
             }
 
-            QColor color = mesh.color();
-            m_componentShader.setUniformVec4("objectColor",
-                QVector4D(color.redF(), color.greenF(), color.blueF(), color.alphaF()));
-            m_componentShader.setUniformBool("selected", mesh.isSelected());
+            QMatrix4x4 model = geometry.transform;
+            QMatrix4x4 modelView = view * model;
+            QMatrix4x4 mvp = projection * modelView;
+            QMatrix3x3 normalMat = modelView.normalMatrix();
 
-            mesh.render();
+            m_componentShader.setUniformMat4("modelViewProjection", mvp);
+            m_componentShader.setUniformMat4("modelView", modelView);
+            m_componentShader.setUniformMat4("model", model);
+            m_componentShader.setUniformMat3("normalMatrix", normalMat);
+            m_componentShader.setUniformBool("selected", isSelected);
+
+            for (auto& layer : geometry.layers) {
+                if (!layer.visible) continue;
+                QColor lc = layer.color;
+                m_componentShader.setUniformVec4("objectColor",
+                    QVector4D(lc.redF(), lc.greenF(), lc.blueF(), 1.0f));
+                layer.mesh.render();
+                m_drawCallCount++;
+            }
+        } else {
+            // Solid mode or Detailed without GDS: render box mesh
+            auto meshIt = m_meshes.find(id);
+            if (meshIt == m_meshes.end()) continue;
+
+            QColor color = meshIt->second.color();
+            m_componentShader.setUniformVec4("objectColor",
+                QVector4D(color.redF(), color.greenF(), color.blueF(), 1.0f));
+            m_componentShader.setUniformBool("selected", isSelected);
+
+            meshIt->second.render();
             m_drawCallCount++;
         }
-
-        m_componentShader.release();
     }
+
+    m_componentShader.release();
+}
+
+void AssemblyView::renderTransparentPass(const std::vector<QString>& ids)
+{
+    if (ids.empty()) return;
+
+    // Disable face culling so both sides of transparent geometry are visible
+    glDisable(GL_CULL_FACE);
+
+    m_componentShader.bind();
+    setupShaderUniforms();
+
+    for (const QString& id : ids) {
+        auto meshIt = m_meshes.find(id);
+        if (meshIt == m_meshes.end()) continue;
+
+        bool isSelected = (id == m_selectedComponent);
+        QColor color = meshIt->second.color();
+        m_componentShader.setUniformVec4("objectColor",
+            QVector4D(color.redF(), color.greenF(), color.blueF(), 0.35f));
+        m_componentShader.setUniformBool("selected", isSelected);
+
+        meshIt->second.render();
+        m_drawCallCount++;
+    }
+
+    m_componentShader.release();
+
+    // Restore face culling
+    glEnable(GL_CULL_FACE);
+}
+
+void AssemblyView::renderWireframePass(const std::vector<QString>& ids)
+{
+    if (ids.empty()) return;
+
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glLineWidth(1.5f);
+
+    m_componentShader.bind();
+    setupShaderUniforms();
+
+    for (const QString& id : ids) {
+        auto meshIt = m_meshes.find(id);
+        if (meshIt == m_meshes.end()) continue;
+
+        bool isSelected = (id == m_selectedComponent);
+        QColor color = meshIt->second.color();
+        m_componentShader.setUniformVec4("objectColor",
+            QVector4D(color.redF(), color.greenF(), color.blueF(), 1.0f));
+        m_componentShader.setUniformBool("selected", isSelected);
+
+        meshIt->second.render();
+        m_drawCallCount++;
+    }
+
+    m_componentShader.release();
+
+    // Restore fill mode
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+}
+
+VECTOR3D AssemblyView::getComponentCenter(const QString& id) const
+{
+    if (!m_assembly) return VECTOR3D(0, 0, 0);
+
+    Component* comp = m_assembly->component(id.toStdString());
+    if (!comp) return VECTOR3D(0, 0, 0);
+
+    const auto& pos = comp->position();
+    const auto& dims = comp->dimensions();
+
+    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D -Z, chiplet Z -> 3D Y
+    // Convert from um to mm
+    return VECTOR3D(
+        static_cast<float>((pos.x + dims.width / 2.0) / 1000.0),
+        static_cast<float>((pos.z + dims.thickness / 2.0) / 1000.0),
+        static_cast<float>(-(pos.y + dims.height / 2.0) / 1000.0)
+    );
+}
+
+void AssemblyView::sortBackToFront(std::vector<QString>& ids)
+{
+    if (ids.size() <= 1) return;
+
+    VECTOR3D camPos = m_scene.camera().position();
+    std::sort(ids.begin(), ids.end(), [&](const QString& a, const QString& b) {
+        VECTOR3D centerA = getComponentCenter(a);
+        VECTOR3D centerB = getComponentCenter(b);
+        float distA = (centerA - camPos).GetSquaredLength();
+        float distB = (centerB - camPos).GetSquaredLength();
+        return distA > distB;  // Farthest first
+    });
+}
+
+void AssemblyView::onComponentRenderModeChanged(const QString& componentId, RenderMode newMode)
+{
+    if (!m_initialized || !m_assembly) return;
+
+    if (newMode == RenderMode::Detailed) {
+        // Build layer geometry for this component if not already present
+        if (!m_layerGeometry.count(componentId)) {
+            Component* comp = m_assembly->component(componentId.toStdString());
+            if (comp) {
+                makeCurrent();
+                const LayerPropertiesFile* lyp = nullptr;
+                const std::string& techId = comp->technology();
+                if (!techId.empty()) {
+                    auto it = m_layerProps.find(techId);
+                    if (it != m_layerProps.end()) {
+                        lyp = &(it->second);
+                    }
+                }
+                buildLayerGeometry(*comp, lyp);
+                doneCurrent();
+            }
+        }
+    }
+
+    update();
 }
 
 void AssemblyView::renderGrid()
@@ -1767,6 +1823,57 @@ void AssemblyView::mouseDoubleClickEvent(QMouseEvent* event)
         }
     }
 
+    event->accept();
+}
+
+void AssemblyView::contextMenuEvent(QContextMenuEvent* event)
+{
+    if (!m_assembly) {
+        QOpenGLWidget::contextMenuEvent(event);
+        return;
+    }
+
+    QString picked = pickComponent(event->x(), event->y());
+    if (picked.isEmpty()) {
+        QOpenGLWidget::contextMenuEvent(event);
+        return;
+    }
+
+    // Select the right-clicked component
+    selectComponent(picked);
+
+    Component* comp = m_assembly->component(picked.toStdString());
+    if (!comp) return;
+
+    RenderMode currentMode = comp->render_mode();
+
+    QMenu menu(this);
+    QMenu* modeMenu = menu.addMenu("Render Mode");
+
+    struct ModeEntry {
+        RenderMode mode;
+        const char* label;
+    };
+    ModeEntry modes[] = {
+        {RenderMode::Hidden,      "Hidden"},
+        {RenderMode::Wireframe,   "Wireframe"},
+        {RenderMode::Transparent, "Transparent"},
+        {RenderMode::Solid,       "Solid"},
+        {RenderMode::Detailed,    "Detailed"},
+    };
+
+    for (const auto& entry : modes) {
+        QAction* action = modeMenu->addAction(entry.label);
+        action->setCheckable(true);
+        action->setChecked(entry.mode == currentMode);
+        RenderMode targetMode = entry.mode;
+        QString compId = picked;
+        connect(action, &QAction::triggered, this, [this, compId, targetMode]() {
+            emit renderModeChangeRequested(compId, targetMode);
+        });
+    }
+
+    menu.exec(event->globalPos());
     event->accept();
 }
 
