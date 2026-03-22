@@ -5,6 +5,7 @@
 #include "ChipletFormat.h"
 #include "core/Technology.h"
 #include "core/ConnectionStack.h"
+#include "core/flow/FlowConfig.h"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 #include <filesystem>
@@ -158,6 +159,15 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         parse_netlist(root["netlist"], *assembly);
     }
 
+    if (root["flow"]) {
+        FlowConfig flowConfig;
+        FlowDefinition def = flowConfig.parse_flow_definition(root["flow"], *assembly);
+        if (def.working_directory.empty()) {
+            def.working_directory = m_basePath;
+        }
+        assembly->set_flow_definition(std::move(def));
+    }
+
     // design_rules, default_views - skipped for now (future extension)
 
     return assembly;
@@ -189,6 +199,10 @@ void ChipletFormat::parse_assembly_metadata(const YAML::Node& node, Assembly& as
 
     if (node["units"]) {
         assembly.set_units(node["units"].as<std::string>());
+    }
+
+    if (node["assembly_gds"]) {
+        assembly.set_assembly_gds(resolve_path(node["assembly_gds"].as<std::string>()));
     }
 }
 
@@ -515,6 +529,9 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
         out << YAML::Key << "modified" << YAML::Value << assembly.modified();
     }
     out << YAML::Key << "units" << YAML::Value << assembly.units();
+    if (!assembly.assembly_gds().empty()) {
+        out << YAML::Key << "assembly_gds" << YAML::Value << assembly.assembly_gds();
+    }
     out << YAML::EndMap;
 
     // Technologies
@@ -755,6 +772,12 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
         }
 
         out << YAML::EndMap;
+    }
+
+    // Flow definition
+    if (assembly.has_flow()) {
+        FlowConfig flowConfig;
+        flowConfig.write_flow_definition(assembly.flow_definition(), out);
     }
 
     out << YAML::EndMap;

@@ -104,7 +104,7 @@ private:
     void setupViewModeToolbar();
     void setupScriptConsole();
     void setupFlowPanel();
-    void loadFlowFromFile(const QString& path);
+    void populateFlowEngine();
 
     std::unique_ptr<Assembly> m_assembly;
     HierarchyPanel* m_hierarchyPanel = nullptr;
@@ -150,6 +150,10 @@ private:
     QButtonGroup* m_viewModeGroup = nullptr;
     QDoubleSpinBox* m_zOffsetSpinBox = nullptr;
 
+    // Drill-down render mode save/restore
+    QString m_drillDownComponentId;
+    RenderMode m_savedRenderMode = RenderMode::Transparent;
+
     // Async loading state
     struct LoadResult {
         std::unique_ptr<Assembly> assembly;
@@ -169,6 +173,8 @@ private:
     void setupAutoSave();
     void initializeCommandProcessor();
     QString autoSavePath() const;
+    QString resolveAssemblyGdsPath() const;
+    void loadAssemblyGds();
 
     /**
      * Detect GDS cells for components that need them.
