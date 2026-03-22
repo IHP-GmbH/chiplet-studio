@@ -22,6 +22,7 @@ add_executable(chiplet_tests
     test_main.cpp  # Custom main with early Python initialization
     test_chiplet_format.cpp
     test_interfaces.cpp
+    test_netlist.cpp
     test_validation.cpp
     test_klayout_bridge.cpp
     test_gds_loading.cpp
@@ -43,6 +44,7 @@ add_executable(chiplet_tests
     test_tessellation.cpp
     test_integration_final.cpp
     test_layer_stackup_blendergds.cpp
+    test_flow_engine.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -74,6 +76,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/Assembly.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Component.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Interface.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Netlist.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Technology.cpp
     ${CMAKE_SOURCE_DIR}/src/core/LayerStackup.cpp
     ${CMAKE_SOURCE_DIR}/src/core/CommandProcessor.cpp
@@ -103,6 +106,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/view3d/LayerMeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/GDSLayerExtractor.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/ComponentMesh.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/flow/FlowEngine.cpp
 )
 
 # KLayout integration for tests (if available)
