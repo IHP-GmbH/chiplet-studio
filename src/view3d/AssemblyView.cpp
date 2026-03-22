@@ -1902,7 +1902,6 @@ void AssemblyView::contextMenuEvent(QContextMenuEvent* event)
         const char* label;
     };
     ModeEntry modes[] = {
-        {RenderMode::Hidden,      "Hidden"},
         {RenderMode::Wireframe,   "Wireframe"},
         {RenderMode::Transparent, "Transparent"},
         {RenderMode::Solid,       "Solid"},
