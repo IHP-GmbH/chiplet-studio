@@ -44,6 +44,11 @@ const Assembly::string_type& Assembly::units() const
     return m_units;
 }
 
+const Assembly::string_type& Assembly::assembly_gds() const
+{
+    return m_assembly_gds;
+}
+
 // Setters - metadata
 
 void Assembly::set_name(const string_type& name)
@@ -74,6 +79,11 @@ void Assembly::set_modified(const string_type& modified)
 void Assembly::set_units(const string_type& units)
 {
     m_units = units;
+}
+
+void Assembly::set_assembly_gds(const string_type& path)
+{
+    m_assembly_gds = path;
 }
 
 // Components
@@ -173,6 +183,28 @@ const Netlist& Assembly::netlist() const
 Netlist& Assembly::netlist()
 {
     return m_netlist;
+}
+
+// Flow definition
+
+void Assembly::set_flow_definition(const FlowDefinition& def)
+{
+    m_flowDefinition = def;
+}
+
+void Assembly::set_flow_definition(FlowDefinition&& def)
+{
+    m_flowDefinition = std::move(def);
+}
+
+const FlowDefinition& Assembly::flow_definition() const
+{
+    return m_flowDefinition;
+}
+
+bool Assembly::has_flow() const
+{
+    return !m_flowDefinition.empty();
 }
 
 // Technologies

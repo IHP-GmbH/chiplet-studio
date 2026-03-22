@@ -16,6 +16,7 @@
 #include "Interface.h"
 #include "Technology.h"
 #include "Netlist.h"
+#include "flow/FlowDefinition.h"
 
 namespace chiplet {
 
@@ -79,6 +80,7 @@ public:
     const string_type& created() const;
     const string_type& modified() const;
     const string_type& units() const;
+    const string_type& assembly_gds() const;
 
     // Setters - metadata
     void set_name(const string_type& name);
@@ -87,6 +89,7 @@ public:
     void set_created(const string_type& created);
     void set_modified(const string_type& modified);
     void set_units(const string_type& units);
+    void set_assembly_gds(const string_type& path);
 
     // Components
     void add_component(std::unique_ptr<Component> component);
@@ -105,6 +108,12 @@ public:
     void set_netlist(Netlist&& netlist);
     const Netlist& netlist() const;
     Netlist& netlist();
+
+    // Flow definition
+    void set_flow_definition(const FlowDefinition& def);
+    void set_flow_definition(FlowDefinition&& def);
+    const FlowDefinition& flow_definition() const;
+    bool has_flow() const;
 
     // Technologies
     void add_technology(std::unique_ptr<Technology> tech);
@@ -153,10 +162,12 @@ private:
     string_type m_created;
     string_type m_modified;
     string_type m_units = "um";  // Default to micrometers
+    string_type m_assembly_gds;
     component_list_type m_components;
     std::unordered_map<ComponentID, Component*> m_component_index;  // O(1) lookup
     interface_list_type m_interfaces;
     Netlist m_netlist;
+    FlowDefinition m_flowDefinition;
     technology_list_type m_technologies;
     connection_stack_map_type m_connectionStacks;
 };
