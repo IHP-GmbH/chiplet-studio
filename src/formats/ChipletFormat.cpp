@@ -81,6 +81,26 @@ std::string component_type_to_string(ComponentType t)
     return "die";
 }
 
+InterfaceType interface_type_from_string(const std::string& s)
+{
+    if (s == "micro_bump") return InterfaceType::MicroBump;
+    if (s == "copper_pillar") return InterfaceType::CopperPillar;
+    if (s == "tsv") return InterfaceType::TSV;
+    if (s == "wire_bond") return InterfaceType::WireBond;
+    throw ChipletFormatException("Unknown interface type: " + s, 0, "interface.type");
+}
+
+std::string interface_type_to_string(InterfaceType t)
+{
+    switch (t) {
+        case InterfaceType::MicroBump: return "micro_bump";
+        case InterfaceType::CopperPillar: return "copper_pillar";
+        case InterfaceType::TSV: return "tsv";
+        case InterfaceType::WireBond: return "wire_bond";
+    }
+    return "micro_bump";
+}
+
 ChipletFormat::ChipletFormat() = default;
 ChipletFormat::~ChipletFormat() = default;
 
@@ -130,7 +150,11 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
     // Auto-calculate z for components with connection stacks and z == 0.0
     auto_calculate_z(*assembly);
 
-    // interfaces, netlist, design_rules, default_views - skipped for now (future extension)
+    if (root["interfaces"]) {
+        parse_interfaces(root["interfaces"], *assembly);
+    }
+
+    // netlist, design_rules, default_views - skipped for now (future extension)
 
     return assembly;
 }
@@ -355,6 +379,56 @@ void ChipletFormat::parse_connection_stacks(const YAML::Node& node, Assembly& as
     }
 }
 
+void ChipletFormat::parse_interfaces(const YAML::Node& node, Assembly& assembly)
+{
+    if (!node.IsSequence()) {
+        throw ChipletFormatException("Expected a sequence", 0, "interfaces");
+    }
+
+    for (const auto& ifaceNode : node) {
+        if (!ifaceNode["id"]) {
+            throw ChipletFormatException("Missing required field", 0, "interface.id");
+        }
+        if (!ifaceNode["type"]) {
+            throw ChipletFormatException("Missing required field", 0, "interface.type");
+        }
+
+        std::string id = ifaceNode["id"].as<std::string>();
+        InterfaceType type = interface_type_from_string(ifaceNode["type"].as<std::string>());
+
+        auto iface = std::make_unique<Interface>(id, type);
+
+        if (ifaceNode["from"]) {
+            const YAML::Node& fromNode = ifaceNode["from"];
+            InterfaceEndpoint ep;
+            if (fromNode["component"]) ep.component = fromNode["component"].as<std::string>();
+            if (fromNode["surface"]) ep.surface = fromNode["surface"].as<std::string>();
+            if (fromNode["port_layer"]) ep.portLayer = fromNode["port_layer"].as<std::string>();
+            iface->set_from(ep);
+        }
+
+        if (ifaceNode["to"]) {
+            const YAML::Node& toNode = ifaceNode["to"];
+            InterfaceEndpoint ep;
+            if (toNode["component"]) ep.component = toNode["component"].as<std::string>();
+            if (toNode["surface"]) ep.surface = toNode["surface"].as<std::string>();
+            if (toNode["port_layer"]) ep.portLayer = toNode["port_layer"].as<std::string>();
+            iface->set_to(ep);
+        }
+
+        if (ifaceNode["physical"]) {
+            const YAML::Node& physNode = ifaceNode["physical"];
+            InterfacePhysical phys;
+            if (physNode["pitch"]) phys.pitch = physNode["pitch"].as<double>();
+            if (physNode["diameter"]) phys.diameter = physNode["diameter"].as<double>();
+            if (physNode["height"]) phys.height = physNode["height"].as<double>();
+            iface->set_physical(phys);
+        }
+
+        assembly.add_interface(std::move(iface));
+    }
+}
+
 void ChipletFormat::auto_calculate_z(Assembly& assembly)
 {
     for (const auto& comp : assembly.components()) {
@@ -542,6 +616,51 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 for (const auto& [key, value] : meta) {
                     out << YAML::Key << key << YAML::Value << value;
                 }
+                out << YAML::EndMap;
+            }
+
+            out << YAML::EndMap;
+        }
+
+        out << YAML::EndSeq;
+    }
+
+    // Interfaces
+    if (!assembly.interfaces().empty()) {
+        out << YAML::Key << "interfaces" << YAML::Value << YAML::BeginSeq;
+
+        for (const auto& iface : assembly.interfaces()) {
+            out << YAML::BeginMap;
+            out << YAML::Key << "id" << YAML::Value << iface->id();
+            out << YAML::Key << "type" << YAML::Value << interface_type_to_string(iface->type());
+
+            // From endpoint
+            const auto& from = iface->from();
+            if (!from.component.empty()) {
+                out << YAML::Key << "from" << YAML::Value << YAML::Flow << YAML::BeginMap;
+                out << YAML::Key << "component" << YAML::Value << from.component;
+                out << YAML::Key << "surface" << YAML::Value << from.surface;
+                out << YAML::Key << "port_layer" << YAML::Value << from.portLayer;
+                out << YAML::EndMap;
+            }
+
+            // To endpoint
+            const auto& to = iface->to();
+            if (!to.component.empty()) {
+                out << YAML::Key << "to" << YAML::Value << YAML::Flow << YAML::BeginMap;
+                out << YAML::Key << "component" << YAML::Value << to.component;
+                out << YAML::Key << "surface" << YAML::Value << to.surface;
+                out << YAML::Key << "port_layer" << YAML::Value << to.portLayer;
+                out << YAML::EndMap;
+            }
+
+            // Physical parameters
+            const auto& phys = iface->physical();
+            if (phys.pitch != 0 || phys.diameter != 0 || phys.height != 0) {
+                out << YAML::Key << "physical" << YAML::Value << YAML::Flow << YAML::BeginMap;
+                out << YAML::Key << "pitch" << YAML::Value << phys.pitch;
+                out << YAML::Key << "diameter" << YAML::Value << phys.diameter;
+                out << YAML::Key << "height" << YAML::Value << phys.height;
                 out << YAML::EndMap;
             }
 
