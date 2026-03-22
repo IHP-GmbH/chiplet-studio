@@ -10,6 +10,7 @@
 #include "FlowPanel.h"
 #include "CellSelectionDialog.h"
 #include "view2d/KLayout2DView.h"
+#include "view2d/CellComponentMapper.h"
 #include "view3d/AssemblyView.h"
 #include "view3d/ClipPlane.h"
 #include "view3d/GDSAnalyzer.h"
@@ -42,7 +43,6 @@
 #include <QFileInfo>
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
-#include <yaml-cpp/yaml.h>
 
 namespace chiplet {
 
@@ -208,12 +208,46 @@ void MainWindow::setupPanels()
     connect(m_hierarchyPanel, &HierarchyPanel::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
 
-    // DrillDownPanel back button -> hide 2D dock and raise Properties
+    // DrillDownPanel back button -> context-dependent behavior
     connect(m_drillDownPanel, &DrillDownPanel::backRequested,
             this, [this]() {
-                m_klayout2DDock->hide();
-                m_propertiesDock->show();
-                m_propertiesDock->raise();
+                if (m_drillDownPanel->panelMode() == DrillDownPanel::PanelMode::DrillDown) {
+                    // Restore render mode from before drill-down
+                    if (!m_drillDownComponentId.isEmpty() && m_assembly) {
+                        Component* comp = m_assembly->component(m_drillDownComponentId.toStdString());
+                        if (comp) {
+                            comp->set_render_mode(m_savedRenderMode);
+                            m_assemblyView->onComponentRenderModeChanged(
+                                m_drillDownComponentId, m_savedRenderMode);
+                        }
+                        m_drillDownComponentId.clear();
+                    }
+                    // Return to assembly mode (DrillDownPanel reloads assembly GDS)
+                    m_drillDownPanel->clearContext();
+                } else {
+                    // From assembly or empty mode, hide dock
+                    m_klayout2DDock->hide();
+                    m_propertiesDock->show();
+                    m_propertiesDock->raise();
+                }
+            });
+
+    // 2D -> 3D: cell navigation in assembly view highlights component in 3D
+    connect(m_drillDownPanel, &DrillDownPanel::componentNavigated,
+            this, [this](const QString& componentId) {
+                m_assemblyView->selectComponent(componentId);
+                m_hierarchyPanel->selectComponent(componentId);
+            });
+
+    // 3D -> 2D: component click navigates to wrapper cell (only in assembly mode)
+    connect(m_assemblyView, &AssemblyView::componentClicked,
+            this, [this](const QString& componentId) {
+                if (m_drillDownPanel->panelMode() == DrillDownPanel::PanelMode::Assembly) {
+                    QString cell = m_drillDownPanel->cellMapper().primaryCellForComponent(componentId);
+                    if (!cell.isEmpty()) {
+                        m_klayout2DView->setCurrentCell(cell);
+                    }
+                }
             });
 
     // Hierarchy visibility toggle -> 3D View
@@ -286,6 +320,14 @@ void MainWindow::onFileNew()
 
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
+
+    // Clear flow panel
+    if (m_flowEngine) {
+        m_flowEngine->clear_steps();
+    }
+    if (m_flowPanel) {
+        m_flowPanel->set_flow_engine(nullptr);
+    }
 
     // Reset autosave timer
     if (m_autoSaveTimer) {
@@ -441,8 +483,11 @@ void MainWindow::onAssemblyLoadFinished()
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
 
-    // Parse flow section if present
-    loadFlowFromFile(m_currentFilePath);
+    // Populate flow engine from assembly's flow definition
+    populateFlowEngine();
+
+    // Load assembly GDS into 2D panel if available
+    loadAssemblyGds();
 
     // Reset autosave timer
     if (m_autoSaveTimer) {
@@ -458,6 +503,70 @@ void MainWindow::onLoadCanceled()
     m_loadCanceled = true;
     // The watcher will still finish, but we'll ignore the result
     statusBar()->showMessage("Load canceled", 2000);
+}
+
+QString MainWindow::resolveAssemblyGdsPath() const
+{
+    if (!m_assembly) return {};
+
+    // 1. Explicit assembly_gds field
+    if (!m_assembly->assembly_gds().empty()) {
+        QString path = QString::fromStdString(m_assembly->assembly_gds());
+        if (QFile::exists(path)) {
+            return path;
+        }
+    }
+
+    // 2. Auto-detect from interposer layout path
+    for (const auto& comp : m_assembly->components()) {
+        if (comp->type() == ComponentType::Interposer && !comp->layout_path().empty()) {
+            QFileInfo info(QString::fromStdString(comp->layout_path()));
+            QString baseName = info.completeBaseName();
+            QString dir = info.absolutePath();
+            QString suffix = info.suffix();
+
+            // Try replacing "_interposer" with "_complete"
+            if (baseName.contains("_interposer", Qt::CaseInsensitive)) {
+                QString candidate = dir + "/" +
+                    baseName.replace("_interposer", "_complete", Qt::CaseInsensitive) +
+                    "." + suffix;
+                if (QFile::exists(candidate)) {
+                    return candidate;
+                }
+            }
+
+            // Try appending "_complete" before extension
+            QString candidate2 = dir + "/" + info.completeBaseName() + "_complete." + suffix;
+            if (QFile::exists(candidate2)) {
+                return candidate2;
+            }
+
+            break;  // Only check first interposer
+        }
+    }
+
+    return {};
+}
+
+void MainWindow::loadAssemblyGds()
+{
+    if (!m_assembly) return;
+
+    QString assemblyGds = resolveAssemblyGdsPath();
+    if (assemblyGds.isEmpty()) return;
+
+    // Find best LYP from technologies
+    QString lypPath;
+    for (const auto& tech : m_assembly->technologies()) {
+        if (!tech->layer_properties_path().empty()) {
+            lypPath = QString::fromStdString(tech->layer_properties_path());
+            break;
+        }
+    }
+
+    m_drillDownPanel->setAssemblyGds(assemblyGds, lypPath, *m_assembly);
+    m_klayout2DDock->show();
+    m_klayout2DDock->raise();
 }
 
 void MainWindow::initializeCommandProcessor()
@@ -644,6 +753,12 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
         return;
     }
 
+    // Save render mode for restore on back
+    m_drillDownComponentId = componentId;
+    m_savedRenderMode = comp->render_mode();
+    comp->set_render_mode(RenderMode::Detailed);
+    m_assemblyView->onComponentRenderModeChanged(componentId, RenderMode::Detailed);
+
     // Get layer properties from technology
     QString lypPath;
     QString techName;
@@ -691,6 +806,9 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
 
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
+
+    // Populate flow engine from recovered assembly
+    populateFlowEngine();
 
     // Reset autosave timer
     if (m_autoSaveTimer) {
@@ -917,9 +1035,9 @@ void MainWindow::setupFlowPanel()
     viewMenu->addAction(toggleFlow);
 }
 
-void MainWindow::loadFlowFromFile(const QString& path)
+void MainWindow::populateFlowEngine()
 {
-    if (path.isEmpty() || !m_assembly || !m_flowEngine) {
+    if (!m_assembly || !m_flowEngine) {
         if (m_flowPanel) {
             m_flowPanel->set_flow_engine(nullptr);
         }
@@ -928,29 +1046,26 @@ void MainWindow::loadFlowFromFile(const QString& path)
 
     m_flowEngine->clear_steps();
 
-    try {
-        YAML::Node root = YAML::LoadFile(path.toStdString());
-        if (root["flow"]) {
-            FlowConfig config;
-            config.parse_flow(root["flow"], *m_assembly, *m_flowEngine);
-
-            // Default working directory to the .chiplet file's directory
-            if (m_flowEngine->working_directory().empty()) {
-                QFileInfo fi(path);
-                m_flowEngine->set_working_directory(
-                    fi.absolutePath().toStdString());
-            }
-
-            m_flowPanel->set_flow_engine(m_flowEngine);
-            qDebug() << "Loaded flow pipeline with"
-                     << m_flowEngine->step_count() << "steps";
-        } else {
-            m_flowPanel->set_flow_engine(nullptr);
-        }
-    } catch (const std::exception& e) {
-        qWarning() << "Failed to parse flow section:" << e.what();
+    if (!m_assembly->has_flow()) {
         m_flowPanel->set_flow_engine(nullptr);
+        return;
     }
+
+    const FlowDefinition& def = m_assembly->flow_definition();
+
+    m_flowEngine->set_working_directory(def.working_directory);
+
+    for (const auto& [key, value] : def.environment) {
+        m_flowEngine->set_environment(key, value);
+    }
+
+    for (const auto& step : def.steps) {
+        m_flowEngine->add_step(step);
+    }
+
+    m_flowPanel->set_flow_engine(m_flowEngine);
+    qDebug() << "Loaded flow pipeline with"
+             << m_flowEngine->step_count() << "steps";
 }
 
 void MainWindow::setupAutoSave()
