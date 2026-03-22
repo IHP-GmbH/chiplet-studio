@@ -21,6 +21,7 @@ enable_testing()
 add_executable(chiplet_tests
     test_main.cpp  # Custom main with early Python initialization
     test_chiplet_format.cpp
+    test_interfaces.cpp
     test_validation.cpp
     test_klayout_bridge.cpp
     test_gds_loading.cpp
