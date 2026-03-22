@@ -10,6 +10,7 @@
 #define CHIPLET_CORE_FLOW_FLOWCONFIG_H
 
 #include <string>
+#include "FlowDefinition.h"
 
 // Forward declarations to avoid exposing yaml-cpp in header
 namespace YAML {
@@ -41,8 +42,22 @@ public:
      */
     void write_flow(const FlowEngine& engine, YAML::Emitter& out);
 
+    /**
+     * Parse a flow section from YAML into a FlowDefinition (thread-safe, no QObject).
+     * Variables (${...}) are resolved against the Assembly at parse time.
+     * @throws ChipletFormatException on parse errors or unresolved variables
+     */
+    FlowDefinition parse_flow_definition(const YAML::Node& node,
+                                         const Assembly& assembly);
+
+    /**
+     * Write a FlowDefinition to a YAML emitter.
+     */
+    void write_flow_definition(const FlowDefinition& def, YAML::Emitter& out);
+
 private:
     FlowStep parse_step(const YAML::Node& node, const Assembly& assembly);
+    void write_step(const FlowStep& step, YAML::Emitter& out);
     std::string resolve_variables(const std::string& input,
                                   const Assembly& assembly);
     std::string resolve_field(const std::string& category,
