@@ -20,8 +20,8 @@ HierarchyPanel::HierarchyPanel(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
 
     m_tree = new QTreeWidget(this);
-    m_tree->setHeaderLabels({"Name", "Type", "Technology"});
-    m_tree->setColumnCount(3);
+    m_tree->setHeaderLabels({"Name", "Type", "Technology", "Mode"});
+    m_tree->setColumnCount(4);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
     m_tree->setAlternatingRowColors(true);
@@ -93,6 +93,7 @@ void HierarchyPanel::refresh()
         item->setText(0, QString::fromStdString(comp->id()));
         item->setText(1, typeToString(comp->type()));
         item->setText(2, QString::fromStdString(comp->technology()));
+        item->setText(3, renderModeToString(comp->render_mode()));
         item->setIcon(0, iconForComponent(*comp));
         item->setData(0, Qt::UserRole, QString::fromStdString(comp->id()));
 
@@ -107,6 +108,7 @@ void HierarchyPanel::refresh()
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
     m_tree->blockSignals(false);
 }
@@ -263,6 +265,31 @@ QString HierarchyPanel::typeToString(ComponentType type) const
             return "Substrate";
     }
     return "Unknown";
+}
+
+void HierarchyPanel::updateRenderModeDisplay(const QString& componentId)
+{
+    QTreeWidgetItem* item = findItemById(componentId);
+    if (!item || !m_assembly) return;
+
+    Component* comp = m_assembly->component(componentId.toStdString());
+    if (!comp) return;
+
+    m_tree->blockSignals(true);
+    item->setText(3, renderModeToString(comp->render_mode()));
+    m_tree->blockSignals(false);
+}
+
+QString HierarchyPanel::renderModeToString(RenderMode mode)
+{
+    switch (mode) {
+        case RenderMode::Hidden:      return "Hidden";
+        case RenderMode::Wireframe:   return "Wire";
+        case RenderMode::Transparent: return "Trans";
+        case RenderMode::Solid:       return "Solid";
+        case RenderMode::Detailed:    return "Detail";
+    }
+    return "?";
 }
 
 QTreeWidgetItem* HierarchyPanel::findItemById(const QString& componentId) const
