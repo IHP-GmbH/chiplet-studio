@@ -5,6 +5,7 @@
 #include "CommandFactory.h"
 #include "commands/CmdMoveComponent.h"
 #include "commands/CmdRenameComponent.h"
+#include "commands/CmdSetRenderMode.h"
 
 #include <QDebug>
 
@@ -44,6 +45,7 @@ void CommandFactory::register_builtin_commands()
 {
     register_command("MoveComponent", CmdMoveComponent::deserialize);
     register_command("RenameComponent", CmdRenameComponent::deserialize);
+    register_command("SetRenderMode", CmdSetRenderMode::deserialize);
 }
 
 std::function<CommandPtr(const std::string&, const nlohmann::json&)>

@@ -85,6 +85,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/CommandFactory.cpp
     ${CMAKE_SOURCE_DIR}/src/core/commands/CmdMoveComponent.cpp
     ${CMAKE_SOURCE_DIR}/src/core/commands/CmdRenameComponent.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/commands/CmdSetRenderMode.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ChipletFormat.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayoutBridge.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp

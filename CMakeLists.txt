@@ -114,6 +114,7 @@ set(CORE_SOURCES
     src/core/CommandFactory.cpp
     src/core/commands/CmdMoveComponent.cpp
     src/core/commands/CmdRenameComponent.cpp
+    src/core/commands/CmdSetRenderMode.cpp
 )
 
 set(FLOW_SOURCES
