@@ -314,8 +314,64 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
     }
 }
 
+GDSBoundingBox GDSLayerExtractor::extractBoundingBox(
+    const std::string& gds_path,
+    const std::string& cell_name)
+{
+    GDSBoundingBox bbox;
+
+    try {
+        tl::InputStream stream(gds_path);
+        db::Reader reader(stream);
+
+        db::Layout layout;
+        reader.read(layout);
+
+        // Find the cell
+        db::cell_index_type cell_index;
+        if (cell_name.empty()) {
+            auto top_it = layout.begin_top_down();
+            if (top_it == layout.end_top_cells()) {
+                return bbox;
+            }
+            cell_index = *top_it;
+        } else {
+            auto found = layout.cell_by_name(cell_name.c_str());
+            if (!found.first) {
+                return bbox;
+            }
+            cell_index = found.second;
+        }
+
+        const db::Cell& cell = layout.cell(cell_index);
+        db::Box db_bbox = cell.bbox();
+
+        if (!db_bbox.empty()) {
+            double dbu = layout.dbu();
+            bbox.x_min = db_bbox.left() * dbu;
+            bbox.y_min = db_bbox.bottom() * dbu;
+            bbox.x_max = db_bbox.right() * dbu;
+            bbox.y_max = db_bbox.top() * dbu;
+        }
+
+    } catch (const tl::Exception& e) {
+        std::cerr << "GDSLayerExtractor::extractBoundingBox: " << e.msg() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "GDSLayerExtractor::extractBoundingBox: " << e.what() << std::endl;
+    }
+
+    return bbox;
+}
+
 #else
 // Stub implementations when KLayout is not available
+
+GDSBoundingBox GDSLayerExtractor::extractBoundingBox(
+    const std::string& /*gds_path*/,
+    const std::string& /*cell_name*/)
+{
+    return {};
+}
 
 std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFile(
     const std::string& /*gds_path*/,

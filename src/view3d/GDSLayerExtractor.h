@@ -76,6 +76,20 @@ struct ExtractionConfig {
 };
 
 /**
+ * 2D bounding box for a GDS cell (in micrometers)
+ */
+struct GDSBoundingBox {
+    double x_min = 0.0;
+    double y_min = 0.0;
+    double x_max = 0.0;
+    double y_max = 0.0;
+
+    double width() const { return x_max - x_min; }
+    double height() const { return y_max - y_min; }
+    bool is_valid() const { return x_max > x_min && y_max > y_min; }
+};
+
+/**
  * GDSLayerExtractor extracts polygon geometry from GDS layouts
  */
 class GDSLayerExtractor {
@@ -129,6 +143,17 @@ public:
     std::map<LayerKey, LayerPolygons> extractFromFileCells(
         const std::string& gds_path,
         const std::vector<std::string>& cell_names);
+
+    /**
+     * Get the cell bounding box from a GDS file without extracting polygons.
+     * Uses KLayout's cached cell bbox (O(1) after file load).
+     * @param gds_path Path to GDS file
+     * @param cell_name Cell name (auto-detect top cell if empty)
+     * @return Bounding box in micrometers, invalid if extraction fails
+     */
+    static GDSBoundingBox extractBoundingBox(
+        const std::string& gds_path,
+        const std::string& cell_name = "");
 
     // Get statistics from last extraction
     size_t lastLayerCount() const { return m_lastLayerCount; }
