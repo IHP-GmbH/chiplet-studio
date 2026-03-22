@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "core/flow/FlowConfig.h"
+#include "core/flow/FlowDefinition.h"
 #include "core/flow/FlowEngine.h"
 #include "core/flow/FlowStep.h"
 #include "core/Assembly.h"
@@ -452,4 +453,96 @@ TEST_F(FlowConfigTest, WriteFlowRoundtrip) {
     EXPECT_EQ(lb->tool_path, "/bin/echo");
     ASSERT_EQ(lb->depends_on.size(), 1u);
     EXPECT_EQ(lb->depends_on[0], "step_a");
+}
+
+// -- FlowDefinition tests ---------------------------------------------------
+
+TEST_F(FlowConfigTest, ParseFlowDefinition) {
+    auto asm_ = make_test_assembly();
+    std::string yaml = R"(
+working_directory: "/work/${assembly.name}"
+environment:
+  PDK: /opt/pdk
+steps:
+  - id: step_a
+    name: "Step A"
+    tool: /bin/echo
+    args: ["${assembly.name}"]
+  - id: step_b
+    tool: /bin/echo
+    depends_on: [step_a]
+)";
+
+    YAML::Node node = YAML::Load(yaml);
+    FlowConfig config;
+    FlowDefinition def = config.parse_flow_definition(node, *asm_);
+
+    EXPECT_EQ(def.working_directory, "/work/TestDesign");
+    ASSERT_EQ(def.environment.size(), 1u);
+    EXPECT_EQ(def.environment.at("PDK"), "/opt/pdk");
+    ASSERT_EQ(def.step_count(), 2u);
+    EXPECT_EQ(def.steps[0].id, "step_a");
+    EXPECT_EQ(def.steps[0].name, "Step A");
+    EXPECT_EQ(def.steps[0].args[0], "TestDesign");
+    EXPECT_EQ(def.steps[1].id, "step_b");
+    ASSERT_EQ(def.steps[1].depends_on.size(), 1u);
+    EXPECT_EQ(def.steps[1].depends_on[0], "step_a");
+}
+
+TEST_F(FlowConfigTest, WriteFlowDefinitionRoundtrip) {
+    FlowDefinition original;
+    original.working_directory = "/tmp/test";
+    original.environment["KEY"] = "value";
+
+    FlowStep a;
+    a.id = "step_a";
+    a.name = "Step A";
+    a.interpreter = "python3";
+    a.tool_path = "script.py";
+    a.args = {"--input", "file.gds"};
+    original.steps.push_back(a);
+
+    FlowStep b;
+    b.id = "step_b";
+    b.name = "step_b";
+    b.tool_path = "/bin/echo";
+    b.depends_on = {"step_a"};
+    original.steps.push_back(b);
+
+    // Write
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+    FlowConfig config;
+    config.write_flow_definition(original, out);
+    out << YAML::EndMap;
+
+    // Parse back
+    YAML::Node root = YAML::Load(out.c_str());
+    ASSERT_TRUE(root["flow"]);
+
+    auto asm_ = make_test_assembly();
+    FlowDefinition loaded = config.parse_flow_definition(root["flow"], *asm_);
+
+    EXPECT_EQ(loaded.working_directory, "/tmp/test");
+    EXPECT_EQ(loaded.environment.at("KEY"), "value");
+    ASSERT_EQ(loaded.step_count(), 2u);
+    EXPECT_EQ(loaded.steps[0].id, "step_a");
+    EXPECT_EQ(loaded.steps[0].interpreter, "python3");
+    EXPECT_EQ(loaded.steps[0].tool_path, "script.py");
+    EXPECT_EQ(loaded.steps[1].id, "step_b");
+    ASSERT_EQ(loaded.steps[1].depends_on.size(), 1u);
+    EXPECT_EQ(loaded.steps[1].depends_on[0], "step_a");
+}
+
+TEST_F(FlowConfigTest, EmptyFlowDefinition) {
+    FlowDefinition def;
+    EXPECT_TRUE(def.empty());
+    EXPECT_EQ(def.step_count(), 0u);
+
+    FlowStep s;
+    s.id = "one";
+    s.tool_path = "/bin/echo";
+    def.steps.push_back(s);
+    EXPECT_FALSE(def.empty());
+    EXPECT_EQ(def.step_count(), 1u);
 }
