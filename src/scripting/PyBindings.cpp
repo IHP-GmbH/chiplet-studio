@@ -180,6 +180,16 @@ PYBIND11_MODULE(chiplet_studio, m) {
             }
             return result;
         }, py::return_value_policy::reference, "Get all components")
+        // Interface access
+        .def("interface", &Assembly::interface, py::return_value_policy::reference,
+             py::arg("id"), "Get interface by ID")
+        .def("interfaces", [](Assembly& a) {
+            std::vector<Interface*> result;
+            for (const auto& i : a.interfaces()) {
+                result.push_back(i.get());
+            }
+            return result;
+        }, py::return_value_policy::reference, "Get all interfaces")
         // Technology access
         .def("technology", &Assembly::technology, py::return_value_policy::reference,
              py::arg("id"), "Get technology by ID")
@@ -222,6 +232,50 @@ PYBIND11_MODULE(chiplet_studio, m) {
         .def("__repr__", [](const Assembly& a) {
             return "<Assembly '" + a.name() + "' with " +
                    std::to_string(a.components().size()) + " components>";
+        });
+
+    // InterfaceType enum
+    py::enum_<InterfaceType>(m, "InterfaceType")
+        .value("MicroBump", InterfaceType::MicroBump)
+        .value("CopperPillar", InterfaceType::CopperPillar)
+        .value("TSV", InterfaceType::TSV)
+        .value("WireBond", InterfaceType::WireBond)
+        .export_values();
+
+    // InterfaceEndpoint struct
+    py::class_<InterfaceEndpoint>(m, "InterfaceEndpoint")
+        .def(py::init<>())
+        .def_readwrite("component", &InterfaceEndpoint::component)
+        .def_readwrite("surface", &InterfaceEndpoint::surface)
+        .def_readwrite("port_layer", &InterfaceEndpoint::portLayer)
+        .def("__repr__", [](const InterfaceEndpoint& ep) {
+            return "<InterfaceEndpoint " + ep.component + ":" + ep.surface + ">";
+        });
+
+    // InterfacePhysical struct
+    py::class_<InterfacePhysical>(m, "InterfacePhysical")
+        .def(py::init<>())
+        .def_readwrite("pitch", &InterfacePhysical::pitch)
+        .def_readwrite("diameter", &InterfacePhysical::diameter)
+        .def_readwrite("height", &InterfacePhysical::height)
+        .def("__repr__", [](const InterfacePhysical& p) {
+            return "<InterfacePhysical pitch=" + std::to_string(p.pitch) +
+                   " diameter=" + std::to_string(p.diameter) +
+                   " height=" + std::to_string(p.height) + ">";
+        });
+
+    // Interface class
+    py::class_<Interface>(m, "Interface")
+        .def_property_readonly("id", &Interface::id)
+        .def_property_readonly("type", &Interface::type)
+        .def_property_readonly("from_endpoint", &Interface::from,
+             py::return_value_policy::reference)
+        .def_property_readonly("to_endpoint", &Interface::to,
+             py::return_value_policy::reference)
+        .def_property_readonly("physical", &Interface::physical,
+             py::return_value_policy::reference)
+        .def("__repr__", [](const Interface& i) {
+            return "<Interface '" + i.id() + "'>";
         });
 
     // ChipletFormat for loading/saving
