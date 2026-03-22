@@ -74,11 +74,13 @@ void DrillDownPanel::setupUI()
     navLayout->addStretch();
 
     m_cellNavLabel = new QLabel("Cell:", navBar);
+    m_cellNavLabel->setVisible(false);
     navLayout->addWidget(m_cellNavLabel);
 
     m_cellCombo = new QComboBox(navBar);
     m_cellCombo->setMinimumWidth(120);
     m_cellCombo->setToolTip("Select cell to display");
+    m_cellCombo->setVisible(false);
     navLayout->addWidget(m_cellCombo);
 
     m_layerToggle = new QToolButton(navBar);
@@ -274,8 +276,6 @@ void DrillDownPanel::setContext(const QString& componentId,
     m_componentId = componentId;
     m_panelMode = PanelMode::DrillDown;
     m_backButton->setVisible(true);
-    m_cellNavLabel->setVisible(true);
-    m_cellCombo->setVisible(true);
 
     QString label = "Component: " + componentName;
     if (!technologyName.isEmpty()) {
