@@ -118,6 +118,7 @@ set(CORE_SOURCES
 
 set(FLOW_SOURCES
     src/core/flow/FlowEngine.cpp
+    src/core/flow/FlowConfig.cpp
 )
 
 set(FORMAT_SOURCES
