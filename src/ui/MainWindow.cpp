@@ -212,16 +212,6 @@ void MainWindow::setupPanels()
     connect(m_drillDownPanel, &DrillDownPanel::backRequested,
             this, [this]() {
                 if (m_drillDownPanel->panelMode() == DrillDownPanel::PanelMode::DrillDown) {
-                    // Restore render mode from before drill-down
-                    if (!m_drillDownComponentId.isEmpty() && m_assembly) {
-                        Component* comp = m_assembly->component(m_drillDownComponentId.toStdString());
-                        if (comp) {
-                            comp->set_render_mode(m_savedRenderMode);
-                            m_assemblyView->onComponentRenderModeChanged(
-                                m_drillDownComponentId, m_savedRenderMode);
-                        }
-                        m_drillDownComponentId.clear();
-                    }
                     // Return to assembly mode (DrillDownPanel reloads assembly GDS)
                     m_drillDownPanel->clearContext();
                 } else {
@@ -555,18 +545,26 @@ void MainWindow::loadAssemblyGds()
     QString assemblyGds = resolveAssemblyGdsPath();
     if (assemblyGds.isEmpty()) return;
 
-    // Find best LYP from technologies
-    QString lypPath;
-    for (const auto& tech : m_assembly->technologies()) {
-        if (!tech->layer_properties_path().empty()) {
-            lypPath = QString::fromStdString(tech->layer_properties_path());
-            break;
-        }
-    }
+    // Defer loading to next event loop iteration so KLayout widget
+    // initialization completes before we start loading layouts.
+    // Without this, KLayout's hierarchy panel initialization
+    // can trigger a menu assertion during first-time widget creation.
+    QTimer::singleShot(0, this, [this, assemblyGds]() {
+        if (!m_assembly) return;
 
-    m_drillDownPanel->setAssemblyGds(assemblyGds, lypPath, *m_assembly);
-    m_klayout2DDock->show();
-    m_klayout2DDock->raise();
+        // Find best LYP from technologies
+        QString lypPath;
+        for (const auto& tech : m_assembly->technologies()) {
+            if (!tech->layer_properties_path().empty()) {
+                lypPath = QString::fromStdString(tech->layer_properties_path());
+                break;
+            }
+        }
+
+        m_drillDownPanel->setAssemblyGds(assemblyGds, lypPath, *m_assembly);
+        m_klayout2DDock->show();
+        m_klayout2DDock->raise();
+    });
 }
 
 void MainWindow::initializeCommandProcessor()
@@ -752,12 +750,6 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
         m_drillDownPanel->clearContext();
         return;
     }
-
-    // Save render mode for restore on back
-    m_drillDownComponentId = componentId;
-    m_savedRenderMode = comp->render_mode();
-    comp->set_render_mode(RenderMode::Detailed);
-    m_assemblyView->onComponentRenderModeChanged(componentId, RenderMode::Detailed);
 
     // Get layer properties from technology
     QString lypPath;

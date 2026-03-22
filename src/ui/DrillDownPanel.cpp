@@ -73,8 +73,8 @@ void DrillDownPanel::setupUI()
 
     navLayout->addStretch();
 
-    auto* cellLabel = new QLabel("Cell:", navBar);
-    navLayout->addWidget(cellLabel);
+    m_cellNavLabel = new QLabel("Cell:", navBar);
+    navLayout->addWidget(m_cellNavLabel);
 
     m_cellCombo = new QComboBox(navBar);
     m_cellCombo->setMinimumWidth(120);
@@ -244,9 +244,10 @@ void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPa
         m_cellMapper->build(assembly, m_view2d->cellNames());
         m_panelMode = PanelMode::Assembly;
         m_backButton->setVisible(false);
+        m_cellNavLabel->setVisible(false);
+        m_cellCombo->setVisible(false);
         m_contextLabel->setText("Assembly");
-        updateSidePanels();
-        populateCellCombo();
+        populateLayerList();
     }
 }
 
@@ -259,10 +260,11 @@ void DrillDownPanel::returnToAssembly()
     m_view2d->loadLayout(m_assemblyGdsPath, m_assemblyLypPath);
     m_panelMode = PanelMode::Assembly;
     m_backButton->setVisible(false);
+    m_cellNavLabel->setVisible(false);
+    m_cellCombo->setVisible(false);
     m_contextLabel->setText("Assembly");
     m_componentId.clear();
-    updateSidePanels();
-    populateCellCombo();
+    populateLayerList();
 }
 
 void DrillDownPanel::setContext(const QString& componentId,
@@ -272,6 +274,8 @@ void DrillDownPanel::setContext(const QString& componentId,
     m_componentId = componentId;
     m_panelMode = PanelMode::DrillDown;
     m_backButton->setVisible(true);
+    m_cellNavLabel->setVisible(true);
+    m_cellCombo->setVisible(true);
 
     QString label = "Component: " + componentName;
     if (!technologyName.isEmpty()) {

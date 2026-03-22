@@ -150,10 +150,6 @@ private:
     QButtonGroup* m_viewModeGroup = nullptr;
     QDoubleSpinBox* m_zOffsetSpinBox = nullptr;
 
-    // Drill-down render mode save/restore
-    QString m_drillDownComponentId;
-    RenderMode m_savedRenderMode = RenderMode::Transparent;
-
     // Async loading state
     struct LoadResult {
         std::unique_ptr<Assembly> assembly;
