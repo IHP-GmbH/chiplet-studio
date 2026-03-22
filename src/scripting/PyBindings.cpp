@@ -17,6 +17,8 @@
 #include "core/Component.h"
 #include "core/Technology.h"
 #include "core/Interface.h"
+#include "core/flow/FlowStep.h"
+#include "core/flow/FlowEngine.h"
 #include "formats/ChipletFormat.h"
 
 namespace py = pybind11;
@@ -276,6 +278,60 @@ PYBIND11_MODULE(chiplet_studio, m) {
              py::return_value_policy::reference)
         .def("__repr__", [](const Interface& i) {
             return "<Interface '" + i.id() + "'>";
+        });
+
+    // StepStatus enum
+    py::enum_<StepStatus>(m, "StepStatus")
+        .value("Pending", StepStatus::Pending)
+        .value("Running", StepStatus::Running)
+        .value("Success", StepStatus::Success)
+        .value("Error", StepStatus::Error)
+        .value("Skipped", StepStatus::Skipped)
+        .export_values();
+
+    // FlowStep struct
+    py::class_<FlowStep>(m, "FlowStep")
+        .def(py::init<>())
+        .def_readwrite("id", &FlowStep::id)
+        .def_readwrite("name", &FlowStep::name)
+        .def_readwrite("tool_path", &FlowStep::tool_path)
+        .def_readwrite("interpreter", &FlowStep::interpreter)
+        .def_readwrite("args", &FlowStep::args)
+        .def_readwrite("input_files", &FlowStep::input_files)
+        .def_readwrite("output_files", &FlowStep::output_files)
+        .def_readwrite("depends_on", &FlowStep::depends_on)
+        .def_property("status",
+            [](const FlowStep& s) { return step_status_to_string(s.status); },
+            [](FlowStep& s, const std::string& v) { s.status = step_status_from_string(v); })
+        .def_property_readonly("exit_code", [](const FlowStep& s) { return s.exit_code; })
+        .def_property_readonly("log", [](const FlowStep& s) { return s.log; })
+        .def("__repr__", [](const FlowStep& s) {
+            return "<FlowStep '" + s.id + "' status=" + step_status_to_string(s.status) + ">";
+        });
+
+    // FlowEngine class (QObject, non-copyable)
+    py::class_<FlowEngine, std::unique_ptr<FlowEngine, py::nodelete>>(m, "FlowEngine")
+        .def(py::init<>())
+        .def("add_step", &FlowEngine::add_step, py::arg("step"))
+        .def("remove_step", &FlowEngine::remove_step, py::arg("id"))
+        .def("step", [](FlowEngine& e, const std::string& id) -> FlowStep* {
+            return e.step(id);
+        }, py::return_value_policy::reference, py::arg("id"))
+        .def("steps", [](const FlowEngine& e) { return e.steps(); })
+        .def("step_count", &FlowEngine::step_count)
+        .def("clear_steps", &FlowEngine::clear_steps)
+        .def("run_step", &FlowEngine::run_step, py::arg("id"))
+        .def("run_all", &FlowEngine::run_all)
+        .def("cancel", &FlowEngine::cancel)
+        .def("is_running", &FlowEngine::is_running)
+        .def("topological_sort", &FlowEngine::topological_sort)
+        .def("set_working_directory", &FlowEngine::set_working_directory, py::arg("dir"))
+        .def("set_environment", &FlowEngine::set_environment,
+             py::arg("key"), py::arg("value"))
+        .def_property_readonly("working_directory",
+            [](const FlowEngine& e) { return e.working_directory(); })
+        .def("__repr__", [](const FlowEngine& e) {
+            return "<FlowEngine with " + std::to_string(e.step_count()) + " steps>";
         });
 
     // ChipletFormat for loading/saving
