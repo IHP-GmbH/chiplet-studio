@@ -170,7 +170,6 @@ void HierarchyPanel::onCustomContextMenu(const QPoint& pos)
             ModeEntry modes[] = {
                 {RenderMode::Wireframe,   "Wireframe"},
                 {RenderMode::Transparent, "Transparent"},
-                {RenderMode::Solid,       "Solid"},
                 {RenderMode::Detailed,    "Detailed"},
             };
 
