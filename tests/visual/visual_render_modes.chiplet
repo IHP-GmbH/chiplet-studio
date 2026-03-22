@@ -1,0 +1,35 @@
+format_version: "1.0"
+
+assembly:
+  name: "V1 Render Modes Visual Test"
+  description: "Assembly for verifying per-component render mode behavior"
+  author: "chiplet-studio"
+  created: "2026-03-22"
+  modified: "2026-03-22"
+  units: "um"
+
+components:
+  - id: substrate
+    type: substrate
+    dimensions: {width: 12000, height: 12000, thickness: 500}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: interposer
+    type: interposer
+    dimensions: {width: 10000, height: 10000, thickness: 100}
+    position: {x: 1000, y: 1000, z: 500}
+
+  - id: die_logic
+    type: die
+    dimensions: {width: 3000, height: 3000, thickness: 200}
+    position: {x: 1500, y: 1500, z: 600}
+
+  - id: die_hbm
+    type: die
+    dimensions: {width: 3000, height: 4000, thickness: 200}
+    position: {x: 6000, y: 1500, z: 600}
+
+  - id: die_io
+    type: die
+    dimensions: {width: 2000, height: 2000, thickness: 150}
+    position: {x: 4000, y: 6000, z: 600}
