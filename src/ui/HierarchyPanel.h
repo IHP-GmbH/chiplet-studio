@@ -36,6 +36,11 @@ public:
     void setAssembly(Assembly* assembly);
     Assembly* assembly() const { return m_assembly; }
 
+    /**
+     * Update the render mode display for a specific component
+     */
+    void updateRenderModeDisplay(const QString& componentId);
+
 public slots:
     /**
      * Select a component by ID (for external sync from 3D view)
@@ -80,6 +85,7 @@ private:
     QIcon iconForComponent(const Component& comp) const;
     QIcon createIconFromStyle(const ComponentStyle* style) const;
     QString typeToString(ComponentType type) const;
+    static QString renderModeToString(RenderMode mode);
     QTreeWidgetItem* findItemById(const QString& componentId) const;
 
     QTreeWidget* m_tree = nullptr;

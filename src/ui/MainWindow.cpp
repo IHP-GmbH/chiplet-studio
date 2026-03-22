@@ -15,6 +15,7 @@
 #include "formats/ChipletFormat.h"
 #include "core/Technology.h"
 #include "core/commands/CmdMoveComponent.h"
+#include "core/commands/CmdSetRenderMode.h"
 #include "core/Snapper.h"
 #include "scripting/ScriptEngine.h"
 #include <QMenuBar>
@@ -240,6 +241,29 @@ void MainWindow::setupPanels()
                     componentId.toStdString(), oldPos, newPos);
                 m_commandProcessor->execute(std::move(cmd));
                 m_assemblyView->update();
+            });
+
+    // 3D View render mode change request -> CommandProcessor
+    connect(m_assemblyView, &AssemblyView::renderModeChangeRequested,
+            this, [this](const QString& componentId, RenderMode newMode) {
+                if (!m_commandProcessor || !m_assembly) {
+                    return;
+                }
+                Component* comp = m_assembly->component(componentId.toStdString());
+                if (!comp) {
+                    return;
+                }
+                RenderMode oldMode = comp->render_mode();
+                if (oldMode == newMode) {
+                    return;
+                }
+                auto cmd = std::make_unique<CmdSetRenderMode>(
+                    componentId.toStdString(), oldMode, newMode);
+                m_commandProcessor->execute(std::move(cmd));
+                m_assemblyView->onComponentRenderModeChanged(componentId, newMode);
+                if (m_hierarchyPanel) {
+                    m_hierarchyPanel->updateRenderModeDisplay(componentId);
+                }
             });
 }
 
