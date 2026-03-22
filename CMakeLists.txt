@@ -106,6 +106,7 @@ set(CORE_SOURCES
     src/core/Assembly.cpp
     src/core/Component.cpp
     src/core/Interface.cpp
+    src/core/Netlist.cpp
     src/core/Technology.cpp
     src/core/LayerStackup.cpp
     src/core/CommandProcessor.cpp
@@ -113,6 +114,10 @@ set(CORE_SOURCES
     src/core/CommandFactory.cpp
     src/core/commands/CmdMoveComponent.cpp
     src/core/commands/CmdRenameComponent.cpp
+)
+
+set(FLOW_SOURCES
+    src/core/flow/FlowEngine.cpp
 )
 
 set(FORMAT_SOURCES
@@ -182,6 +187,7 @@ set(SHADER_SOURCES
 add_executable(chiplet-studio
     src/main.cpp
     ${CORE_SOURCES}
+    ${FLOW_SOURCES}
     ${FORMAT_SOURCES}
     ${VIEW3D_SOURCES}
     ${VIEW2D_SOURCES}
@@ -268,6 +274,7 @@ if(HAVE_PYTHON)
     pybind11_add_module(chiplet_studio_py
         src/scripting/PyBindings.cpp
         ${CORE_SOURCES}
+        ${FLOW_SOURCES}
         ${FORMAT_SOURCES}
     )
 
