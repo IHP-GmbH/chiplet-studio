@@ -47,6 +47,7 @@ add_executable(chiplet_tests
     test_flow_engine.cpp
     test_flow_config.cpp
     test_render_mode.cpp
+    test_flow_panel.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -111,6 +112,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/view3d/ComponentMesh.cpp
     ${CMAKE_SOURCE_DIR}/src/core/flow/FlowEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/flow/FlowConfig.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/FlowPanel.cpp
 )
 
 # KLayout integration for tests (if available)

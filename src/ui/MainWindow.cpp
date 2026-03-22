@@ -7,6 +7,7 @@
 #include "PropertiesPanel.h"
 #include "DrillDownPanel.h"
 #include "ScriptConsole.h"
+#include "FlowPanel.h"
 #include "CellSelectionDialog.h"
 #include "view2d/KLayout2DView.h"
 #include "view3d/AssemblyView.h"
@@ -18,6 +19,8 @@
 #include "core/commands/CmdSetRenderMode.h"
 #include "core/Snapper.h"
 #include "scripting/ScriptEngine.h"
+#include "core/flow/FlowEngine.h"
+#include "core/flow/FlowConfig.h"
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -39,6 +42,7 @@
 #include <QFileInfo>
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
+#include <yaml-cpp/yaml.h>
 
 namespace chiplet {
 
@@ -54,6 +58,7 @@ MainWindow::MainWindow(QWidget* parent)
     setupSnapToolbar();
     setupViewModeToolbar();
     setupScriptConsole();
+    setupFlowPanel();
     setupAutoSave();
 
     // Initialize async load watcher
@@ -435,6 +440,9 @@ void MainWindow::onAssemblyLoadFinished()
 
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
+
+    // Parse flow section if present
+    loadFlowFromFile(m_currentFilePath);
 
     // Reset autosave timer
     if (m_autoSaveTimer) {
@@ -858,6 +866,91 @@ void MainWindow::setupScriptConsole()
     toggle2D->setText("2D Layout");
     toggle2D->setShortcut(QKeySequence("F4"));
     viewMenu->addAction(toggle2D);
+}
+
+void MainWindow::setupFlowPanel()
+{
+    m_flowEngine = new FlowEngine(this);
+
+    m_flowPanel = new FlowPanel(this);
+
+    m_flowPanelDock = new QDockWidget("Flow Pipeline", this);
+    m_flowPanelDock->setWidget(m_flowPanel);
+    m_flowPanelDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+
+    addDockWidget(Qt::BottomDockWidgetArea, m_flowPanelDock);
+
+    m_flowPanelDock->setMinimumHeight(100);
+    m_flowPanelDock->resize(m_flowPanelDock->width(), 200);
+
+    // Tab with script console
+    if (m_scriptConsoleDock) {
+        tabifyDockWidget(m_scriptConsoleDock, m_flowPanelDock);
+        m_scriptConsoleDock->raise();
+    }
+
+    // Connect FlowPanel signals to FlowEngine
+    connect(m_flowPanel, &FlowPanel::stepRunRequested,
+            this, [this](const QString& id) {
+                if (m_flowEngine) {
+                    m_flowEngine->run_step(id.toStdString());
+                }
+            });
+
+    connect(m_flowPanel, &FlowPanel::runAllRequested,
+            this, [this]() {
+                if (m_flowEngine) {
+                    m_flowEngine->run_all();
+                }
+            });
+
+    // View menu entry
+    QMenu* viewMenu = menuBar()->findChild<QMenu*>("viewMenu");
+    if (!viewMenu) {
+        viewMenu = menuBar()->addMenu("&View");
+        viewMenu->setObjectName("viewMenu");
+    }
+
+    QAction* toggleFlow = m_flowPanelDock->toggleViewAction();
+    toggleFlow->setText("Flow Pipeline");
+    toggleFlow->setShortcut(QKeySequence("Ctrl+F"));
+    viewMenu->addAction(toggleFlow);
+}
+
+void MainWindow::loadFlowFromFile(const QString& path)
+{
+    if (path.isEmpty() || !m_assembly || !m_flowEngine) {
+        if (m_flowPanel) {
+            m_flowPanel->set_flow_engine(nullptr);
+        }
+        return;
+    }
+
+    m_flowEngine->clear_steps();
+
+    try {
+        YAML::Node root = YAML::LoadFile(path.toStdString());
+        if (root["flow"]) {
+            FlowConfig config;
+            config.parse_flow(root["flow"], *m_assembly, *m_flowEngine);
+
+            // Default working directory to the .chiplet file's directory
+            if (m_flowEngine->working_directory().empty()) {
+                QFileInfo fi(path);
+                m_flowEngine->set_working_directory(
+                    fi.absolutePath().toStdString());
+            }
+
+            m_flowPanel->set_flow_engine(m_flowEngine);
+            qDebug() << "Loaded flow pipeline with"
+                     << m_flowEngine->step_count() << "steps";
+        } else {
+            m_flowPanel->set_flow_engine(nullptr);
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Failed to parse flow section:" << e.what();
+        m_flowPanel->set_flow_engine(nullptr);
+    }
 }
 
 void MainWindow::setupAutoSave()
