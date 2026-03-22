@@ -13,6 +13,7 @@ Component::Component(const std::string& id, ComponentType type)
     : m_id(id)
     , m_name(id)  // Default display name to id
     , m_type(type)
+    , m_renderMode(type == ComponentType::Substrate ? RenderMode::Solid : RenderMode::Transparent)
 {
 }
 
@@ -162,6 +163,16 @@ Component::string_type Component::metadata(const string_type& key) const
 const Component::metadata_type& Component::all_metadata() const
 {
     return m_metadata;
+}
+
+RenderMode Component::render_mode() const
+{
+    return m_renderMode;
+}
+
+void Component::set_render_mode(RenderMode mode)
+{
+    m_renderMode = mode;
 }
 
 } // namespace chiplet

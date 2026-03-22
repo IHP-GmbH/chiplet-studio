@@ -38,6 +38,17 @@ struct Dimensions3D {
 };
 
 /**
+ * Per-component render mode for 3D visualization
+ */
+enum class RenderMode {
+    Hidden,       // Not rendered
+    Wireframe,    // Bounding box edges only
+    Transparent,  // Semi-transparent solid (alpha blending)
+    Solid,        // Opaque solid
+    Detailed      // Full GDS layer tessellation
+};
+
+/**
  * Component types
  */
 enum class ComponentType {
@@ -126,6 +137,10 @@ public:
     string_type metadata(const string_type& key) const;
     const metadata_type& all_metadata() const;
 
+    // Render mode (per-component 3D visualization control)
+    RenderMode render_mode() const;
+    void set_render_mode(RenderMode mode);
+
 private:
     string_type m_id;
     string_type m_name;  // User-editable display name, defaults to id
@@ -139,6 +154,7 @@ private:
     dimensions_type m_dimensions;
     std::optional<array_type> m_array;
     metadata_type m_metadata;
+    RenderMode m_renderMode;
 
     // Static empty string for backward compatibility reference return
     static const string_type s_emptyString;
