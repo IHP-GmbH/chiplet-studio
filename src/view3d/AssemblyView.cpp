@@ -9,9 +9,6 @@
 #include "view2d/KLayoutBridge.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
-#include <QContextMenuEvent>
-#include <QMenu>
-#include <QAction>
 #include <QDebug>
 #include <set>
 #include <cmath>
@@ -1870,56 +1867,6 @@ void AssemblyView::mouseDoubleClickEvent(QMouseEvent* event)
         }
     }
 
-    event->accept();
-}
-
-void AssemblyView::contextMenuEvent(QContextMenuEvent* event)
-{
-    if (!m_assembly) {
-        QOpenGLWidget::contextMenuEvent(event);
-        return;
-    }
-
-    QString picked = pickComponent(event->x(), event->y());
-    if (picked.isEmpty()) {
-        QOpenGLWidget::contextMenuEvent(event);
-        return;
-    }
-
-    // Select the right-clicked component
-    selectComponent(picked);
-
-    Component* comp = m_assembly->component(picked.toStdString());
-    if (!comp) return;
-
-    RenderMode currentMode = comp->render_mode();
-
-    QMenu menu(this);
-    QMenu* modeMenu = menu.addMenu("Render Mode");
-
-    struct ModeEntry {
-        RenderMode mode;
-        const char* label;
-    };
-    ModeEntry modes[] = {
-        {RenderMode::Wireframe,   "Wireframe"},
-        {RenderMode::Transparent, "Transparent"},
-        {RenderMode::Solid,       "Solid"},
-        {RenderMode::Detailed,    "Detailed"},
-    };
-
-    for (const auto& entry : modes) {
-        QAction* action = modeMenu->addAction(entry.label);
-        action->setCheckable(true);
-        action->setChecked(entry.mode == currentMode);
-        RenderMode targetMode = entry.mode;
-        QString compId = picked;
-        connect(action, &QAction::triggered, this, [this, compId, targetMode]() {
-            emit renderModeChangeRequested(compId, targetMode);
-        });
-    }
-
-    menu.exec(event->globalPos());
     event->accept();
 }
 

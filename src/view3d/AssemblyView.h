@@ -103,7 +103,6 @@ signals:
 
     // Command system signals (emitted when user requests actions)
     void moveComponentRequested(const QString& componentId, double dx, double dy, double dz);
-    void renderModeChangeRequested(const QString& componentId, RenderMode mode);
 
 protected:
     // OpenGL lifecycle
@@ -117,7 +116,6 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
-    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     void buildMeshes();
