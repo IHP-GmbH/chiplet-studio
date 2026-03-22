@@ -4,6 +4,7 @@
 
 #include "DrillDownPanel.h"
 #include "view2d/KLayout2DView.h"
+#include "view2d/CellComponentMapper.h"
 
 #include <QLabel>
 #include <QComboBox>
@@ -17,11 +18,13 @@
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QMenu>
+#include <QFile>
 
 namespace chiplet {
 
 DrillDownPanel::DrillDownPanel(QWidget* parent)
     : QWidget(parent)
+    , m_cellMapper(std::make_unique<CellComponentMapper>())
 {
     setupUI();
 }
@@ -214,6 +217,52 @@ void DrillDownPanel::setupUI()
     // Layer filter
     connect(m_layerFilter, &QLineEdit::textChanged,
             this, &DrillDownPanel::onLayerFilterChanged);
+
+    // Cell navigation in 2D -> component mapping for assembly mode
+    connect(m_view2d, &KLayout2DView::cellNavigated,
+            this, [this](const QString& cellName) {
+                if (m_panelMode != PanelMode::Assembly || !m_cellMapper) return;
+                QString compId = m_cellMapper->componentForCell(cellName);
+                if (!compId.isEmpty()) {
+                    emit componentNavigated(compId);
+                }
+            });
+}
+
+void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPath,
+                                     const Assembly& assembly)
+{
+    m_assemblyGdsPath = gdsPath;
+    m_assemblyLypPath = lypPath;
+
+    if (!QFile::exists(gdsPath)) {
+        qWarning("DrillDownPanel: Assembly GDS not found: %s", qPrintable(gdsPath));
+        return;
+    }
+
+    if (m_view2d->loadLayout(gdsPath, lypPath)) {
+        m_cellMapper->build(assembly, m_view2d->cellNames());
+        m_panelMode = PanelMode::Assembly;
+        m_backButton->setVisible(false);
+        m_contextLabel->setText("Assembly");
+        updateSidePanels();
+        populateCellCombo();
+    }
+}
+
+void DrillDownPanel::returnToAssembly()
+{
+    if (m_assemblyGdsPath.isEmpty()) {
+        return;
+    }
+
+    m_view2d->loadLayout(m_assemblyGdsPath, m_assemblyLypPath);
+    m_panelMode = PanelMode::Assembly;
+    m_backButton->setVisible(false);
+    m_contextLabel->setText("Assembly");
+    m_componentId.clear();
+    updateSidePanels();
+    populateCellCombo();
 }
 
 void DrillDownPanel::setContext(const QString& componentId,
@@ -221,6 +270,8 @@ void DrillDownPanel::setContext(const QString& componentId,
                                 const QString& technologyName)
 {
     m_componentId = componentId;
+    m_panelMode = PanelMode::DrillDown;
+    m_backButton->setVisible(true);
 
     QString label = "Component: " + componentName;
     if (!technologyName.isEmpty()) {
@@ -235,12 +286,20 @@ void DrillDownPanel::setContext(const QString& componentId,
 void DrillDownPanel::clearContext()
 {
     m_componentId.clear();
-    m_contextLabel->setText("");
     m_cellCombo->clear();
     m_cellLabel->setText("");
     m_posLabel->setText("x: --  y: --");
     m_layerFilter->clear();
     m_layerTree->clear();
+
+    // If we have an assembly GDS, return to assembly mode instead of going empty
+    if (!m_assemblyGdsPath.isEmpty()) {
+        returnToAssembly();
+    } else {
+        m_panelMode = PanelMode::Empty;
+        m_contextLabel->setText("");
+        m_backButton->setVisible(true);
+    }
 }
 
 bool DrillDownPanel::isLayerPanelVisible() const

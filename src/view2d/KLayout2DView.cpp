@@ -20,9 +20,26 @@
 #include "dbLayout.h"
 #include "dbLoadLayoutOptions.h"
 #include "tlException.h"
+#include "tlObject.h"
 #endif
 
 namespace chiplet {
+
+#ifdef HAVE_KLAYOUT
+class KLayout2DView::CellViewEventBridge : public tl::Object {
+public:
+    CellViewEventBridge(KLayout2DView* parent) : m_parent(parent) {}
+    void on_cellview_changed(int /*index*/) {
+        if (m_parent->m_blockCellNavigation) return;
+        QString name = m_parent->currentCellName();
+        if (!name.isEmpty()) {
+            emit m_parent->cellNavigated(name);
+        }
+    }
+private:
+    KLayout2DView* m_parent;
+};
+#endif
 
 KLayout2DView::KLayout2DView(QWidget* parent)
     : QWidget(parent)
@@ -30,7 +47,13 @@ KLayout2DView::KLayout2DView(QWidget* parent)
     setupUI();
 }
 
-KLayout2DView::~KLayout2DView() = default;
+KLayout2DView::~KLayout2DView()
+{
+#ifdef HAVE_KLAYOUT
+    // Destroy bridge before view widget to avoid dangling event subscriptions
+    m_cellViewBridge.reset();
+#endif
+}
 
 bool KLayout2DView::isDisplayAvailable()
 {
@@ -145,6 +168,14 @@ void KLayout2DView::connectSignals()
             this, [this](double x, double y, bool /*dbu_units*/) {
                 emit positionChanged(x, y);
             });
+
+    // Subscribe to cellview_changed_event for 2D->3D cell navigation
+    lay::LayoutView* view = m_viewWidget->view();
+    if (view) {
+        m_cellViewBridge = std::make_unique<CellViewEventBridge>(this);
+        view->cellview_changed_event.add(m_cellViewBridge.get(),
+            &CellViewEventBridge::on_cellview_changed);
+    }
 #endif
 }
 
@@ -161,6 +192,9 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
     if (!view) return false;
 
     try {
+        // Block cellNavigated during load to prevent spurious events
+        m_blockCellNavigation = true;
+
         // Clear existing layouts
         while (view->cellviews() > 0) {
             view->erase_cellview(0);
@@ -178,16 +212,19 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
         // Zoom to fit
         view->zoom_fit();
 
+        m_blockCellNavigation = false;
         m_currentPath = path;
         emit layoutChanged(true);
         return true;
 
     } catch (const tl::Exception& e) {
+        m_blockCellNavigation = false;
         qWarning("KLayout2DView::loadLayout failed: %s", e.msg().c_str());
         m_currentPath.clear();
         emit layoutChanged(false);
         return false;
     } catch (const std::exception& e) {
+        m_blockCellNavigation = false;
         qWarning("KLayout2DView::loadLayout failed: %s", e.what());
         m_currentPath.clear();
         emit layoutChanged(false);
@@ -323,14 +360,18 @@ bool KLayout2DView::setCurrentCell(const QString& name)
         if (view->cellviews() == 0) {
             return false;
         }
+        m_blockCellNavigation = true;
         lay::CellViewRef cvRef = view->cellview_ref(0);
         cvRef.set_cell(name.toStdString());
         view->zoom_fit();
+        m_blockCellNavigation = false;
         emit cellChanged(name);
         return true;
     } catch (const tl::Exception& e) {
+        m_blockCellNavigation = false;
         qWarning("KLayout2DView::setCurrentCell failed: %s", e.msg().c_str());
     } catch (const std::exception& e) {
+        m_blockCellNavigation = false;
         qWarning("KLayout2DView::setCurrentCell failed: %s", e.what());
     }
 #else

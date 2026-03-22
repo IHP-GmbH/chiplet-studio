@@ -153,6 +153,15 @@ signals:
      */
     void cellChanged(const QString& cellName);
 
+    /**
+     * @brief Emitted when user navigates to a cell via the hierarchy panel
+     *
+     * Unlike cellChanged (which fires on programmatic setCurrentCell),
+     * this fires from KLayout's cellview_changed_event when the user
+     * interacts with the hierarchy panel.
+     */
+    void cellNavigated(const QString& cellName);
+
 private:
     void setupUI();
     void connectSignals();
@@ -164,10 +173,13 @@ private:
 #ifdef HAVE_KLAYOUT
     std::unique_ptr<EmbeddedDispatcher> m_dispatcher;
     lay::LayoutViewWidget* m_viewWidget = nullptr;
+    class CellViewEventBridge;
+    std::unique_ptr<CellViewEventBridge> m_cellViewBridge;
 #endif
     QString m_currentPath;
     bool m_viewAvailable = false;
     bool m_initAttempted = false;
+    bool m_blockCellNavigation = false;
 };
 
 } // namespace chiplet
