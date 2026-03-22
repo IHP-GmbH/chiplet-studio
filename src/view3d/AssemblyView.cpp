@@ -765,9 +765,22 @@ void AssemblyView::buildMeshes()
         return;
     }
 
-    // Always build non-instanced box meshes for ALL components.
-    // Box meshes are used for Wireframe, Transparent, Solid modes and as
-    // fallback for Detailed when GDS extraction fails.
+    // Extract GDS bounding boxes for components with layouts.
+    // This ensures box meshes match the actual GDS footprint in all
+    // abstraction modes (Wireframe, Transparent, Solid).
+    std::map<QString, GDSBoundingBox> gdsBounds;
+    for (const auto& comp : components) {
+        if (!comp || comp->layout_path().empty()) continue;
+        GDSBoundingBox bbox = GDSLayerExtractor::extractBoundingBox(
+            comp->layout_path(), comp->top_cell());
+        if (bbox.is_valid()) {
+            gdsBounds[QString::fromStdString(comp->id())] = bbox;
+        }
+    }
+
+    // Build non-instanced box meshes for ALL components.
+    // For components with GDS layouts, use GDS bounding box for dimensions
+    // so that all abstraction levels show the correct footprint.
     for (const auto& comp : components) {
         if (!comp) continue;
 
@@ -780,12 +793,46 @@ void AssemblyView::buildMeshes()
             }
         }
 
-        ComponentMesh mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
+        QString compId = QString::fromStdString(comp->id());
+        auto bboxIt = gdsBounds.find(compId);
+
+        ComponentMesh mesh;
+        if (bboxIt != gdsBounds.end()) {
+            // GDS-derived box: match the layout footprint
+            const GDSBoundingBox& bbox = bboxIt->second;
+            const auto& pos = comp->position();
+            auto dims = comp->dimensions();
+
+            // Use GDS width/height, keep thickness from component
+            if (dims.thickness <= 0) {
+                dims.thickness = 200.0;  // Default die thickness
+            }
+
+            // Convert to mm (same as MeshBuilder)
+            float w = static_cast<float>(bbox.width() / 1000.0);
+            float d = static_cast<float>(dims.thickness / 1000.0);
+            float h = static_cast<float>(bbox.height() / 1000.0);
+
+            // Position the box to align with GDS coordinates.
+            // GDS geometry is at (gds_x, gds_y) in cell space, then translated
+            // by component position. Box must match.
+            float offsetX = static_cast<float>(pos.x / 1000.0 + (bbox.x_min + bbox.x_max) / 2000.0);
+            float offsetY = static_cast<float>(pos.z / 1000.0);     // Elevation
+            float offsetZ = static_cast<float>(-pos.y / 1000.0 - bbox.y_min / 1000.0);  // Near Z face
+
+            mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
+            mesh.setColor(MeshBuilder::colorForComponent(*comp, lyp));
+        } else {
+            // No GDS: use YAML dimensions (existing behavior)
+            mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
+        }
+
         mesh.upload();
-        m_meshes.emplace(QString::fromStdString(comp->id()), std::move(mesh));
+        m_meshes.emplace(compId, std::move(mesh));
     }
 
-    qDebug() << "Built" << m_meshes.size() << "box meshes for all components";
+    qDebug() << "Built" << m_meshes.size() << "box meshes ("
+             << gdsBounds.size() << " from GDS extents)";
 
     // Build layer geometry for Detailed components or when in global LayerMode
     for (const auto& comp : components) {
