@@ -99,7 +99,7 @@ private:
     void setupPanels();
     void setupClipToolbar();
     void setupSnapToolbar();
-    void setupRenderModeToolbar();
+    void setupViewModeToolbar();
     void setupScriptConsole();
 
     std::unique_ptr<Assembly> m_assembly;
@@ -137,8 +137,8 @@ private:
     bool m_snapEnabled = false;
     double m_gridSize = 10.0;  // Default: 10um
 
-    // Render mode toolbar
-    QButtonGroup* m_renderModeGroup = nullptr;
+    // View mode toolbar
+    QButtonGroup* m_viewModeGroup = nullptr;
     QDoubleSpinBox* m_zOffsetSpinBox = nullptr;
 
     // Async loading state

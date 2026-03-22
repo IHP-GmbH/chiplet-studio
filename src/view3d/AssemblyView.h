@@ -30,9 +30,9 @@
 namespace chiplet {
 
 /**
- * Rendering mode for 3D view
+ * View mode for 3D view (global rendering strategy)
  */
-enum class RenderMode {
+enum class ViewMode {
     BoxMode,      // Simple boxes (fast, schematic)
     LayerMode     // Layer-by-layer 2.5D visualization (like KLayout 2.5D)
 };
@@ -87,12 +87,12 @@ public:
     void setClipPosition(float position);
     void setClipAxis(ClipAxis axis);
 
-    // Render mode control (BoxMode vs LayerMode)
-    RenderMode renderMode() const { return m_renderMode; }
-    void setRenderMode(RenderMode mode);
+    // View mode control (BoxMode vs LayerMode)
+    ViewMode viewMode() const { return m_viewMode; }
+    void setViewMode(ViewMode mode);
 
 signals:
-    void renderModeChanged(RenderMode mode);
+    void viewModeChanged(ViewMode mode);
     void clipPlaneChanged();
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
@@ -182,8 +182,8 @@ private:
     // Dither patterns for layer fill styles
     DitherPatterns m_ditherPatterns;
 
-    // Render mode (BoxMode = simple boxes, LayerMode = 2.5D layer extrusion)
-    RenderMode m_renderMode = RenderMode::LayerMode;  // Default to layer mode
+    // View mode (BoxMode = simple boxes, LayerMode = 2.5D layer extrusion)
+    ViewMode m_viewMode = ViewMode::LayerMode;  // Default to layer mode
 
     // Layer geometry for 2.5D rendering (component_id -> geometry)
     std::map<QString, Component3DGeometry> m_layerGeometry;

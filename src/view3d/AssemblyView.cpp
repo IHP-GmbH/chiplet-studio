@@ -760,7 +760,7 @@ void AssemblyView::buildMeshes()
     std::set<QString> componentsWithLayerGeometry;
 
     // In LayerMode, try to build layer geometry for components with GDS layouts
-    if (m_renderMode == RenderMode::LayerMode) {
+    if (m_viewMode == ViewMode::LayerMode) {
         for (const auto& comp : components) {
             if (!comp) continue;
 
@@ -1187,10 +1187,10 @@ QString AssemblyView::pickComponent(int x, int y)
     return QString();
 }
 
-void AssemblyView::setRenderMode(RenderMode mode)
+void AssemblyView::setViewMode(ViewMode mode)
 {
-    if (m_renderMode != mode) {
-        m_renderMode = mode;
+    if (m_viewMode != mode) {
+        m_viewMode = mode;
         m_needsRebuild = true;
         if (m_initialized && m_assembly) {
             makeCurrent();
@@ -1198,7 +1198,7 @@ void AssemblyView::setRenderMode(RenderMode mode)
             updateSceneBounds();
             doneCurrent();
         }
-        emit renderModeChanged(mode);
+        emit viewModeChanged(mode);
         update();
     }
 }

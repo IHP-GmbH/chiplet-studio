@@ -51,7 +51,7 @@ MainWindow::MainWindow(QWidget* parent)
     setupPanels();
     setupClipToolbar();
     setupSnapToolbar();
-    setupRenderModeToolbar();
+    setupViewModeToolbar();
     setupScriptConsole();
     setupAutoSave();
 
@@ -729,9 +729,9 @@ void MainWindow::setupSnapToolbar()
     });
 }
 
-void MainWindow::setupRenderModeToolbar()
+void MainWindow::setupViewModeToolbar()
 {
-    QToolBar* renderToolbar = addToolBar("Render Mode");
+    QToolBar* renderToolbar = addToolBar("View Mode");
     renderToolbar->setMovable(false);
 
     // Label
@@ -739,15 +739,15 @@ void MainWindow::setupRenderModeToolbar()
     renderToolbar->addWidget(modeLabel);
 
     // Button group for exclusive selection
-    m_renderModeGroup = new QButtonGroup(this);
-    m_renderModeGroup->setExclusive(true);
+    m_viewModeGroup = new QButtonGroup(this);
+    m_viewModeGroup->setExclusive(true);
 
     // Box mode button (simple boxes)
     QPushButton* btnBox = new QPushButton("Box", this);
     btnBox->setCheckable(true);
     btnBox->setToolTip("Simple box representation (fast)");
     btnBox->setFixedWidth(50);
-    m_renderModeGroup->addButton(btnBox, static_cast<int>(RenderMode::BoxMode));
+    m_viewModeGroup->addButton(btnBox, static_cast<int>(ViewMode::BoxMode));
     renderToolbar->addWidget(btnBox);
 
     // Layer mode button (KLayout 2.5D style)
@@ -756,14 +756,14 @@ void MainWindow::setupRenderModeToolbar()
     btnLayer->setChecked(true);  // Default mode
     btnLayer->setToolTip("Layer-by-layer 2.5D visualization (like KLayout)");
     btnLayer->setFixedWidth(50);
-    m_renderModeGroup->addButton(btnLayer, static_cast<int>(RenderMode::LayerMode));
+    m_viewModeGroup->addButton(btnLayer, static_cast<int>(ViewMode::LayerMode));
     renderToolbar->addWidget(btnLayer);
 
     // Connect button group to AssemblyView
-    connect(m_renderModeGroup, QOverload<int>::of(&QButtonGroup::idClicked),
+    connect(m_viewModeGroup, QOverload<int>::of(&QButtonGroup::idClicked),
             this, [this](int id) {
         if (m_assemblyView) {
-            m_assemblyView->setRenderMode(static_cast<RenderMode>(id));
+            m_assemblyView->setViewMode(static_cast<ViewMode>(id));
         }
     });
 
