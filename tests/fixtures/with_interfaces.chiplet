@@ -1,0 +1,64 @@
+format_version: "1.0"
+
+assembly:
+  name: "Test Assembly with Interfaces"
+  description: "Assembly with physical connections between components"
+  author: "Test Author"
+  units: "um"
+
+technologies:
+  ihp_sg13g2:
+    description: "IHP SG13G2 130nm BiCMOS"
+    dbu: 0.001
+  interposer_tech:
+    description: "Silicon interposer technology"
+    dbu: 0.001
+
+components:
+  - id: substrate
+    type: substrate
+    technology: interposer_tech
+    dimensions: {width: 15000, height: 15000, thickness: 500}
+
+  - id: interposer
+    type: interposer
+    technology: interposer_tech
+    position: {x: 1000, y: 1000, z: 0}
+    dimensions: {width: 10000, height: 10000, thickness: 100}
+
+  - id: die_0
+    type: die
+    technology: ihp_sg13g2
+    position: {x: 2000, y: 2000, z: 150}
+    dimensions: {width: 5000, height: 5000, thickness: 100}
+
+interfaces:
+  - id: die0_to_interposer
+    type: micro_bump
+    from:
+      component: die_0
+      surface: bottom
+      port_layer: TopMetal2
+    to:
+      component: interposer
+      surface: top
+      port_layer: TopMetal2
+    physical:
+      pitch: 55.0
+      diameter: 25.0
+      height: 30.0
+
+  - id: interposer_to_substrate
+    type: copper_pillar
+    from:
+      component: interposer
+      surface: bottom
+      port_layer: Metal1
+    to:
+      component: substrate
+      surface: top
+      port_layer: Metal1
+    physical:
+      pitch: 130.0
+      diameter: 50.0
+      height: 45.0
