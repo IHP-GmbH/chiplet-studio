@@ -8,6 +8,7 @@
 #include "DrillDownPanel.h"
 #include "ScriptConsole.h"
 #include "FlowPanel.h"
+#include "NetGraphPanel.h"
 #include "CellSelectionDialog.h"
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
@@ -59,6 +60,7 @@ MainWindow::MainWindow(QWidget* parent)
     setupViewModeToolbar();
     setupScriptConsole();
     setupFlowPanel();
+    setupNetGraphPanel();
     setupAutoSave();
 
     // Initialize async load watcher
@@ -305,6 +307,9 @@ void MainWindow::onFileNew()
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->clearSelection();
+    if (m_netGraphPanel) {
+        m_netGraphPanel->setAssembly(m_assembly.get());
+    }
 
     setWindowTitle("Chiplet Studio - Untitled");
 
@@ -466,6 +471,9 @@ void MainWindow::onAssemblyLoadFinished()
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->clearSelection();
+    if (m_netGraphPanel) {
+        m_netGraphPanel->setAssembly(m_assembly.get());
+    }
 
     setWindowTitle(QString("Chiplet Studio - %1").arg(
         QString::fromStdString(m_assembly->name())));
@@ -792,6 +800,9 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->clearSelection();
+    if (m_netGraphPanel) {
+        m_netGraphPanel->setAssembly(m_assembly.get());
+    }
 
     setWindowTitle(QString("Chiplet Studio - %1 [Recovered]").arg(
         QString::fromStdString(m_assembly->name())));
@@ -1035,6 +1046,57 @@ void MainWindow::setupFlowPanel()
     connect(toggleBasePlane, &QAction::toggled, m_assemblyView,
             &AssemblyView::setBasePlaneVisible);
     viewMenu->addAction(toggleBasePlane);
+}
+
+void MainWindow::setupNetGraphPanel()
+{
+    m_netGraphPanel = new NetGraphPanel(this);
+
+    m_netGraphDock = new QDockWidget("Net Graph", this);
+    m_netGraphDock->setWidget(m_netGraphPanel);
+    m_netGraphDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+
+    addDockWidget(Qt::BottomDockWidgetArea, m_netGraphDock);
+    m_netGraphDock->setMinimumHeight(100);
+    m_netGraphDock->resize(m_netGraphDock->width(), 250);
+
+    // Tab with flow panel
+    if (m_flowPanelDock) {
+        tabifyDockWidget(m_flowPanelDock, m_netGraphDock);
+    } else if (m_scriptConsoleDock) {
+        tabifyDockWidget(m_scriptConsoleDock, m_netGraphDock);
+    }
+
+    // Bidirectional selection sync
+    // NetGraph -> 3D + Hierarchy + Properties
+    connect(m_netGraphPanel, &NetGraphPanel::componentSelected,
+            m_assemblyView, &AssemblyView::selectComponent);
+    connect(m_netGraphPanel, &NetGraphPanel::componentSelected,
+            m_hierarchyPanel, &HierarchyPanel::selectComponent);
+    connect(m_netGraphPanel, &NetGraphPanel::componentSelected,
+            this, [this](const QString& componentId) {
+                if (m_propertiesPanel && m_assembly) {
+                    m_propertiesPanel->setComponent(componentId.toStdString(), m_assembly.get());
+                }
+            });
+
+    // 3D/Hierarchy -> NetGraph
+    connect(m_assemblyView, &AssemblyView::selectionChanged,
+            m_netGraphPanel, &NetGraphPanel::highlightComponent);
+    connect(m_hierarchyPanel, &HierarchyPanel::componentSelected,
+            m_netGraphPanel, &NetGraphPanel::highlightComponent);
+
+    // View menu entry
+    QMenu* viewMenu = menuBar()->findChild<QMenu*>("viewMenu");
+    if (!viewMenu) {
+        viewMenu = menuBar()->addMenu("&View");
+        viewMenu->setObjectName("viewMenu");
+    }
+
+    QAction* toggleNetGraph = m_netGraphDock->toggleViewAction();
+    toggleNetGraph->setText("Net Graph");
+    toggleNetGraph->setShortcut(QKeySequence("Ctrl+G"));
+    viewMenu->addAction(toggleNetGraph);
 }
 
 void MainWindow::populateFlowEngine()
