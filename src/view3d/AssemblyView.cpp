@@ -1175,9 +1175,15 @@ void AssemblyView::onComponentRenderModeChanged(const QString& componentId, Rend
     update();
 }
 
+void AssemblyView::setBasePlaneVisible(bool visible)
+{
+    m_basePlaneVisible = visible;
+    update();
+}
+
 void AssemblyView::renderGrid()
 {
-    if (!m_componentShader.isValid() || !m_gridMesh.hasData()) {
+    if (!m_basePlaneVisible || !m_componentShader.isValid() || !m_gridMesh.hasData()) {
         return;
     }
 

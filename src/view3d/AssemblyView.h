@@ -94,6 +94,10 @@ public:
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
 
+    // Base plane visibility
+    bool basePlaneVisible() const { return m_basePlaneVisible; }
+    void setBasePlaneVisible(bool visible);
+
 signals:
     void viewModeChanged(ViewMode mode);
     void clipPlaneChanged();
@@ -153,6 +157,7 @@ private:
     // Legacy per-component mesh map (for fallback/transition)
     std::map<QString, ComponentMesh> m_meshes;
     ComponentMesh m_gridMesh;
+    bool m_basePlaneVisible = true;
 
     // Instancing enabled flag
     bool m_useInstancing = true;
