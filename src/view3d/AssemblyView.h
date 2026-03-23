@@ -26,6 +26,9 @@
 #include "view2d/LayerProperties.h"
 #include "gizmos/TransformGizmo.h"
 #include "LayerMeshBuilder.h"
+#include "ShapeFilter.h"
+
+class QTimer;
 
 namespace chiplet {
 
@@ -94,6 +97,10 @@ public:
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
 
+    // Shape filter control (area-based polygon filtering for Detailed mode)
+    void setShapeFilterPercent(double percent);
+    double shapeFilterPercent() const { return m_shapeFilterPercent; }
+
     // Base plane visibility
     bool basePlaneVisible() const { return m_basePlaneVisible; }
     void setBasePlaneVisible(bool visible);
@@ -104,6 +111,7 @@ signals:
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
+    void shapeFilterChanged(double percent);
 
     // Command system signals (emitted when user requests actions)
     void moveComponentRequested(const QString& componentId, double dx, double dy, double dz);
@@ -199,8 +207,16 @@ private:
     // Layer stackup cache (technology_id -> stackup)
     std::map<std::string, LayerStackup> m_stackups;
 
+    // Shape filter: polygon cache and area statistics per component
+    std::map<QString, std::map<LayerKey, LayerPolygons>> m_polygonCache;
+    std::map<QString, AreaStatistics> m_areaStats;
+    double m_shapeFilterPercent = 0.0;
+    QTimer* m_filterDebounceTimer = nullptr;
+
     // Helper to build layer geometry for a component
     void buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp);
+    void applyShapeFilter();
+    void rebuildFilteredGeometry(const QString& compId);
 
     // Render layers for a component
     void renderLayerGeometry();
