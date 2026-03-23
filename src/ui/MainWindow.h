@@ -155,6 +155,8 @@ private:
     // View mode toolbar
     QButtonGroup* m_viewModeGroup = nullptr;
     QDoubleSpinBox* m_zOffsetSpinBox = nullptr;
+    QSlider* m_shapeFilterSlider = nullptr;
+    QLabel* m_shapeFilterLabel = nullptr;
 
     // Async loading state
     struct LoadResult {

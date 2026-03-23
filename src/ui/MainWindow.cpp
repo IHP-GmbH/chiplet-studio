@@ -940,6 +940,32 @@ void MainWindow::setupViewModeToolbar()
             m_assemblyView->setGlobalZOffset(value);
         }
     });
+
+    // Shape filter slider (area-based polygon filtering for Detailed mode)
+    renderToolbar->addSeparator();
+    QLabel* filterLabel = new QLabel("Filter:", this);
+    renderToolbar->addWidget(filterLabel);
+
+    m_shapeFilterSlider = new QSlider(Qt::Horizontal, this);
+    m_shapeFilterSlider->setRange(0, 1000);
+    m_shapeFilterSlider->setValue(0);
+    m_shapeFilterSlider->setMinimumWidth(120);
+    m_shapeFilterSlider->setToolTip("Shape area filter: hide small polygons (0% = show all)");
+    renderToolbar->addWidget(m_shapeFilterSlider);
+
+    m_shapeFilterLabel = new QLabel("0%", this);
+    m_shapeFilterLabel->setMinimumWidth(40);
+    m_shapeFilterLabel->setAlignment(Qt::AlignCenter);
+    renderToolbar->addWidget(m_shapeFilterLabel);
+
+    connect(m_shapeFilterSlider, &QSlider::valueChanged,
+            this, [this](int value) {
+        double percent = value / 10.0;
+        m_shapeFilterLabel->setText(QString("%1%").arg(percent, 0, 'f', 1));
+        if (m_assemblyView) {
+            m_assemblyView->setShapeFilterPercent(percent);
+        }
+    });
 }
 
 void MainWindow::setupScriptConsole()
