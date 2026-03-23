@@ -6,9 +6,11 @@
 #include "MeshBuilder.h"
 #include "GDSLayerExtractor.h"
 #include "LayerMeshBuilder.h"
+#include "ShapeFilter.h"
 #include "view2d/KLayoutBridge.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QTimer>
 #include <QDebug>
 #include <set>
 #include <cmath>
@@ -252,6 +254,12 @@ AssemblyView::AssemblyView(QWidget* parent)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+
+    // Shape filter debounce timer (re-tessellation is expensive)
+    m_filterDebounceTimer = new QTimer(this);
+    m_filterDebounceTimer->setSingleShot(true);
+    m_filterDebounceTimer->setInterval(150);
+    connect(m_filterDebounceTimer, &QTimer::timeout, this, &AssemblyView::applyShapeFilter);
 }
 
 AssemblyView::~AssemblyView()
@@ -260,6 +268,8 @@ AssemblyView::~AssemblyView()
     m_meshes.clear();
     m_instanceGroups.clear();
     m_layerGeometry.clear();
+    m_polygonCache.clear();
+    m_areaStats.clear();
     m_gridMesh.release();
     m_ditherPatterns.cleanup();
     doneCurrent();
@@ -367,6 +377,9 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_needsRebuild = true;
     m_selectedComponent.clear();
     m_layerProps.clear();
+    m_polygonCache.clear();
+    m_areaStats.clear();
+    m_shapeFilterPercent = 0.0;
     m_debugPrinted = false;
 
     if (!assembly) {
@@ -1430,6 +1443,17 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     qDebug() << "Extracted" << extractor.lastLayerCount() << "layers,"
              << extractor.lastPolygonCount() << "polygons from" << compId;
 
+    // Cache polygon data for shape filtering (avoids re-extracting from GDS)
+    m_polygonCache[compId] = polygons;
+    m_areaStats[compId] = ShapeFilter::computeStatistics(polygons);
+
+    // Apply active shape filter
+    if (m_shapeFilterPercent > 0.0 && m_areaStats[compId].total_polygons > 0) {
+        double threshold = ShapeFilter::thresholdFromPercentage(
+            m_shapeFilterPercent, m_areaStats[compId]);
+        polygons = ShapeFilter::filter(polygons, threshold);
+    }
+
     // Build 3D geometry from polygons
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
@@ -1461,6 +1485,109 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
 #else
     Q_UNUSED(comp);
     Q_UNUSED(lyp);
+#endif
+}
+
+void AssemblyView::setShapeFilterPercent(double percent)
+{
+    percent = std::clamp(percent, 0.0, 100.0);
+    if (std::abs(percent - m_shapeFilterPercent) < 0.01) return;
+    m_shapeFilterPercent = percent;
+    if (m_filterDebounceTimer) {
+        m_filterDebounceTimer->start(150);
+    }
+    emit shapeFilterChanged(percent);
+}
+
+void AssemblyView::applyShapeFilter()
+{
+    if (!m_initialized || m_polygonCache.empty()) return;
+
+    makeCurrent();
+    for (const auto& [compId, cachedPolygons] : m_polygonCache) {
+        if (m_layerGeometry.count(compId)) {
+            rebuildFilteredGeometry(compId);
+        }
+    }
+    doneCurrent();
+
+    updateSceneBounds();
+    update();
+}
+
+void AssemblyView::rebuildFilteredGeometry(const QString& compId)
+{
+#ifdef HAVE_KLAYOUT
+    auto cacheIt = m_polygonCache.find(compId);
+    if (cacheIt == m_polygonCache.end()) return;
+
+    auto statsIt = m_areaStats.find(compId);
+    if (statsIt == m_areaStats.end()) return;
+
+    // Filter polygons
+    auto polygons = cacheIt->second;
+    if (m_shapeFilterPercent > 0.0 && statsIt->second.total_polygons > 0) {
+        double threshold = ShapeFilter::thresholdFromPercentage(
+            m_shapeFilterPercent, statsIt->second);
+        polygons = ShapeFilter::filter(polygons, threshold);
+    }
+
+    // Look up component for technology info
+    Component* comp = m_assembly ? m_assembly->component(compId.toStdString()) : nullptr;
+    if (!comp) return;
+
+    const std::string& techId = comp->technology();
+
+    // Get cached stackup
+    LayerStackup stackup;
+    auto stackupIt = m_stackups.find(techId);
+    if (stackupIt != m_stackups.end()) {
+        stackup = stackupIt->second;
+    }
+
+    // Get layer properties
+    const LayerPropertiesFile* lyp = nullptr;
+    if (!techId.empty()) {
+        auto it = m_layerProps.find(techId);
+        if (it != m_layerProps.end()) {
+            lyp = &(it->second);
+        }
+    }
+
+    // Get color scheme
+    LayerColorScheme colorScheme;
+    bool hasColorScheme = false;
+    if (!techId.empty()) {
+        std::string csPath = BlenderGDSConfigs::colorSchemePath(techId, "realistic");
+        if (!csPath.empty() && colorScheme.loadFromYAML(csPath)) {
+            hasColorScheme = true;
+        }
+    }
+
+    // Preserve transform from existing geometry
+    QMatrix4x4 transform;
+    auto geomIt = m_layerGeometry.find(compId);
+    if (geomIt != m_layerGeometry.end()) {
+        transform = geomIt->second.transform;
+    }
+
+    // Rebuild mesh
+    LayerMeshBuilder meshBuilder;
+    Component3DGeometry geometry = meshBuilder.build(
+        polygons, stackup, lyp,
+        hasColorScheme ? &colorScheme : nullptr);
+
+    geometry.componentId = compId;
+    geometry.transform = transform;
+
+    // Upload to GPU
+    for (auto& layer : geometry.layers) {
+        layer.mesh.upload();
+    }
+
+    m_layerGeometry[compId] = std::move(geometry);
+#else
+    Q_UNUSED(compId);
 #endif
 }
 
