@@ -36,6 +36,7 @@ class ScriptConsole;
 class ScriptEngine;
 class FlowEngine;
 class FlowPanel;
+class NetGraphPanel;
 
 /**
  * MainWindow is the main application window.
@@ -104,6 +105,7 @@ private:
     void setupViewModeToolbar();
     void setupScriptConsole();
     void setupFlowPanel();
+    void setupNetGraphPanel();
     void populateFlowEngine();
 
     std::unique_ptr<Assembly> m_assembly;
@@ -126,6 +128,10 @@ private:
     FlowEngine* m_flowEngine = nullptr;
     FlowPanel* m_flowPanel = nullptr;
     QDockWidget* m_flowPanelDock = nullptr;
+
+    // Net graph
+    NetGraphPanel* m_netGraphPanel = nullptr;
+    QDockWidget* m_netGraphDock = nullptr;
 
     // Clip plane toolbar widgets
     QToolBar* m_clipToolbar = nullptr;

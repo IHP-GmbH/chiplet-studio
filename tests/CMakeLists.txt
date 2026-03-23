@@ -49,6 +49,8 @@ add_executable(chiplet_tests
     test_render_mode.cpp
     test_flow_panel.cpp
     test_assembly_2d_view.cpp
+    test_shape_filter.cpp
+    test_net_graph.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -111,9 +113,11 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/view3d/LayerMeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/GDSLayerExtractor.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/ComponentMesh.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/ShapeFilter.cpp
     ${CMAKE_SOURCE_DIR}/src/core/flow/FlowEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/flow/FlowConfig.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/FlowPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/NetGraphPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/CellComponentMapper.cpp
 )
 

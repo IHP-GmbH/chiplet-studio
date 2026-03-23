@@ -149,6 +149,7 @@ set(VIEW3D_SOURCES
     src/view3d/GDSLayerExtractor.cpp
     src/view3d/GDSAnalyzer.cpp
     src/view3d/LayerMeshBuilder.cpp
+    src/view3d/ShapeFilter.cpp
     src/view3d/gizmos/TransformGizmo.cpp
     ${VIEW3D_MATH_SOURCES}
 )
@@ -172,6 +173,7 @@ set(UI_SOURCES
     src/ui/CellSelectionDialog.cpp
     src/ui/ScriptConsole.cpp
     src/ui/FlowPanel.cpp
+    src/ui/NetGraphPanel.cpp
 )
 
 # Scripting sources (always included, conditionally compiled)
