@@ -1025,6 +1025,16 @@ void MainWindow::setupFlowPanel()
     toggleFlow->setText("Flow Pipeline");
     toggleFlow->setShortcut(QKeySequence("Ctrl+F"));
     viewMenu->addAction(toggleFlow);
+
+    // Base plane toggle
+    viewMenu->addSeparator();
+    QAction* toggleBasePlane = new QAction("Base Plane", this);
+    toggleBasePlane->setCheckable(true);
+    toggleBasePlane->setChecked(true);
+    toggleBasePlane->setShortcut(QKeySequence("Ctrl+B"));
+    connect(toggleBasePlane, &QAction::toggled, m_assemblyView,
+            &AssemblyView::setBasePlaneVisible);
+    viewMenu->addAction(toggleBasePlane);
 }
 
 void MainWindow::populateFlowEngine()
