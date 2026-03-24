@@ -1030,11 +1030,12 @@ void MainWindow::setupFlowPanel()
     m_flowPanelDock->setMinimumHeight(100);
     m_flowPanelDock->resize(m_flowPanelDock->width(), 200);
 
-    // Tab with script console
+    // Tab with script console, hidden by default (View > Flow Pipeline to show)
     if (m_scriptConsoleDock) {
         tabifyDockWidget(m_scriptConsoleDock, m_flowPanelDock);
         m_scriptConsoleDock->raise();
     }
+    m_flowPanelDock->hide();
 
     // Connect FlowPanel signals to FlowEngine
     connect(m_flowPanel, &FlowPanel::stepRunRequested,
@@ -1086,12 +1087,13 @@ void MainWindow::setupNetGraphPanel()
     m_netGraphDock->setMinimumHeight(100);
     m_netGraphDock->resize(m_netGraphDock->width(), 250);
 
-    // Tab with flow panel
+    // Tab with flow panel, hidden by default (View > Net Graph to show)
     if (m_flowPanelDock) {
         tabifyDockWidget(m_flowPanelDock, m_netGraphDock);
     } else if (m_scriptConsoleDock) {
         tabifyDockWidget(m_scriptConsoleDock, m_netGraphDock);
     }
+    m_netGraphDock->hide();
 
     // Bidirectional selection sync
     // NetGraph -> 3D + Hierarchy + Properties
