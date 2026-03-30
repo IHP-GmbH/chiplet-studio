@@ -1018,6 +1018,10 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
 
         bool isSelected = (id == m_selectedComponent);
 
+        // Flip-chip mirror reverses triangle winding -- fix face culling
+        bool isFlipped = (comp->orientation() == Orientation::FaceDown);
+        if (isFlipped) glFrontFace(GL_CW);
+
         // If Detailed and has layer geometry, render that
         if (comp->render_mode() == RenderMode::Detailed && m_layerGeometry.count(id)) {
             auto& geometry = m_layerGeometry[id];
@@ -1053,7 +1057,10 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
         } else {
             // Solid mode or Detailed without GDS: render box mesh
             auto meshIt = m_meshes.find(id);
-            if (meshIt == m_meshes.end()) continue;
+            if (meshIt == m_meshes.end()) {
+                if (isFlipped) glFrontFace(GL_CCW);
+                continue;
+            }
 
             QColor color = meshIt->second.color();
             m_componentShader.setUniformVec4("objectColor",
@@ -1063,6 +1070,8 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             meshIt->second.render();
             m_drawCallCount++;
         }
+
+        if (isFlipped) glFrontFace(GL_CCW);
     }
 
     m_componentShader.release();
@@ -1471,6 +1480,10 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         static_cast<float>(pos.x / 1000.0),
         static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y (vertical)
         static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z (negated)
+    // Flip-chip: mirror X for face-down dies
+    if (comp.orientation() == Orientation::FaceDown) {
+        geometry.transform.scale(-1.0f, 1.0f, 1.0f);
+    }
 
     // Upload layer meshes to GPU
     for (auto& layer : geometry.layers) {
@@ -2139,6 +2152,9 @@ void AssemblyView::updateTransforms()
                 static_cast<float>(pos.x / 1000.0),
                 static_cast<float>((pos.z + zOff) / 1000.0),
                 static_cast<float>(-pos.y / 1000.0));
+            if (comp->orientation() == Orientation::FaceDown) {
+                it->second.transform.scale(-1.0f, 1.0f, 1.0f);
+            }
         }
     }
 
@@ -2158,6 +2174,9 @@ void AssemblyView::updateTransforms()
                 static_cast<float>(pos.x / 1000.0),
                 static_cast<float>((pos.z + zOff) / 1000.0),
                 static_cast<float>(-pos.y / 1000.0));
+            if (comp->orientation() == Orientation::FaceDown) {
+                transform.scale(-1.0f, 1.0f, 1.0f);
+            }
             group.transforms[i] = transform;
 
             // Update bounding box
@@ -2165,8 +2184,18 @@ void AssemblyView::updateTransforms()
             VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
                            static_cast<float>((pos.z + zOff) / 1000.0),
                            static_cast<float>(-pos.y / 1000.0));
-            group.boundingBoxes[i].mins = localBB.mins + offset;
-            group.boundingBoxes[i].maxes = localBB.maxes + offset;
+            if (comp->orientation() == Orientation::FaceDown) {
+                // Mirror flips X bounds
+                group.boundingBoxes[i].mins.x = -(localBB.maxes.x) + offset.x;
+                group.boundingBoxes[i].maxes.x = -(localBB.mins.x) + offset.x;
+                group.boundingBoxes[i].mins.y = localBB.mins.y + offset.y;
+                group.boundingBoxes[i].maxes.y = localBB.maxes.y + offset.y;
+                group.boundingBoxes[i].mins.z = localBB.mins.z + offset.z;
+                group.boundingBoxes[i].maxes.z = localBB.maxes.z + offset.z;
+            } else {
+                group.boundingBoxes[i].mins = localBB.mins + offset;
+                group.boundingBoxes[i].maxes = localBB.maxes + offset;
+            }
         }
 
         makeCurrent();
