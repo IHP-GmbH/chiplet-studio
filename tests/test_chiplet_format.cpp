@@ -375,5 +375,56 @@ TEST(ChipletFormat, RoundTripFlow)
     std::filesystem::remove(tempPath);
 }
 
+// Test orientation field parsing and defaults
+TEST(ChipletFormat, OrientationDefault)
+{
+    Component comp("test_die", ComponentType::Die);
+    EXPECT_EQ(comp.orientation(), Orientation::FaceUp);
+}
+
+TEST(ChipletFormat, OrientationSetGet)
+{
+    Component comp("test_die", ComponentType::Die);
+    comp.set_orientation(Orientation::FaceDown);
+    EXPECT_EQ(comp.orientation(), Orientation::FaceDown);
+    comp.set_orientation(Orientation::FaceUp);
+    EXPECT_EQ(comp.orientation(), Orientation::FaceUp);
+}
+
+TEST(ChipletFormat, OrientationRoundTrip)
+{
+    // Create assembly with a flip-chip die
+    Assembly assembly;
+    assembly.set_name("OrientationTest");
+    auto die = std::make_unique<Component>("flip_die", ComponentType::Die);
+    die->set_orientation(Orientation::FaceDown);
+    die->set_dimensions({1000, 1000, 100});
+    assembly.add_component(std::move(die));
+
+    auto die_up = std::make_unique<Component>("normal_die", ComponentType::Die);
+    die_up->set_dimensions({1000, 1000, 100});
+    assembly.add_component(std::move(die_up));
+
+    // Save
+    std::string tempPath = "test_orientation_roundtrip.chiplet";
+    ChipletFormat format;
+    EXPECT_NO_THROW(format.save(assembly, tempPath));
+
+    // Load back
+    ChipletFormat format2;
+    auto loaded = format2.load(tempPath);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* flip = loaded->component("flip_die");
+    ASSERT_NE(flip, nullptr);
+    EXPECT_EQ(flip->orientation(), Orientation::FaceDown);
+
+    auto* normal = loaded->component("normal_die");
+    ASSERT_NE(normal, nullptr);
+    EXPECT_EQ(normal->orientation(), Orientation::FaceUp);
+
+    std::filesystem::remove(tempPath);
+}
+
 } // namespace
 } // namespace chiplet

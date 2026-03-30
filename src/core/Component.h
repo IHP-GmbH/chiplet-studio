@@ -49,6 +49,14 @@ enum class RenderMode {
 };
 
 /**
+ * Die orientation (face-up for wirebond, face-down for flip-chip)
+ */
+enum class Orientation {
+    FaceUp,    // Default: die face up (wirebond)
+    FaceDown   // Flip-chip: die face down, mirror X
+};
+
+/**
  * Component types
  */
 enum class ComponentType {
@@ -141,6 +149,10 @@ public:
     RenderMode render_mode() const;
     void set_render_mode(RenderMode mode);
 
+    // Orientation (face-up or flip-chip face-down)
+    Orientation orientation() const;
+    void set_orientation(Orientation o);
+
 private:
     string_type m_id;
     string_type m_name;  // User-editable display name, defaults to id
@@ -155,6 +167,7 @@ private:
     std::optional<array_type> m_array;
     metadata_type m_metadata;
     RenderMode m_renderMode;
+    Orientation m_orientation = Orientation::FaceUp;
 
     // Static empty string for backward compatibility reference return
     static const string_type s_emptyString;
