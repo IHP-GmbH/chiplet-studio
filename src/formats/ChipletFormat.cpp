@@ -320,6 +320,13 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
         component->set_rotation(parseRotation3D(node["rotation"]));
     }
 
+    // Orientation (face-up or flip-chip)
+    if (node["orientation"]) {
+        std::string orient = node["orientation"].as<std::string>("face_up");
+        if (orient == "flip_chip" || orient == "face_down")
+            component->set_orientation(Orientation::FaceDown);
+    }
+
     // Dimensions
     if (node["dimensions"]) {
         component->set_dimensions(parseDimensions3D(node["dimensions"]));
@@ -640,6 +647,11 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::Key << "rotation" << YAML::Value << YAML::Flow << YAML::BeginMap;
                 out << YAML::Key << "z" << YAML::Value << rot.z;
                 out << YAML::EndMap;
+            }
+
+            // Orientation
+            if (comp->orientation() == Orientation::FaceDown) {
+                out << YAML::Key << "orientation" << YAML::Value << "flip_chip";
             }
 
             // Dimensions

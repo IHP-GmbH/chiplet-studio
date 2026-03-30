@@ -175,4 +175,14 @@ void Component::set_render_mode(RenderMode mode)
     m_renderMode = mode;
 }
 
+Orientation Component::orientation() const
+{
+    return m_orientation;
+}
+
+void Component::set_orientation(Orientation o)
+{
+    m_orientation = o;
+}
+
 } // namespace chiplet
