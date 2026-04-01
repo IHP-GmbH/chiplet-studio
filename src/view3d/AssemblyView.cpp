@@ -1698,26 +1698,39 @@ void AssemblyView::updateSceneBounds()
     // This is checked FIRST because layer mode is the default and most common
     if (!m_layerGeometry.empty()) {
         for (const auto& [compId, geom] : m_layerGeometry) {
-            // Extract translation from transform (column 3)
-            QVector3D translation = geom.transform.column(3).toVector3D();
-
-            // For each layer, transform its mesh bounds to world space
             for (const auto& layer : geom.layers) {
                 AA_BOUNDING_BOX localBounds = layer.mesh.boundingBox();
 
-                // Apply translation to get world-space bounds
+                // Transform all 8 corners of the local bounding box to world space.
+                // This correctly handles scale(-1,1,1) for flip-chip components,
+                // where extracting only the translation column produces wrong bounds.
+                QVector3D corners[8] = {
+                    {localBounds.mins.x,  localBounds.mins.y,  localBounds.mins.z},
+                    {localBounds.maxes.x, localBounds.mins.y,  localBounds.mins.z},
+                    {localBounds.mins.x,  localBounds.maxes.y, localBounds.mins.z},
+                    {localBounds.maxes.x, localBounds.maxes.y, localBounds.mins.z},
+                    {localBounds.mins.x,  localBounds.mins.y,  localBounds.maxes.z},
+                    {localBounds.maxes.x, localBounds.mins.y,  localBounds.maxes.z},
+                    {localBounds.mins.x,  localBounds.maxes.y, localBounds.maxes.z},
+                    {localBounds.maxes.x, localBounds.maxes.y, localBounds.maxes.z},
+                };
+
+                QVector3D wc = geom.transform.map(corners[0]);
+                VECTOR3D wMins(wc.x(), wc.y(), wc.z());
+                VECTOR3D wMaxes = wMins;
+
+                for (int i = 1; i < 8; ++i) {
+                    wc = geom.transform.map(corners[i]);
+                    if (wc.x() < wMins.x) wMins.x = wc.x();
+                    if (wc.y() < wMins.y) wMins.y = wc.y();
+                    if (wc.z() < wMins.z) wMins.z = wc.z();
+                    if (wc.x() > wMaxes.x) wMaxes.x = wc.x();
+                    if (wc.y() > wMaxes.y) wMaxes.y = wc.y();
+                    if (wc.z() > wMaxes.z) wMaxes.z = wc.z();
+                }
+
                 AA_BOUNDING_BOX worldBounds;
-                VECTOR3D worldMins(
-                    localBounds.mins.x + translation.x(),
-                    localBounds.mins.y + translation.y(),
-                    localBounds.mins.z + translation.z()
-                );
-                VECTOR3D worldMaxes(
-                    localBounds.maxes.x + translation.x(),
-                    localBounds.maxes.y + translation.y(),
-                    localBounds.maxes.z + translation.z()
-                );
-                worldBounds.SetFromMinsMaxes(worldMins, worldMaxes);
+                worldBounds.SetFromMinsMaxes(wMins, wMaxes);
 
                 if (first) {
                     sceneBounds = worldBounds;
