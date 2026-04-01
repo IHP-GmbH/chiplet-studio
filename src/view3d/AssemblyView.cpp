@@ -1468,10 +1468,17 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     }
 
     // Build 3D geometry from polygons
+    // For flip-chip (FaceDown) dies, invert layer z-positions so that
+    // the topmost metal (e.g. TopMetal2) sits at z=0 and lower metals
+    // stack upward, matching the physical face-down orientation.
+    bool flipZ = (comp.orientation() == Orientation::FaceDown);
+    double beolTop = flipZ ? stackup.totalHeight() : 0.0;
+
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
         polygons, stackup, lyp,
-        hasColorScheme ? &colorScheme : nullptr);
+        hasColorScheme ? &colorScheme : nullptr,
+        1.0, flipZ, beolTop);
 
     // Set component ID and apply transform
     geometry.componentId = compId;

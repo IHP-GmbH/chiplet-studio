@@ -91,7 +91,9 @@ public:
         const LayerStackup& stackup,
         const LayerPropertiesFile* lyp = nullptr,
         const LayerColorScheme* colorScheme = nullptr,
-        double scale = 1.0);
+        double scale = 1.0,
+        bool flipZ = false,
+        double beolTop = 0.0);
 
     /**
      * Build a single layer mesh
