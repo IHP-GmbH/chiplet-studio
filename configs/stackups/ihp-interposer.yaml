@@ -3,7 +3,7 @@
 # IHP SG13G2 Interposer stackup with cu-pillar connection stack
 #
 # Based on SG13G2 process spec Rev 1.2 (BEOL thicknesses) and
-# SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 1 (cu-pillar dimensions).
+# SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 2 (cu-pillar dimensions).
 #
 # Layers 500+ are 3D visualization/simulation auxiliary layers.
 # They represent post-passivation physical volumes and are NOT
@@ -58,21 +58,44 @@ Passiv:
   z: 13.83
   height: 1.90
 
-# --- Cu-Pillar connection stack (Table 6.1 Option 1, 35um opening) ---
+# --- Cu-Pillar fabrication layers (datatype 35 = pillar variant) ---
+# These are the same physical layers as their parent (Passiv, dfpad, Recog)
+# but with datatype 35 to indicate cu-pillar pad regions.
+# Rendered at TopMetal2 z so they visually merge with the interposer pad.
+
+Passiv_pillar:
+  index: 9
+  type: 35
+  z: 10.83
+  height: 3.00
+
+dfpad_pillar:
+  index: 41
+  type: 35
+  z: 10.83
+  height: 3.00
+
+Recog_pillar:
+  index: 99
+  type: 35
+  z: 10.83
+  height: 3.00
+
+# --- Cu-Pillar connection stack (Table 6.1 Option 2, 40um opening) ---
 # Physical stack above passivation opening:
-#   Cu pillar body: 28 um height, 44 um diameter
-#   SnAg cap:       16 um height, 44 um diameter
+#   Cu pillar body: 32 um height, 49 um diameter
+#   SnAg cap:       16 um height, 49 um diameter
 
 CuPillar:
   index: 500
   type: 35
   z: 13.83
-  height: 28.00
+  height: 32.00
 
 SnAgCap:
   index: 501
   type: 35
-  z: 41.83
+  z: 45.83
   height: 16.00
 
 # --- Solder bump (Section 6.9.1, 80um ball on 60um opening) ---

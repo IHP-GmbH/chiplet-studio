@@ -826,7 +826,11 @@ void AssemblyView::buildMeshes()
             // Position the box to align with GDS coordinates.
             // GDS geometry is at (gds_x, gds_y) in cell space, then translated
             // by component position. Box must match.
-            float offsetX = static_cast<float>(pos.x / 1000.0 + (bbox.x_min + bbox.x_max) / 2000.0);
+            // Flip-chip dies get scale(-1,1,1) in LayerMode, so the GDS center X
+            // must be negated to keep the box aligned with the mirrored geometry.
+            bool isFlipChip = (comp->orientation() == Orientation::FaceDown);
+            float gdsCenterX = static_cast<float>((bbox.x_min + bbox.x_max) / 2000.0);
+            float offsetX = static_cast<float>(pos.x / 1000.0) + (isFlipChip ? -gdsCenterX : gdsCenterX);
             float offsetY = static_cast<float>(pos.z / 1000.0);     // Elevation
             float offsetZ = static_cast<float>(-pos.y / 1000.0 - bbox.y_min / 1000.0);  // Near Z face
 
@@ -2174,9 +2178,8 @@ void AssemblyView::updateTransforms()
                 static_cast<float>(pos.x / 1000.0),
                 static_cast<float>((pos.z + zOff) / 1000.0),
                 static_cast<float>(-pos.y / 1000.0));
-            if (comp->orientation() == Orientation::FaceDown) {
-                transform.scale(-1.0f, 1.0f, 1.0f);
-            }
+            // No mirror in BoxMode -- boxes are symmetric, mirror only
+            // affects Detailed/LayerMode where internal geometry matters
             group.transforms[i] = transform;
 
             // Update bounding box
@@ -2184,18 +2187,8 @@ void AssemblyView::updateTransforms()
             VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
                            static_cast<float>((pos.z + zOff) / 1000.0),
                            static_cast<float>(-pos.y / 1000.0));
-            if (comp->orientation() == Orientation::FaceDown) {
-                // Mirror flips X bounds
-                group.boundingBoxes[i].mins.x = -(localBB.maxes.x) + offset.x;
-                group.boundingBoxes[i].maxes.x = -(localBB.mins.x) + offset.x;
-                group.boundingBoxes[i].mins.y = localBB.mins.y + offset.y;
-                group.boundingBoxes[i].maxes.y = localBB.maxes.y + offset.y;
-                group.boundingBoxes[i].mins.z = localBB.mins.z + offset.z;
-                group.boundingBoxes[i].maxes.z = localBB.maxes.z + offset.z;
-            } else {
-                group.boundingBoxes[i].mins = localBB.mins + offset;
-                group.boundingBoxes[i].maxes = localBB.maxes + offset;
-            }
+            group.boundingBoxes[i].mins = localBB.mins + offset;
+            group.boundingBoxes[i].maxes = localBB.maxes + offset;
         }
 
         makeCurrent();
