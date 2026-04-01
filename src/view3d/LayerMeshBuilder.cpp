@@ -261,6 +261,12 @@ Component3DGeometry LayerMeshBuilder::build(
 
     result.total_height = max_z;
 
+    // Sort layers by physical z-position so rendering order matches stacking
+    std::sort(result.layers.begin(), result.layers.end(),
+        [](const LayerMesh& a, const LayerMesh& b) {
+            return a.z_bottom < b.z_bottom;
+        });
+
     std::cerr << "LayerMeshBuilder: Built " << result.layers.size()
               << " layer meshes, " << result.totalTriangles() << " triangles"
               << std::endl;
