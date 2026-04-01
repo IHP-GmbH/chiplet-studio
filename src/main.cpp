@@ -19,11 +19,14 @@ namespace py = pybind11;
 #include <QStandardPaths>
 #include <QTimer>
 #include <QFile>
+#include <QDir>
+#include <QFileInfo>
 #include "ui/MainWindow.h"
 #include "ui/CrashRecoveryDialog.h"
 #include "core/CommandFactory.h"
 #include "core/CommandJournal.h"
 #include "core/Assembly.h"
+#include "core/LayerStackup.h"
 
 #ifdef HAVE_PYTHON
 // Global Python interpreter guard - must be created before Qt and
@@ -56,6 +59,35 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("Chiplet Studio");
     app.setApplicationVersion("0.1.0");
+
+    // Resolve BlenderGDS configs directory at runtime.
+    // CONFIGS_DIR is set at compile time (may point to Docker build path).
+    // Try multiple candidate paths to find the actual configs directory.
+    {
+        QStringList candidates;
+#ifdef CONFIGS_DIR
+        candidates << QString::fromStdString(CONFIGS_DIR);
+#endif
+        // Relative to executable (installed layout or development build)
+        QString appDir = QCoreApplication::applicationDirPath();
+        candidates << appDir + "/../configs"
+                   << appDir + "/../../configs"
+                   << appDir + "/../share/chiplet-studio/configs";
+        // Relative to source tree (for development when running from build dir)
+        candidates << appDir + "/../../chiplet-studio/configs"
+                   << appDir + "/../../../chiplet-studio/configs";
+
+        for (const QString& candidate : candidates) {
+            QDir dir(candidate);
+            if (dir.exists() && dir.exists("stackups")) {
+                chiplet::BlenderGDSConfigs::setConfigsDir(
+                    dir.canonicalPath().toStdString());
+                qDebug("BlenderGDS configs: %s",
+                       qPrintable(dir.canonicalPath()));
+                break;
+            }
+        }
+    }
 
     // Register built-in command types for deserialization
     chiplet::CommandFactory::register_builtin_commands();

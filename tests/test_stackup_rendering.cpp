@@ -65,7 +65,7 @@ TEST_F(StackupRenderingTest, InterposerTechfile) {
     ASSERT_TRUE(tech.load_process_def(techfile));
 
     chiplet::LayerStackup stackup = tech.createStackup();
-    EXPECT_EQ(stackup.layerCount(), 7) << "Interposer has 7 layers";
+    EXPECT_EQ(stackup.layerCount(), 11) << "Interposer has 11 layers (7 routing + Passiv + 3 cu-pillar)";
 
     // TopMetal2 (layer 134): Height 11160nm -> 11.16um
     const chiplet::LayerElevation* topMetal2 = stackup.find(134, 0);

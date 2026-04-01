@@ -179,7 +179,18 @@ Component3DGeometry LayerMeshBuilder::build(
         // Find layer elevation
         const LayerElevation* elev = stackup.find(key);
 
-        // Create fallback elevation if not in stackup
+        // Fallback: try matching by layer number only (different datatypes
+        // of the same layer share the same physical z position)
+        if (!elev) {
+            elev = stackup.findByLayer(key.layer);
+            if (elev) {
+                std::cerr << "LayerMeshBuilder: Layer " << key.layer << "/" << key.datatype
+                          << " mapped to " << elev->name << " via layer-number fallback"
+                          << " (z=" << elev->z_bottom << ")" << std::endl;
+            }
+        }
+
+        // Create fallback elevation if not in stackup at all
         LayerElevation fallback_elev;
         if (!elev) {
             // Auto-assign z position based on layer number to spread them out
@@ -267,6 +278,9 @@ Component3DGeometry LayerMeshBuilder::build(
             return a.z_bottom < b.z_bottom;
         });
 
+    if (flipZ) {
+        std::cerr << "LayerMeshBuilder: flipZ beolTop=" << beolTop << std::endl;
+    }
     std::cerr << "LayerMeshBuilder: Built " << result.layers.size()
               << " layer meshes, " << result.totalTriangles() << " triangles"
               << std::endl;
