@@ -154,7 +154,9 @@ Component3DGeometry LayerMeshBuilder::build(
     const LayerStackup& stackup,
     const LayerPropertiesFile* lyp,
     const LayerColorScheme* colorScheme,
-    double scale)
+    double scale,
+    bool flipZ,
+    double beolTop)
 {
     Component3DGeometry result;
 
@@ -227,10 +229,17 @@ Component3DGeometry LayerMeshBuilder::build(
             color = QColor::fromHsv(hue, 200, 200, 200);
         }
 
+        // Z-inversion for flip-chip dies: TopMetal2 goes to z=0 (bottom),
+        // Metal1 goes to the top. Thickness is unchanged.
+        double layer_z = elev->z_bottom;
+        if (flipZ) {
+            layer_z = beolTop - (elev->z_bottom + elev->thickness);
+        }
+
         // Build mesh for this layer
         LayerMesh layer_mesh = buildLayerMesh(
             layer_polys,
-            elev->z_bottom,
+            layer_z,
             elev->thickness,
             color,
             unit_scale,
