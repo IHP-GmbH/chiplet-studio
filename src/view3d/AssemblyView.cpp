@@ -1595,11 +1595,15 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
         transform = geomIt->second.transform;
     }
 
-    // Rebuild mesh
+    // Rebuild mesh (preserve flip-chip z-inversion from initial build)
+    bool flipZ = (comp->orientation() == Orientation::FaceDown);
+    double beolTop = flipZ ? stackup.totalHeight() : 0.0;
+
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
         polygons, stackup, lyp,
-        hasColorScheme ? &colorScheme : nullptr);
+        hasColorScheme ? &colorScheme : nullptr,
+        1.0, flipZ, beolTop);
 
     geometry.componentId = compId;
     geometry.transform = transform;
