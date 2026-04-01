@@ -42,9 +42,14 @@ public:
     void addLayer(int layer, int datatype, double z_bottom, double thickness,
                   const std::string& name = "");
 
-    // Find elevation for a layer
+    // Find elevation for a layer (exact layer/datatype match)
     const LayerElevation* find(int layer, int datatype) const;
     const LayerElevation* find(const LayerKey& key) const;
+
+    // Find elevation by layer number only (any datatype).
+    // Returns the first match -- useful as fallback when exact datatype
+    // is not mapped (e.g. filler/label datatypes sharing the same z).
+    const LayerElevation* findByLayer(int layer) const;
 
     // Get all layers sorted by z_bottom
     std::vector<LayerElevation> sortedLayers() const;

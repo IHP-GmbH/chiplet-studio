@@ -38,6 +38,16 @@ const LayerElevation* LayerStackup::find(const LayerKey& key) const
     return nullptr;
 }
 
+const LayerElevation* LayerStackup::findByLayer(int layer) const
+{
+    for (const auto& [key, elev] : m_layers) {
+        if (key.layer == layer) {
+            return &elev;
+        }
+    }
+    return nullptr;
+}
+
 std::vector<LayerElevation> LayerStackup::sortedLayers() const
 {
     std::vector<LayerElevation> result;
