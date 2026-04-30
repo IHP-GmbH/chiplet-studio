@@ -4,6 +4,10 @@
 
 #include <gtest/gtest.h>
 #include <filesystem>
+#include <map>
+#include <set>
+#include <string>
+#include <utility>
 #include "formats/ChipletFormat.h"
 #include "core/IOPad.h"
 
@@ -117,6 +121,42 @@ TEST(ChipletFormatIOPads, ComponentApiAddAndClear)
 
     c.clear_io_pads();
     EXPECT_EQ(c.io_pad_count(), 0u);
+}
+
+TEST(ChipletFormatIOPads, LoadRealHypToGdsOutput)
+{
+    // Smoke: parse a .chiplet produced by the actual hyp_to_gds.py pipeline.
+    // Asserts schema compatibility end-to-end (hyp_to_gds -> ChipletFormat::load).
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("pipeline_smoke.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    auto* interposer = assembly->component(ComponentID("interposer"));
+    ASSERT_NE(interposer, nullptr);
+
+    const auto& pads = interposer->io_pads();
+    ASSERT_EQ(pads.size(), 4u);
+
+    std::map<std::string, std::pair<double, double>> expected = {
+        {"J1", {500.0, 1000.0}},
+        {"J2", {1500.0, 1000.0}},
+        {"J3", {500.0, 2000.0}},
+        {"J4", {1500.0, 2000.0}},
+    };
+    std::set<std::string> expected_nets = {"VDD_EXT", "GND_EXT", "OUT0", "OUT1"};
+    std::set<std::string> seen_nets;
+
+    for (const auto& p : pads) {
+        EXPECT_EQ(p.io_class(), IOClass::WireBond);
+        EXPECT_EQ(p.layer(), "TopMetal2");
+        EXPECT_DOUBLE_EQ(p.size().x, 100.0);
+        EXPECT_DOUBLE_EQ(p.size().y, 100.0);
+        ASSERT_TRUE(expected.count(p.id())) << "unexpected pad id: " << p.id();
+        EXPECT_DOUBLE_EQ(p.position().x, expected[p.id()].first);
+        EXPECT_DOUBLE_EQ(p.position().y, expected[p.id()].second);
+        seen_nets.insert(p.net());
+    }
+    EXPECT_EQ(seen_nets, expected_nets);
 }
 
 }  // namespace

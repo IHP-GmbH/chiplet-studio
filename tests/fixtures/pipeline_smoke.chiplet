@@ -1,0 +1,179 @@
+format_version: '1.0'
+assembly:
+  name: pipeline_smoke
+  units: um
+technologies:
+  interposer_tech:
+    description: Imported from KiCad
+    layer_properties: ./interposer_ihp.lyp
+    dbu: 0.001
+  sg13g2:
+    description: Imported from KiCad
+    layer_properties: ./sg13g2.lyp
+    dbu: 0.001
+  sky130:
+    description: Imported from KiCad
+    layer_properties: ./sky130.lyp
+    dbu: 0.001
+connection_stacks:
+  cupillar_opt1:
+    description: PacTech Cu Pillar, Table 6.1 Option 1 (35um opening)
+    layers:
+    - name: CuPillar
+      material: Cu
+      height: 28.0
+      diameter: 44.0
+    - name: SnAgCap
+      material: SnAg
+      height: 16.0
+      diameter: 44.0
+  cupillar_opt2:
+    description: PacTech Cu Pillar, Table 6.1 Option 2 (40um opening)
+    layers:
+    - name: CuPillar
+      material: Cu
+      height: 32.0
+      diameter: 49.0
+    - name: SnAgCap
+      material: SnAg
+      height: 16.0
+      diameter: 49.0
+  cupillar_opt3:
+    description: PacTech Cu Pillar, Table 6.1 Option 3 (45um opening)
+    layers:
+    - name: CuPillar
+      material: Cu
+      height: 42.0
+      diameter: 54.0
+    - name: SnAgCap
+      material: SnAg
+      height: 19.0
+      diameter: 54.0
+  sbump_sac305:
+    description: PacTech SAC305 solder bump (80um ball)
+    layers:
+    - name: SolderBall
+      material: SAC305
+      height: 80.0
+      diameter: 80.0
+components:
+- id: interposer
+  type: interposer
+  technology: interposer_tech
+  layout: ./interposer.gds
+  top_cell: TOP
+  dimensions:
+    width: 172986.089
+    height: 103893.19900000001
+    thickness: 13.83
+  position:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  io_pads:
+  - id: J1
+    io_class: wire_bond
+    net: VDD_EXT
+    position:
+      x: 500.0
+      y: 1000.0
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J2
+    io_class: wire_bond
+    net: GND_EXT
+    position:
+      x: 1500.0
+      y: 1000.0
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J3
+    io_class: wire_bond
+    net: OUT0
+    position:
+      x: 500.0
+      y: 2000.0
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J4
+    io_class: wire_bond
+    net: OUT1
+    position:
+      x: 1500.0
+      y: 2000.0
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+- id: U2
+  type: die
+  technology: sg13g2
+  connection: cupillar_opt2
+  layout: ./FMD_QNC_OTA_TIA.gds
+  orientation: flip_chip
+  dimensions:
+    width: 625.87
+    height: 625.87
+    thickness: 0.0
+  position:
+    x: 171461.971
+    y: -100372.559
+    z: 61.83
+  rotation:
+    z: 0.0
+  top_cell: DiffAmp_NOFILL
+- id: U1
+  type: die
+  technology: sg13g2
+  connection: cupillar_opt2
+  layout: ./Interposer_ANT_CuPi.gds
+  orientation: flip_chip
+  dimensions:
+    width: 1560.0
+    height: 3530.172
+    thickness: 0.0
+  position:
+    x: 172785.382
+    y: -100482.692
+    z: 61.83
+  rotation:
+    z: 0.0
+  top_cell: Interposer_ANT_CuPi
+- id: U4
+  type: die
+  technology: sg13g2
+  connection: cupillar_opt2
+  layout: ./Interposer_ANT_CuPi.gds
+  orientation: flip_chip
+  dimensions:
+    width: 1560.0
+    height: 3530.172
+    thickness: 0.0
+  position:
+    x: 169882.357
+    y: -100484.023
+    z: 61.83
+  rotation:
+    z: 0.0
+  top_cell: Interposer_ANT_CuPi
+- id: U3
+  type: die
+  technology: sky130
+  layout: ./SystemLevel.gds
+  dimensions:
+    width: 238.485
+    height: 212.035
+    thickness: 0.0
+  position:
+    x: 171721.017
+    y: -99890.459
+    z: 1560.0
+  rotation:
+    z: 0.0
+  top_cell: SystemLevel
