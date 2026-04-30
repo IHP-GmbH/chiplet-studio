@@ -106,6 +106,7 @@ set(CORE_SOURCES
     src/core/Assembly.cpp
     src/core/Component.cpp
     src/core/Interface.cpp
+    src/core/IOPad.cpp
     src/core/Netlist.cpp
     src/core/Technology.cpp
     src/core/LayerStackup.cpp

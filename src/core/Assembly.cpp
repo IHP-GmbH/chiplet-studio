@@ -49,6 +49,11 @@ const Assembly::string_type& Assembly::assembly_gds() const
     return m_assembly_gds;
 }
 
+const Assembly::string_type& Assembly::io_technology() const
+{
+    return m_io_technology;
+}
+
 // Setters - metadata
 
 void Assembly::set_name(const string_type& name)
@@ -84,6 +89,11 @@ void Assembly::set_units(const string_type& units)
 void Assembly::set_assembly_gds(const string_type& path)
 {
     m_assembly_gds = path;
+}
+
+void Assembly::set_io_technology(const string_type& tech)
+{
+    m_io_technology = tech;
 }
 
 // Components

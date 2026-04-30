@@ -68,6 +68,16 @@ void Net::clear_connections()
     m_connections.clear();
 }
 
+bool Net::external() const
+{
+    return m_external;
+}
+
+void Net::set_external(bool e)
+{
+    m_external = e;
+}
+
 // --- Netlist implementation ---
 
 Netlist::Netlist() = default;
@@ -145,6 +155,17 @@ std::vector<const Net*> Netlist::nets_for_component(const string_type& component
                 result.push_back(&net);
                 break;  // Found at least one connection to this component
             }
+        }
+    }
+    return result;
+}
+
+std::vector<const Net*> Netlist::nets_external() const
+{
+    std::vector<const Net*> result;
+    for (const auto& net : m_nets) {
+        if (net.external()) {
+            result.push_back(&net);
         }
     }
     return result;

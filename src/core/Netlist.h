@@ -63,10 +63,16 @@ public:
     size_t connection_count() const;
     void clear_connections();
 
+    // External flag: set when this net leaves the package boundary
+    // (e.g. terminates at an IOPad on the interposer for wire-bonding).
+    bool external() const;
+    void set_external(bool e);
+
 private:
     string_type m_name;
     NetClass m_net_class = NetClass::Signal;
     connection_list_type m_connections;
+    bool m_external = false;
 };
 
 /**
@@ -96,6 +102,9 @@ public:
 
     // Query by component
     std::vector<const Net*> nets_for_component(const string_type& component_id) const;
+
+    // Query: nets exposed externally (Net::external() == true)
+    std::vector<const Net*> nets_external() const;
 
     // External netlist file reference (CSV)
     void set_external_netlist_path(const string_type& path);

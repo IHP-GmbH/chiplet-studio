@@ -5,6 +5,7 @@
 #include "ChipletFormat.h"
 #include "core/Technology.h"
 #include "core/ConnectionStack.h"
+#include "core/IOPad.h"
 #include "core/flow/FlowConfig.h"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
@@ -204,6 +205,10 @@ void ChipletFormat::parse_assembly_metadata(const YAML::Node& node, Assembly& as
     if (node["assembly_gds"]) {
         assembly.set_assembly_gds(resolve_path(node["assembly_gds"].as<std::string>()));
     }
+
+    if (node["io_technology"]) {
+        assembly.set_io_technology(node["io_technology"].as<std::string>());
+    }
 }
 
 void ChipletFormat::parse_technologies(const YAML::Node& node, Assembly& assembly)
@@ -371,6 +376,48 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
         }
     }
 
+    // External I/O pads (e.g. wire-bond pads on the interposer).
+    // Optional and additive: existing files without io_pads are unaffected.
+    if (node["io_pads"] && node["io_pads"].IsSequence()) {
+        for (const auto& padNode : node["io_pads"]) {
+            IOPad pad;
+            if (padNode["id"]) {
+                pad.set_id(padNode["id"].as<std::string>());
+            }
+            if (padNode["io_class"]) {
+                pad.set_io_class(string_to_io_class(
+                    padNode["io_class"].as<std::string>()));
+            }
+            if (padNode["net"]) {
+                pad.set_net(padNode["net"].as<std::string>());
+            }
+            if (padNode["position"]) {
+                IOPadPosition p;
+                if (padNode["position"]["x"]) {
+                    p.x = padNode["position"]["x"].as<double>();
+                }
+                if (padNode["position"]["y"]) {
+                    p.y = padNode["position"]["y"].as<double>();
+                }
+                pad.set_position(p);
+            }
+            if (padNode["size"]) {
+                IOPadSize sz;
+                if (padNode["size"]["x"]) {
+                    sz.x = padNode["size"]["x"].as<double>();
+                }
+                if (padNode["size"]["y"]) {
+                    sz.y = padNode["size"]["y"].as<double>();
+                }
+                pad.set_size(sz);
+            }
+            if (padNode["layer"]) {
+                pad.set_layer(padNode["layer"].as<std::string>());
+            }
+            component->add_io_pad(pad);
+        }
+    }
+
     assembly.add_component(std::move(component));
 }
 
@@ -470,6 +517,10 @@ void ChipletFormat::parse_netlist(const YAML::Node& node, Assembly& assembly)
 
             Net net(name, nc);
 
+            if (netNode["external"]) {
+                net.set_external(netNode["external"].as<bool>());
+            }
+
             if (netNode["connections"] && netNode["connections"].IsSequence()) {
                 for (const auto& connNode : netNode["connections"]) {
                     NetConnection conn;
@@ -538,6 +589,9 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     out << YAML::Key << "units" << YAML::Value << assembly.units();
     if (!assembly.assembly_gds().empty()) {
         out << YAML::Key << "assembly_gds" << YAML::Value << assembly.assembly_gds();
+    }
+    if (!assembly.io_technology().empty()) {
+        out << YAML::Key << "io_technology" << YAML::Value << assembly.io_technology();
     }
     out << YAML::EndMap;
 
@@ -695,6 +749,35 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::EndMap;
             }
 
+            // I/O pads
+            if (!comp->io_pads().empty()) {
+                out << YAML::Key << "io_pads" << YAML::Value << YAML::BeginSeq;
+                for (const auto& pad : comp->io_pads()) {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "id" << YAML::Value << pad.id();
+                    out << YAML::Key << "io_class" << YAML::Value
+                        << io_class_to_string(pad.io_class());
+                    if (!pad.net().empty()) {
+                        out << YAML::Key << "net" << YAML::Value << pad.net();
+                    }
+                    out << YAML::Key << "position" << YAML::Value
+                        << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "x" << YAML::Value << pad.position().x;
+                    out << YAML::Key << "y" << YAML::Value << pad.position().y;
+                    out << YAML::EndMap;
+                    out << YAML::Key << "size" << YAML::Value
+                        << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "x" << YAML::Value << pad.size().x;
+                    out << YAML::Key << "y" << YAML::Value << pad.size().y;
+                    out << YAML::EndMap;
+                    if (!pad.layer().empty()) {
+                        out << YAML::Key << "layer" << YAML::Value << pad.layer();
+                    }
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
+
             out << YAML::EndMap;
         }
 
@@ -758,6 +841,10 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::BeginMap;
                 out << YAML::Key << "name" << YAML::Value << net.name();
                 out << YAML::Key << "class" << YAML::Value << net_class_to_string(net.net_class());
+
+                if (net.external()) {
+                    out << YAML::Key << "external" << YAML::Value << net.external();
+                }
 
                 if (net.connection_count() > 0) {
                     out << YAML::Key << "connections" << YAML::Value << YAML::BeginSeq;
