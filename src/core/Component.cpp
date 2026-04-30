@@ -185,4 +185,24 @@ void Component::set_orientation(Orientation o)
     m_orientation = o;
 }
 
+void Component::add_io_pad(const IOPad& pad)
+{
+    m_ioPads.push_back(pad);
+}
+
+void Component::clear_io_pads()
+{
+    m_ioPads.clear();
+}
+
+const std::vector<IOPad>& Component::io_pads() const
+{
+    return m_ioPads;
+}
+
+size_t Component::io_pad_count() const
+{
+    return m_ioPads.size();
+}
+
 } // namespace chiplet

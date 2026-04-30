@@ -9,6 +9,7 @@
 #include <vector>
 #include <optional>
 #include <map>
+#include "IOPad.h"
 
 namespace chiplet {
 
@@ -153,6 +154,13 @@ public:
     Orientation orientation() const;
     void set_orientation(Orientation o);
 
+    // External I/O pads attached to this component (e.g. wire-bond
+    // pads on the interposer).
+    void add_io_pad(const IOPad& pad);
+    void clear_io_pads();
+    const std::vector<IOPad>& io_pads() const;
+    size_t io_pad_count() const;
+
 private:
     string_type m_id;
     string_type m_name;  // User-editable display name, defaults to id
@@ -168,6 +176,7 @@ private:
     metadata_type m_metadata;
     RenderMode m_renderMode;
     Orientation m_orientation = Orientation::FaceUp;
+    std::vector<IOPad> m_ioPads;
 
     // Static empty string for backward compatibility reference return
     static const string_type s_emptyString;
