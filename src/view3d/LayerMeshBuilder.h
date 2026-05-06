@@ -93,7 +93,8 @@ public:
         const LayerColorScheme* colorScheme = nullptr,
         double scale = 1.0,
         bool flipZ = false,
-        double beolTop = 0.0);
+        double beolTop = 0.0,
+        bool useGdsOriginAsAnchor = false);
 
     /**
      * Build a single layer mesh
