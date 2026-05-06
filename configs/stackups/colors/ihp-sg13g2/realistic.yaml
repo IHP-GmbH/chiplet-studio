@@ -100,11 +100,15 @@ layers:
     roughness: 0.3
 
   # TopMetal2: matches sg13g2.lyp fill color (#ff8000 = orange).
+  # TopMetal2Filler is intentionally dimmed so the drawing layer
+  # (actual bond pads / signal routing) stands out visually. KLayout
+  # uses dither patterns to differentiate drawing/filler; in 3D we have
+  # only solid color, so we lean on tone.
   TopMetal2:
     color: [1.0, 0.502, 0.0, 1.0]
     metallic: 0.8
     roughness: 0.3
   TopMetal2Filler:
-    color: [1.0, 0.502, 0.0, 1.0]
-    metallic: 0.8
-    roughness: 0.3
+    color: [0.35, 0.18, 0.0, 1.0]
+    metallic: 0.5
+    roughness: 0.7
