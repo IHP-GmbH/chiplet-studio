@@ -70,7 +70,7 @@ int CmdSetRenderMode::renderModeToInt(RenderMode mode)
 
 RenderMode CmdSetRenderMode::renderModeFromInt(int value)
 {
-    if (value >= 0 && value <= 4) {
+    if (value >= 0 && value <= 5) {
         return static_cast<RenderMode>(value);
     }
     return RenderMode::Solid;  // Safe default

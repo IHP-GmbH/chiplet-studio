@@ -9,6 +9,17 @@
 # They represent post-passivation physical volumes and are NOT
 # fabrication layers. See interposer PDK layers_def.drc for details.
 
+# --- Si bulk substrate (visualized at 50 um -- aesthetic, NOT physical) ---
+# True wafer is 750 um per SG13G2 spec. We render a much thinner slab so
+# RDL routing, cu-pillars, and chiplets sitting on top remain visible at
+# usable camera distances. For physically-accurate rendering (thermal/
+# mechanical sims), restore height: 750.0 here.
+Substrate:
+  index: 40
+  type: 0
+  z: -50.0
+  height: 50.0
+
 # --- Interposer RDL routing layers (Metal4 through TopMetal2) ---
 
 Metal4:

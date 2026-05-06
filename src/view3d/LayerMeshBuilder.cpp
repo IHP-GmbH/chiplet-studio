@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <QDebug>
 
 // GDS3D tessellation engine - must include in this order
@@ -169,13 +170,73 @@ Component3DGeometry LayerMeshBuilder::build(
     double auto_z = 0.0;
     const double default_layer_thickness = 1.0;  // 1um default thickness
 
-    // No per-component centering: GDS coordinates are used as-is so that
-    // the .chiplet position (applied as a transform in AssemblyView) places
-    // each component correctly in assembly space.
-    double center_offset_x = 0.0;
-    double center_offset_y = 0.0;
+    // Per-component centering: subtract each component's own GDS bounding-box
+    // center from its mesh vertices so the mesh is built around (0,0). This
+    // makes components reusable regardless of where their content sits in
+    // the source GDS frame, and lets `.chiplet position` consistently mean
+    // "where this component's center sits in assembly space" (applied as a
+    // transform in AssemblyView).
+    double global_min_x = std::numeric_limits<double>::max();
+    double global_min_y = std::numeric_limits<double>::max();
+    double global_max_x = std::numeric_limits<double>::lowest();
+    double global_max_y = std::numeric_limits<double>::lowest();
+    bool has_polygons = false;
 
     for (const auto& [key, layer_polys] : polygons) {
+        for (const auto& poly : layer_polys.polygons) {
+            for (const auto& pt : poly.points) {
+                if (pt.x < global_min_x) global_min_x = pt.x;
+                if (pt.x > global_max_x) global_max_x = pt.x;
+                if (pt.y < global_min_y) global_min_y = pt.y;
+                if (pt.y > global_max_y) global_max_y = pt.y;
+                has_polygons = true;
+            }
+        }
+    }
+
+    double center_offset_x = 0.0;
+    double center_offset_y = 0.0;
+    if (has_polygons) {
+        center_offset_x = (global_min_x + global_max_x) / 2.0;
+        center_offset_y = (global_min_y + global_max_y) / 2.0;
+    }
+
+    result.centeringOffset = QVector2D(
+        static_cast<float>(center_offset_x / 1000.0),
+        static_cast<float>(center_offset_y / 1000.0));
+
+    // Inject a procedural Substrate polygon covering the component's full
+    // bbox, so flip-chip dies and interposers show an opaque silicon body
+    // when viewed from the back. If the stackup declares Substrate (40/0),
+    // we always render it full-bbox -- the GDS may contain partial or no
+    // Substrate polygons (sg13g2 dies do; the interposer GDS does not).
+    // The slab thickness comes from the stackup YAML and is intentionally
+    // far thinner than the real 750 um wafer (see the YAML comments).
+    std::map<LayerKey, LayerPolygons> polygons_with_substrate;
+    const LayerElevation* substrate_elev = stackup.find(40, 0);
+    if (has_polygons && substrate_elev) {
+        SimplePolygon body_poly;
+        body_poly.points.push_back(Point2D(global_min_x, global_min_y));
+        body_poly.points.push_back(Point2D(global_max_x, global_min_y));
+        body_poly.points.push_back(Point2D(global_max_x, global_max_y));
+        body_poly.points.push_back(Point2D(global_min_x, global_max_y));
+
+        LayerKey substrate_key(40, 0);
+        LayerPolygons substrate_layer;
+        substrate_layer.key = substrate_key;
+        substrate_layer.name = "Substrate";
+        substrate_layer.polygons.push_back(std::move(body_poly));
+
+        // Copy original polygons, then OVERRIDE the substrate layer with
+        // the procedural full-bbox polygon (any partial substrate from
+        // the GDS is replaced).
+        polygons_with_substrate = polygons;
+        polygons_with_substrate[substrate_key] = std::move(substrate_layer);
+    }
+    const auto& effective_polygons = polygons_with_substrate.empty() ? polygons
+                                                                      : polygons_with_substrate;
+
+    for (const auto& [key, layer_polys] : effective_polygons) {
         // Find layer elevation
         const LayerElevation* elev = stackup.find(key);
 

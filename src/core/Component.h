@@ -42,11 +42,12 @@ struct Dimensions3D {
  * Per-component render mode for 3D visualization
  */
 enum class RenderMode {
-    Hidden,       // Not rendered
-    Wireframe,    // Bounding box edges only
-    Transparent,  // Semi-transparent solid (alpha blending)
-    Solid,        // Opaque solid
-    Detailed      // Full GDS layer tessellation
+    Hidden,                 // Not rendered
+    Wireframe,              // Bounding box edges only
+    Transparent,            // Semi-transparent solid (alpha blending)
+    Solid,                  // Opaque solid
+    Detailed,               // Full GDS layer tessellation (with Si bulk)
+    DetailedNoSubstrate     // Full GDS layer tessellation (no Si bulk slab)
 };
 
 /**

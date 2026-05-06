@@ -2,6 +2,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+# Si bulk visualized at 50 um -- aesthetic, NOT physically accurate.
+# IHP SG13 wafer is 750 um (sg13cmos5l shares the sg13g2 process). We
+# render a much thinner slab so the BEOL and connection stack stay
+# visible. For physically-accurate rendering (thermal/mechanical sims),
+# restore height: 750.0 here. Layer 40/0 = Substrate.drawing.
+Substrate:
+  index: 40
+  type: 0
+  z: -50.0
+  height: 50.0
+
 Activ:
   index: 1
   type: 0
