@@ -99,11 +99,12 @@ layers:
     metallic: 0.8
     roughness: 0.3
 
+  # TopMetal2: matches sg13g2.lyp fill color (#ff8000 = orange).
   TopMetal2:
-    color: [0.88, 0.90, 0.92, 1.0]
+    color: [1.0, 0.502, 0.0, 1.0]
     metallic: 0.8
     roughness: 0.3
   TopMetal2Filler:
-    color: [0.88, 0.90, 0.92, 1.0]
+    color: [1.0, 0.502, 0.0, 1.0]
     metallic: 0.8
     roughness: 0.3
