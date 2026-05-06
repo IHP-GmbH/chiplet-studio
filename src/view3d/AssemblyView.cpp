@@ -823,16 +823,15 @@ void AssemblyView::buildMeshes()
             float d = static_cast<float>(dims.thickness / 1000.0);
             float h = static_cast<float>(bbox.height() / 1000.0);
 
-            // Position the box to align with GDS coordinates.
-            // GDS geometry is at (gds_x, gds_y) in cell space, then translated
-            // by component position. Box must match.
-            // Flip-chip dies get scale(-1,1,1) in LayerMode, so the GDS center X
-            // must be negated to keep the box aligned with the mirrored geometry.
-            bool isFlipChip = (comp->orientation() == Orientation::FaceDown);
-            float gdsCenterX = static_cast<float>((bbox.x_min + bbox.x_max) / 2000.0);
-            float offsetX = static_cast<float>(pos.x / 1000.0) + (isFlipChip ? -gdsCenterX : gdsCenterX);
+            // Box is sized from the GDS bbox and positioned by .chiplet position.
+            // LayerMode centers each mesh on its own GDS bbox center so that
+            // .chiplet position consistently means "where the component's center
+            // sits in assembly space". BoxMode follows the same convention here.
+            // buildBox() centers along X and Y but treats offsetZ as the +Z face,
+            // so add h/2 to land the box centered on -pos.y in 3D Z.
+            float offsetX = static_cast<float>(pos.x / 1000.0);
             float offsetY = static_cast<float>(pos.z / 1000.0);     // Elevation
-            float offsetZ = static_cast<float>(-pos.y / 1000.0 - bbox.y_min / 1000.0);  // Near Z face
+            float offsetZ = static_cast<float>(-pos.y / 1000.0) + h / 2.0f;
 
             mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
             mesh.setColor(MeshBuilder::colorForComponent(*comp, lyp));
@@ -853,6 +852,7 @@ void AssemblyView::buildMeshes()
         if (!comp) continue;
 
         bool needsDetail = (comp->render_mode() == RenderMode::Detailed)
+                        || (comp->render_mode() == RenderMode::DetailedNoSubstrate)
                         || (m_viewMode == ViewMode::LayerMode);
 
         if (needsDetail) {
@@ -951,6 +951,7 @@ void AssemblyView::renderComponents()
                 break;
             case RenderMode::Solid:
             case RenderMode::Detailed:
+            case RenderMode::DetailedNoSubstrate:
                 opaqueIds.push_back(id);
                 break;
             default:
@@ -1026,8 +1027,11 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
         bool isFlipped = (comp->orientation() == Orientation::FaceDown);
         if (isFlipped) glFrontFace(GL_CW);
 
-        // If Detailed and has layer geometry, render that
-        if (comp->render_mode() == RenderMode::Detailed && m_layerGeometry.count(id)) {
+        // If Detailed (with or without substrate) and has layer geometry, render that
+        bool isDetailedMode = (comp->render_mode() == RenderMode::Detailed)
+                           || (comp->render_mode() == RenderMode::DetailedNoSubstrate);
+        bool hideSubstrate  = (comp->render_mode() == RenderMode::DetailedNoSubstrate);
+        if (isDetailedMode && m_layerGeometry.count(id)) {
             auto& geometry = m_layerGeometry[id];
 
             float aspect = static_cast<float>(width()) / height();
@@ -1052,6 +1056,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
 
             for (auto& layer : geometry.layers) {
                 if (!layer.visible) continue;
+                if (hideSubstrate && layer.name == "Substrate") continue;
                 QColor lc = layer.color;
                 m_componentShader.setUniformVec4("objectColor",
                     QVector4D(lc.redF(), lc.greenF(), lc.blueF(), 1.0f));
@@ -1178,7 +1183,7 @@ void AssemblyView::onComponentRenderModeChanged(const QString& componentId, Rend
 {
     if (!m_initialized || !m_assembly) return;
 
-    if (newMode == RenderMode::Detailed) {
+    if (newMode == RenderMode::Detailed || newMode == RenderMode::DetailedNoSubstrate) {
         // Build layer geometry for this component if not already present
         if (!m_layerGeometry.count(componentId)) {
             Component* comp = m_assembly->component(componentId.toStdString());
