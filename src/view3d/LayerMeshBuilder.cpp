@@ -259,23 +259,16 @@ Component3DGeometry LayerMeshBuilder::build(
             }
         }
 
-        // Create fallback elevation if not in stackup at all
-        LayerElevation fallback_elev;
+        // If neither exact-key nor layer-only lookup found this layer in
+        // the stackup, it is not a fabrication layer the PDK models -- skip
+        // it. Auto-elevating these would inject random colored slabs at
+        // arbitrary Z (often negative after flipZ), which visually
+        // obscures the cu-pillar / die contact area.
         if (!elev) {
-            // Auto-assign z position based on layer number to spread them out
-            fallback_elev.layer = key.layer;
-            fallback_elev.datatype = key.datatype;
-            fallback_elev.z_bottom = auto_z;
-            fallback_elev.thickness = default_layer_thickness;
-            fallback_elev.name = "Layer " + std::to_string(key.layer) + "/" + std::to_string(key.datatype);
-            fallback_elev.visible = true;
-            elev = &fallback_elev;
-            auto_z += default_layer_thickness + 0.1;  // Small gap between layers
-
-            std::cerr << "LayerMeshBuilder: Using auto-elevation for layer "
-                      << key.layer << "/" << key.datatype
-                      << " at z=" << fallback_elev.z_bottom << std::endl;
+            continue;
         }
+        (void)auto_z;
+        (void)default_layer_thickness;
 
         // Color priority chain:
         // 0: BlenderGDS color scheme (if provided and layer found)

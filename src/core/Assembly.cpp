@@ -270,51 +270,52 @@ double Assembly::calculate_component_z(const ComponentID& id) const
         return 0.0;
     }
 
-    // Mounting surface = top of the interposer's *non-connection* layers.
-    // The BlenderGDS stackup may include connection-stack volumes
-    // (CuPillar/SnAgCap/SolderBall) for visualization, but those are NOT
-    // part of the mounting surface -- the die lands on top of the chosen
-    // connection stack, which already accounts for those heights.
-    // We exclude any stackup layer whose name matches a layer in *any*
-    // connection stack, then take max_z of what remains.
-    std::set<std::string> connectionLayerNames;
-    for (const auto& [stackId, cs] : m_connectionStacks) {
-        (void)stackId;
-        for (const auto& cl : cs.layers) {
-            if (!cl.name.empty()) connectionLayerNames.insert(cl.name);
-        }
-    }
-
-    double interposer_top = 0.0;
-    for (const auto& c : m_components) {
-        if (c->type() == ComponentType::Interposer) {
-            interposer_top = c->dimensions().thickness;
+    // Mounting surface = z_bottom of the chosen connection stack's first
+    // layer (the layer that physically attaches to the interposer pad,
+    // e.g. CuPillar for cu-pillar stacks). Looking it up in the
+    // interposer stackup gives the exact passivation-opening / pad-top
+    // height. Adding stack->total_height() then lands the die on the
+    // tip of the connection.
+    //
+    // Naive max_z(stackup) is wrong: it picks up Passiv (the
+    // passivation around the opening, taller than TopMetal2) and adds
+    // 1.9 um on top of the real mounting surface.
+    double mounting_surface = 0.0;
+    bool mounting_surface_found = false;
+    if (!stack->layers.empty()) {
+        const std::string& firstLayerName = stack->layers.front().name;
+        for (const auto& c : m_components) {
+            if (c->type() != ComponentType::Interposer) continue;
             const std::string& techId = c->technology();
-            if (!techId.empty()) {
-                std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
-                if (!stackupYaml.empty()) {
-                    LayerStackup stackup;
-                    if (stackup.loadFromBlenderGDS(stackupYaml)) {
-                        double max_z = 0.0;
-                        for (const auto& layer : stackup.sortedLayers()) {
-                            if (connectionLayerNames.count(layer.name)) {
-                                continue;
-                            }
-                            if (layer.z_top() > max_z) {
-                                max_z = layer.z_top();
-                            }
-                        }
-                        if (max_z > 0.0) {
-                            interposer_top = max_z;
-                        }
-                    }
+            if (techId.empty()) break;
+            std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
+            if (stackupYaml.empty()) break;
+            LayerStackup stackup;
+            if (!stackup.loadFromBlenderGDS(stackupYaml)) break;
+            for (const auto& layer : stackup.sortedLayers()) {
+                if (!firstLayerName.empty() && layer.name == firstLayerName) {
+                    mounting_surface = layer.z_bottom;
+                    mounting_surface_found = true;
+                    break;
                 }
             }
             break;
         }
     }
 
-    return interposer_top + stack->total_height();
+    // Fallback for stackups that don't visualize the connection layers:
+    // use the interposer thickness so the die lands on top of the
+    // physical interposer body.
+    if (!mounting_surface_found) {
+        for (const auto& c : m_components) {
+            if (c->type() == ComponentType::Interposer) {
+                mounting_surface = c->dimensions().thickness;
+                break;
+            }
+        }
+    }
+
+    return mounting_surface + stack->total_height();
 }
 
 // Validation
