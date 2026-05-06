@@ -6,6 +6,7 @@
 #include "LayerStackup.h"
 #include <algorithm>
 #include <filesystem>
+#include <set>
 
 namespace chiplet {
 
@@ -269,13 +270,25 @@ double Assembly::calculate_component_z(const ComponentID& id) const
         return 0.0;
     }
 
-    // Find the interposer component and get its stackup top
+    // Mounting surface = top of the interposer's *non-connection* layers.
+    // The BlenderGDS stackup may include connection-stack volumes
+    // (CuPillar/SnAgCap/SolderBall) for visualization, but those are NOT
+    // part of the mounting surface -- the die lands on top of the chosen
+    // connection stack, which already accounts for those heights.
+    // We exclude any stackup layer whose name matches a layer in *any*
+    // connection stack, then take max_z of what remains.
+    std::set<std::string> connectionLayerNames;
+    for (const auto& [stackId, cs] : m_connectionStacks) {
+        (void)stackId;
+        for (const auto& cl : cs.layers) {
+            if (!cl.name.empty()) connectionLayerNames.insert(cl.name);
+        }
+    }
+
     double interposer_top = 0.0;
     for (const auto& c : m_components) {
         if (c->type() == ComponentType::Interposer) {
-            // Use interposer thickness as the mounting surface height
             interposer_top = c->dimensions().thickness;
-            // If we have a technology with a stackup, use that instead
             const std::string& techId = c->technology();
             if (!techId.empty()) {
                 std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
@@ -284,6 +297,9 @@ double Assembly::calculate_component_z(const ComponentID& id) const
                     if (stackup.loadFromBlenderGDS(stackupYaml)) {
                         double max_z = 0.0;
                         for (const auto& layer : stackup.sortedLayers()) {
+                            if (connectionLayerNames.count(layer.name)) {
+                                continue;
+                            }
                             if (layer.z_top() > max_z) {
                                 max_z = layer.z_top();
                             }
