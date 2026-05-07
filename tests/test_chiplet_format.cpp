@@ -586,5 +586,65 @@ TEST(ChipletFormat, MetadataFinalizeRequiredRejected)
     }
 }
 
+// ---------------------------------------------------------------------
+// Gate 2 — Reader updates (coord_frame_contract.md §3.4 / §5.5)
+//
+// Assembly::calculate_component_z must always land a die on a sane
+// surface. Before Gate 2 it returned 0.0 for any die without a
+// connection or with an undefined connection_stack — the contract
+// calls that out as a footgun (the formula must hold in all cases).
+// ---------------------------------------------------------------------
+
+TEST(Assembly, CalculateZFallsBackToInterposerThicknessWhenConnectionMissing)
+{
+    Assembly assembly;
+    auto interposer = std::make_unique<Component>("interp", ComponentType::Interposer);
+    interposer->set_dimensions({1000, 1000, 13.83});
+    assembly.add_component(std::move(interposer));
+
+    auto die = std::make_unique<Component>("die_no_connection", ComponentType::Die);
+    die->set_dimensions({500, 500, 50});
+    // Deliberately no set_connection() call.
+    assembly.add_component(std::move(die));
+
+    double z = assembly.calculate_component_z("die_no_connection");
+    EXPECT_NEAR(z, 13.83, 1e-6);
+}
+
+TEST(Assembly, CalculateZFallsBackWhenConnectionStackUndefined)
+{
+    Assembly assembly;
+    auto interposer = std::make_unique<Component>("interp", ComponentType::Interposer);
+    interposer->set_dimensions({1000, 1000, 13.83});
+    assembly.add_component(std::move(interposer));
+
+    auto die = std::make_unique<Component>("die_undefined_stack", ComponentType::Die);
+    die->set_connection("nonexistent_stack");
+    die->set_dimensions({500, 500, 50});
+    assembly.add_component(std::move(die));
+
+    double z = assembly.calculate_component_z("die_undefined_stack");
+    EXPECT_NEAR(z, 13.83, 1e-6);
+}
+
+TEST(Assembly, CalculateZReturnsZeroForUnknownComponent)
+{
+    Assembly assembly;
+    EXPECT_DOUBLE_EQ(assembly.calculate_component_z("not_in_assembly"), 0.0);
+}
+
+TEST(Assembly, CalculateZReturnsZeroWhenNoInterposerAndNoConnection)
+{
+    // Degenerate assembly (no interposer): the fallback has nothing
+    // to anchor against, so the function returns 0. This is the only
+    // pre-Gate-2 behavior we keep -- it is genuinely degenerate.
+    Assembly assembly;
+    auto die = std::make_unique<Component>("orphan_die", ComponentType::Die);
+    die->set_dimensions({500, 500, 50});
+    assembly.add_component(std::move(die));
+
+    EXPECT_DOUBLE_EQ(assembly.calculate_component_z("orphan_die"), 0.0);
+}
+
 } // namespace
 } // namespace chiplet

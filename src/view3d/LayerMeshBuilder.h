@@ -10,6 +10,7 @@
 
 #include "ComponentMesh.h"
 #include "GDSLayerExtractor.h"
+#include "core/Component.h"   // Anchor enum
 #include "core/LayerStackup.h"
 #include "view2d/LayerProperties.h"
 #include <map>
@@ -86,6 +87,11 @@ public:
      * @param scale Scale factor (usually 1.0 for um)
      * @return Complete 3D geometry
      */
+    /**
+     * @param anchor Mesh anchor convention. See coord_frame_contract.md
+     *               §2 (BboxCenter centers the mesh on its own GDS bbox;
+     *               GdsOrigin keeps centering at GDS (0,0)).
+     */
     Component3DGeometry build(
         const std::map<LayerKey, LayerPolygons>& polygons,
         const LayerStackup& stackup,
@@ -94,7 +100,7 @@ public:
         double scale = 1.0,
         bool flipZ = false,
         double beolTop = 0.0,
-        bool useGdsOriginAsAnchor = false);
+        Anchor anchor = Anchor::BboxCenter);
 
     /**
      * Build a single layer mesh

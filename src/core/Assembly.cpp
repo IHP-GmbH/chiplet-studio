@@ -261,13 +261,20 @@ const Assembly::connection_stack_map_type& Assembly::connection_stacks() const
 double Assembly::calculate_component_z(const ComponentID& id) const
 {
     Component* comp = component(id);
-    if (!comp || comp->connection().empty()) {
+    if (!comp) {
         return 0.0;
     }
 
-    const ConnectionStack* stack = connection_stack(comp->connection());
-    if (!stack) {
-        return 0.0;
+    // Resolve the connection stack. Missing or unknown stacks fall
+    // back to a zero-height mounting (the die sits directly on the
+    // interposer body) per coord_frame_contract.md §3.4 / §5.5.
+    // Earlier behavior was to return 0.0 for these cases; that put
+    // dies at world z=0 instead of on top of the interposer body,
+    // which the contract calls out as a bug because the formula must
+    // hold in all cases.
+    const ConnectionStack* stack = nullptr;
+    if (!comp->connection().empty()) {
+        stack = connection_stack(comp->connection());
     }
 
     // Mounting surface = z_bottom of the chosen connection stack's first
@@ -282,7 +289,7 @@ double Assembly::calculate_component_z(const ComponentID& id) const
     // 1.9 um on top of the real mounting surface.
     double mounting_surface = 0.0;
     bool mounting_surface_found = false;
-    if (!stack->layers.empty()) {
+    if (stack && !stack->layers.empty()) {
         const std::string& firstLayerName = stack->layers.front().name;
         for (const auto& c : m_components) {
             if (c->type() != ComponentType::Interposer) continue;
@@ -303,9 +310,11 @@ double Assembly::calculate_component_z(const ComponentID& id) const
         }
     }
 
-    // Fallback for stackups that don't visualize the connection layers:
-    // use the interposer thickness so the die lands on top of the
-    // physical interposer body.
+    // Fallback for stackups that don't visualize the connection layers
+    // AND for the missing-connection / null-stack cases above: use the
+    // interposer thickness so the die lands on top of the physical
+    // interposer body. (Contract §3.4 collapses all three fallback
+    // paths into the same formula.)
     if (!mounting_surface_found) {
         for (const auto& c : m_components) {
             if (c->type() == ComponentType::Interposer) {
@@ -315,7 +324,8 @@ double Assembly::calculate_component_z(const ComponentID& id) const
         }
     }
 
-    return mounting_surface + stack->total_height();
+    const double connection_height = stack ? stack->total_height() : 0.0;
+    return mounting_surface + connection_height;
 }
 
 // Validation
