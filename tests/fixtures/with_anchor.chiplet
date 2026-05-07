@@ -1,0 +1,25 @@
+format_version: "1.0"
+
+assembly:
+  name: "Anchor Field Test Assembly"
+  description: "Fixture for coord_frame_contract.md anchor field"
+  units: "um"
+
+components:
+  - id: interposer
+    type: interposer
+    anchor: bbox_center
+    dimensions: {width: 1000, height: 1000, thickness: 13.83}
+    position: {x: 500, y: 500, z: 0}
+
+  - id: U1
+    type: die
+    anchor: gds_origin
+    dimensions: {width: 200, height: 200, thickness: 50}
+    position: {x: 250, y: 250, z: 50}
+
+  - id: U2
+    type: die
+    anchor: gds_origin
+    dimensions: {width: 200, height: 200, thickness: 50}
+    position: {x: 750, y: 750, z: 50}

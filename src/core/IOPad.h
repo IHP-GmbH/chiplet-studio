@@ -24,7 +24,11 @@ enum class IOClass {
 };
 
 /**
- * 2D pad position in micrometers (interposer-global coordinates).
+ * 2D pad position in micrometers, in the canonical frame defined in
+ * chiplet-studio/docs/coord_frame_contract.md (interposer-local,
+ * GDS-bbox-corner of the parent interposer's top_cell, geometric
+ * center of the pad). io_pads inherit the interposer's frame and do
+ * not declare an `anchor` field of their own.
  *
  * Intentionally a separate type from Position3D so this header has no
  * dependency on Component.h (avoids a circular include with Component

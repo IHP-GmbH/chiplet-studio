@@ -426,5 +426,165 @@ TEST(ChipletFormat, OrientationRoundTrip)
     std::filesystem::remove(tempPath);
 }
 
+// ---------------------------------------------------------------------
+// Gate 1 — coord_frame_contract.md
+//
+// These tests cover the schema-level plumbing: Anchor enum, parser
+// support, serializer output, and the rejection of intermediate KiCad
+// output marked with `_metadata.finalize_required: true`.
+// Reader-side wiring (LayerMeshBuilder, AssemblyView) is verified in
+// later gates.
+// ---------------------------------------------------------------------
+
+TEST(ChipletFormat, AnchorEnumDefault)
+{
+    // Per contract §2.2: when `anchor:` is absent the reader defaults
+    // to BboxCenter (preserves pre-contract interposer behavior).
+    Component comp("test", ComponentType::Die);
+    EXPECT_EQ(comp.anchor(), Anchor::BboxCenter);
+    EXPECT_FALSE(comp.anchor_declared());
+}
+
+TEST(ChipletFormat, AnchorEnumSetGet)
+{
+    Component comp("test", ComponentType::Die);
+    comp.set_anchor(Anchor::GdsOrigin);
+    EXPECT_EQ(comp.anchor(), Anchor::GdsOrigin);
+
+    comp.set_anchor_declared(true);
+    EXPECT_TRUE(comp.anchor_declared());
+
+    comp.set_anchor(Anchor::BboxCenter);
+    EXPECT_EQ(comp.anchor(), Anchor::BboxCenter);
+}
+
+TEST(ChipletFormat, AnchorStringConversion)
+{
+    EXPECT_EQ(anchor_to_string(Anchor::GdsOrigin), "gds_origin");
+    EXPECT_EQ(anchor_to_string(Anchor::BboxCenter), "bbox_center");
+
+    auto a = string_to_anchor("gds_origin");
+    ASSERT_TRUE(a.has_value());
+    EXPECT_EQ(a.value(), Anchor::GdsOrigin);
+
+    auto b = string_to_anchor("bbox_center");
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(b.value(), Anchor::BboxCenter);
+
+    // Unknown value is not silently mapped.
+    EXPECT_FALSE(string_to_anchor("center").has_value());
+    EXPECT_FALSE(string_to_anchor("").has_value());
+    EXPECT_FALSE(string_to_anchor("GdsOrigin").has_value());  // case sensitive
+}
+
+TEST(ChipletFormat, AnchorParseField)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_anchor.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    auto* interposer = assembly->component("interposer");
+    ASSERT_NE(interposer, nullptr);
+    EXPECT_EQ(interposer->anchor(), Anchor::BboxCenter);
+    EXPECT_TRUE(interposer->anchor_declared());
+
+    auto* u1 = assembly->component("U1");
+    ASSERT_NE(u1, nullptr);
+    EXPECT_EQ(u1->anchor(), Anchor::GdsOrigin);
+    EXPECT_TRUE(u1->anchor_declared());
+
+    auto* u2 = assembly->component("U2");
+    ASSERT_NE(u2, nullptr);
+    EXPECT_EQ(u2->anchor(), Anchor::GdsOrigin);
+    EXPECT_TRUE(u2->anchor_declared());
+}
+
+TEST(ChipletFormat, AnchorMissingDefaultsToBboxCenter)
+{
+    // with_components.chiplet was authored before the contract and
+    // declares no `anchor:` field on any of its 4 components.
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_components.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+    ASSERT_EQ(assembly->components().size(), 4u);
+
+    for (const auto& comp : assembly->components()) {
+        EXPECT_EQ(comp->anchor(), Anchor::BboxCenter)
+            << "component " << comp->id() << " should default to bbox_center";
+        EXPECT_FALSE(comp->anchor_declared())
+            << "component " << comp->id() << " should be marked undeclared";
+    }
+}
+
+TEST(ChipletFormat, AnchorRoundTrip)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_anchor.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    std::string tempPath = "test_anchor_roundtrip.chiplet";
+    EXPECT_NO_THROW(format.save(*assembly, tempPath));
+
+    ChipletFormat format2;
+    auto loaded = format2.load(tempPath);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* interposer = loaded->component("interposer");
+    ASSERT_NE(interposer, nullptr);
+    EXPECT_EQ(interposer->anchor(), Anchor::BboxCenter);
+    EXPECT_TRUE(interposer->anchor_declared());
+
+    auto* u1 = loaded->component("U1");
+    ASSERT_NE(u1, nullptr);
+    EXPECT_EQ(u1->anchor(), Anchor::GdsOrigin);
+    EXPECT_TRUE(u1->anchor_declared());
+
+    std::filesystem::remove(tempPath);
+}
+
+TEST(ChipletFormat, AnchorAlwaysSerializedEvenIfDefaulted)
+{
+    // The writer contract (§4) requires `anchor:` to be emitted
+    // explicitly so downstream readers never have to guess. After a
+    // round trip from a legacy file (no anchor declared), the
+    // re-loaded file must have anchor_declared() == true on every
+    // component.
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_components.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    std::string tempPath = "test_anchor_serialized.chiplet";
+    EXPECT_NO_THROW(format.save(*assembly, tempPath));
+
+    ChipletFormat format2;
+    auto loaded = format2.load(tempPath);
+    ASSERT_NE(loaded, nullptr);
+
+    for (const auto& comp : loaded->components()) {
+        EXPECT_TRUE(comp->anchor_declared())
+            << "component " << comp->id() << " must be declared post-save";
+    }
+
+    std::filesystem::remove(tempPath);
+}
+
+TEST(ChipletFormat, MetadataFinalizeRequiredRejected)
+{
+    // Files marked with `_metadata.finalize_required: true` must be
+    // rejected at load time (contract §5.1). Error message must point
+    // the user to the finalizer command.
+    ChipletFormat format;
+    try {
+        format.load(fixturePath("intermediate_kicad.chiplet"));
+        FAIL() << "Expected ChipletFormatException";
+    } catch (const ChipletFormatException& e) {
+        std::string msg = e.what();
+        EXPECT_NE(msg.find("intermediate"), std::string::npos)
+            << "error must mention intermediate state: " << msg;
+        EXPECT_NE(msg.find("hyp_to_gds.py"), std::string::npos)
+            << "error must reference the finalizer: " << msg;
+    }
+}
+
 } // namespace
 } // namespace chiplet
