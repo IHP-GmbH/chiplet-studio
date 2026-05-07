@@ -1,0 +1,21 @@
+format_version: "1.0"
+
+# Simulates intermediate output emitted by KiCad's chiplet exporter.
+# Per coord_frame_contract.md §4.1 (Option a), KiCad cannot resolve
+# the canonical (GDS-bbox-corner) frame on its own and tags the file
+# as needing finalization by hyp_to_gds.py --update-chiplet-file.
+_metadata:
+  frame: pcb-bbox-corner
+  finalize_required: true
+  finalizer: hyp_to_gds.py --update-chiplet-file
+
+assembly:
+  name: "Intermediate KiCad Output"
+  units: "um"
+
+components:
+  - id: interposer
+    type: interposer
+    anchor: bbox_center
+    dimensions: {width: 2000, height: 2000, thickness: 13.83}
+    position: {x: 1000, y: 1000, z: 0}

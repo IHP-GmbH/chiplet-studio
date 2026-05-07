@@ -59,6 +59,23 @@ enum class Orientation {
 };
 
 /**
+ * Mesh anchor convention. Determines how a component's local mesh is
+ * built relative to its declared `position` in the canonical frame.
+ *
+ * See chiplet-studio/docs/coord_frame_contract.md §2 for the contract.
+ *
+ * - GdsOrigin: the component mesh is built around its own GDS (0,0).
+ *   `position` is added to the GDS-origin without extra centering.
+ *   Used by dies produced by gds_to_kicad (footprint anchor at GDS 0,0).
+ * - BboxCenter: the component mesh is centered on its own GDS bbox.
+ *   `position` places the bbox center. Used by interposers.
+ */
+enum class Anchor {
+    GdsOrigin,
+    BboxCenter
+};
+
+/**
  * Component types
  */
 enum class ComponentType {
@@ -155,6 +172,17 @@ public:
     Orientation orientation() const;
     void set_orientation(Orientation o);
 
+    // Mesh anchor convention (see Anchor enum doc and contract §2).
+    Anchor anchor() const;
+    void set_anchor(Anchor a);
+
+    // True when the anchor field was explicitly declared in the source
+    // .chiplet file (vs defaulted by the reader). Used by tests and by
+    // ChipletFormat to emit one warning per file when a writer omits
+    // the field.
+    bool anchor_declared() const;
+    void set_anchor_declared(bool declared);
+
     // External I/O pads attached to this component (e.g. wire-bond
     // pads on the interposer).
     void add_io_pad(const IOPad& pad);
@@ -177,11 +205,22 @@ private:
     metadata_type m_metadata;
     RenderMode m_renderMode;
     Orientation m_orientation = Orientation::FaceUp;
+    Anchor m_anchor = Anchor::BboxCenter;
+    bool m_anchorDeclared = false;
     std::vector<IOPad> m_ioPads;
 
     // Static empty string for backward compatibility reference return
     static const string_type s_emptyString;
 };
+
+// Anchor string conversion helpers. Strings are snake_case
+// ("gds_origin", "bbox_center") matching the schema.
+//
+// string_to_anchor returns std::nullopt for unknown values; callers
+// must decide how to handle that (log + default for the parser, hard
+// error for command-line tools, etc.).
+std::string anchor_to_string(Anchor a);
+std::optional<Anchor> string_to_anchor(const std::string& s);
 
 } // namespace chiplet
 
