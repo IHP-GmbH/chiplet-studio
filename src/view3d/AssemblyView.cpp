@@ -1478,16 +1478,17 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     // stack upward, matching the physical face-down orientation.
     bool flipZ = (comp.orientation() == Orientation::FaceDown);
     double beolTop = flipZ ? stackup.totalHeight() : 0.0;
-    // Dies (from gds_to_kicad) anchor the footprint at GDS (0,0). The
-    // interposer (from hyp_to_gds) keeps placing content in absolute
-    // pcbnew coords, so it still needs bbox-centering.
-    bool useGdsOrigin = (comp.type() == ComponentType::Die);
+    // Mesh anchor convention is now schema-driven (per
+    // coord_frame_contract.md §2): each component declares
+    // `anchor: gds_origin` or `anchor: bbox_center`. Legacy files
+    // without the field default to BboxCenter (the parser warns).
+    Anchor anchor = comp.anchor();
 
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
         polygons, stackup, lyp,
         hasColorScheme ? &colorScheme : nullptr,
-        1.0, flipZ, beolTop, useGdsOrigin);
+        1.0, flipZ, beolTop, anchor);
 
     // Set component ID and apply transform
     geometry.componentId = compId;
@@ -1604,16 +1605,17 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
         transform = geomIt->second.transform;
     }
 
-    // Rebuild mesh (preserve flip-chip z-inversion from initial build)
+    // Rebuild mesh (preserve flip-chip z-inversion from initial build).
+    // Anchor is schema-driven per coord_frame_contract.md §2.
     bool flipZ = (comp->orientation() == Orientation::FaceDown);
     double beolTop = flipZ ? stackup.totalHeight() : 0.0;
-    bool useGdsOrigin = (comp->type() == ComponentType::Die);
+    Anchor anchor = comp->anchor();
 
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
         polygons, stackup, lyp,
         hasColorScheme ? &colorScheme : nullptr,
-        1.0, flipZ, beolTop, useGdsOrigin);
+        1.0, flipZ, beolTop, anchor);
 
     geometry.componentId = compId;
     geometry.transform = transform;
