@@ -322,12 +322,13 @@ focused on the alignment fix.
   - io_pads: not applicable — io_pads are nested under the
     interposer and inherit its frame; they do not declare anchor
     themselves.
-- After this contract is implemented, the explicit override of
-  interposer position (line 1576-1577) and the die re-anchor
-  (lines 1685-1701) become redundant **iff** the upstream KiCad
-  export already emits in the canonical frame. Until KiCad option
-  (a) or (b) is decided in Gate 3, keep the overrides as the
-  finalizer.
+- Gate 3 locked **Option (a)** (§4.1): KiCad does not emit in the
+  canonical frame; the finalizer in `update_chiplet_file` is the
+  only place that owns the GDS bbox and performs the frame
+  conversion. The interposer position override (lines 1545-1565
+  post-Gate-3) and the die x/y re-anchor (lines 1690-1711
+  post-Gate-3) are therefore **legitimate finalizer logic**, not
+  band-aids. They stay. See §8 for the updated band-aid disposition.
 
 ### 4.3 `hyp_to_gds.py::add_io_pads` (and upstream JSON producer)
 
@@ -614,21 +615,26 @@ All three must pass before declaring this contract implemented.
 
 ---
 
-## 8. Band-Aid Removal Checklist
+## 8. Band-Aid Disposition
 
-Subsumed by this contract — **delete** during execution:
+Gate 6 audited each of the four pre-execution band-aids against the
+final Option (a) writer/reader contract. Two were removed, two were
+re-categorized as legitimate Option (a) finalizer logic. See the
+**Gate 6 disposition** column for what actually happened.
 
-| Commit | Repo | Description |
-|---|---|---|
-| `bbc9c60` | chiplet-studio | `useGdsOriginAsAnchor` per-`ComponentType` heuristic at `AssemblyView.cpp:1484`. Replaced by `comp.anchor()`. |
-| `6537e38` step 1 | hyp_to_gds.py | Override of interposer position to `(width/2, height/2)`. Replaced by writer emitting in canonical frame from the start. |
-| `6537e38` step 2 | hyp_to_gds.py | Re-anchor of die x/y from HYP-absolute. Replaced by writer emitting in canonical frame. |
-| `e901d35` | KiCad fork | Interposer position at PCB-bbox-center. Replaced per Gate 3 decision (intermediate frame or shells-out). |
+Removed during execution:
+
+| Commit | Repo | Description | Gate 6 disposition |
+|---|---|---|---|
+| `bbc9c60` | chiplet-studio | `useGdsOriginAsAnchor` per-`ComponentType` heuristic at `AssemblyView.cpp:1484`. Replaced by `comp.anchor()`. | **Removed in Gate 2** (`56033db`). Sweep-audit at Gate 6 confirms zero residual references. |
+| `e901d35` | KiCad fork | Interposer position at PCB-bbox-center (`width/2, height/2`). | **Removed in Gate 6.** KiCad now emits `interposer.position = (0, 0, 0)` as an intermediate placeholder; the canonical value is computed by the finalizer. Chiplet-studio refuses to load the intermediate file anyway (via `_metadata.finalize_required`). |
 
 Kept and documented (not removed):
 
 | Commit | Repo | Description | Why kept |
 |---|---|---|---|
+| `6537e38` step 1 | hyp_to_gds.py | Override of interposer position to `(gds_width/2, gds_height/2)`. | **Legitimate Option (a) finalizer.** KiCad emits in PCB-bbox-corner; it does not own the GDS bbox. Converting PCB-bbox-corner → GDS-bbox-corner for the interposer is the finalizer's job. Removing this would leak the wrong frame to the canonical file for any design where PCB-bbox ≠ GDS-bbox (i.e. the general case). Pre-Gate-6 the §8 table mislabelled this as a band-aid; corrected here. |
+| `6537e38` step 2 | hyp_to_gds.py | Re-anchor of die x/y from HYP-absolute to GDS-bbox-corner using `dev.x * 1e6 - gds_left`. | **Legitimate Option (a) finalizer.** Same reasoning as step 1, for dies. Pre-Gate-6 the §8 table mislabelled this as a band-aid; corrected here. The wire-bond demo's `U1.position = (1503.58, 1822.94)` depends on this conversion; removing it would shift U1 by `(-200, -780) µm` from canonical (verified by the round-trip test added in Gate 5). |
 | `d166da9` | chiplet-studio | Exclude connection layers from interposer max_z | Z-mounting formula uses connection-stack first-layer lookup; this exclusion is part of the formula. Documented in §3. |
 | `e903b16` | chiplet-studio | Connection-stack first-layer z_bottom lookup | The Z mounting rule itself. Documented in §3. |
 | `e903b16` | chiplet-studio | Skip non-stackup GDS layers at build time | Orthogonal to coord frames. Avoids spurious magenta sheets from auto-elevated LVS/recognition layers. Documented as a rendering rule, not a coord-frame band-aid. |
@@ -637,8 +643,10 @@ Kept and documented (not removed):
 
 Post-removal sanity check:
 ```bash
-git grep -nE 'useGdsOriginAsAnchor|re-anchor|PCB bbox center|stale convention'
+git grep -nE 'useGdsOriginAsAnchor|PCB bbox center|stale convention'
 # Expected: zero hits in non-doc files (this doc and CHANGELOGs are OK).
+# Note: 're-anchor' deliberately not included — that is the
+# legitimate term for the §8 'kept' finalizer logic in hyp_to_gds.py.
 ```
 
 ---
@@ -725,16 +733,28 @@ KiCad approach: **Option (a) — intermediate output**. Locked.
 - [ ] `check_complete_gds_alignment.py` script (§7.3)
 - [ ] All three pass
 
-### Gate 6 — Band-aid removal
+### Gate 6 — Band-aid disposition
 
-- [ ] Delete `useGdsOriginAsAnchor` everywhere it is referenced
-      (param, callers, tests)
-- [ ] Delete `hyp_to_gds.py 6537e38` step 1 + step 2 overrides
-      (only after Gate 3 KiCad emits canonical frame; see §4.2 note)
-- [ ] Delete `kicad e901d35` PCB-bbox-center logic (only after
-      Gate 3 decision implemented)
-- [ ] `git grep` sanity passes (§8)
-- [ ] Re-run all gates' tests; everything still green
+The pre-execution §8 table marked four items as "delete". Gate 6
+audited each one against Option (a) and updated the disposition.
+
+- [x] `useGdsOriginAsAnchor` (`bbc9c60`, chiplet-studio): swept in
+      Gate 2 (`56033db`). Audit grep at Gate 6 returns zero residual
+      references — no further action.
+- [x] `hyp_to_gds.py 6537e38` step 1 + step 2: **re-categorized
+      from "delete" to "keep"**. Under Option (a) (§4.1), KiCad emits
+      PCB-bbox-corner intermediate; the finalizer (`update_chiplet_file`)
+      owns the GDS bbox and performs the canonical conversion.
+      Removing step 1/2 would leak intermediate-frame positions to
+      the canonical file. See updated §8.
+- [x] `kicad e901d35` PCB-bbox-center interposer position: reverted.
+      KiCad now emits `interposer.position = (0, 0, 0)` as an
+      intermediate placeholder; the finalizer writes the canonical
+      value.
+- [x] `git grep` sanity for `useGdsOriginAsAnchor`,
+      `PCB bbox center`, `stale convention`: zero hits in code paths.
+- [x] Gate 5 regression net green: `CoordFrameContract*` 10/10 PASS;
+      `check_complete_gds_alignment.py` dx=0.000 µm exit 0.
 
 ### Gate 7 — Final regression
 
