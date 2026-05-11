@@ -52,6 +52,7 @@ add_executable(chiplet_tests
     test_assembly_2d_view.cpp
     test_shape_filter.cpp
     test_net_graph.cpp
+    test_coord_frame_contract.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
