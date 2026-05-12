@@ -8,8 +8,12 @@
 #include "core/CommandProcessor.h"
 #include "core/CommandFactory.h"
 #include "core/commands/CmdSetRenderMode.h"
+#include "formats/ChipletFormat.h"
 #include <QApplication>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <optional>
 
 using namespace chiplet;
 
@@ -244,4 +248,110 @@ TEST(RenderSortingTest, BackToFrontOrder)
     EXPECT_EQ(distances[0].first, "far");
     EXPECT_EQ(distances[1].first, "mid");
     EXPECT_EQ(distances[2].first, "near");
+}
+
+// --- Auto-Detailed promotion for flip-chip dies (task #8) ---
+//
+// Loading a .chiplet whose component declares `orientation: flip_chip`
+// (or `face_down`) promotes its render_mode from the constructor
+// default (Transparent) to Detailed. The promotion only fires when
+// render_mode is still the default, so future render_mode persistence
+// can override the policy.
+//
+// Implementation lives in ChipletFormat::parse_component (loader-side
+// policy, not a Component invariant — keeps the data class pure).
+
+namespace {
+
+std::string renderModeFixturePath(const std::string& filename)
+{
+    return std::string(FIXTURES_DIR) + "/" + filename;
+}
+
+// Locate the canonical wire-bond demo .chiplet so the integration
+// test below can pin the post-Gate-7 invariant "U1 (flip_chip) loads
+// with render_mode == Detailed" on the real demo, not just synthetics.
+// Resolution order: env var (set by CI/Docker), workspace-relative
+// fallback, then GTEST_SKIP so the test stays portable.
+std::optional<std::string> locateWirebondDemoChiplet()
+{
+    if (const char* env = std::getenv("WIREBOND_DEMO_CHIPLET")) {
+        std::filesystem::path p(env);
+        if (std::filesystem::exists(p))
+            return p.string();
+    }
+    std::filesystem::path fixtures(FIXTURES_DIR);
+    std::filesystem::path candidate = fixtures.parent_path()
+        .parent_path().parent_path()
+        / "kicad_designs" / "interposer_wire_bonding_demo"
+        / "interposer_wire_bonding_demo.chiplet";
+    if (std::filesystem::exists(candidate))
+        return candidate.string();
+    return std::nullopt;
+}
+
+}  // namespace
+
+TEST(RenderModeTest, FlipChipDieAutoPromotedToDetailed)
+{
+    ChipletFormat format;
+    auto assembly = format.load(renderModeFixturePath("flip_chip_render_mode.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    Component* flip = assembly->component("U_flip");
+    ASSERT_NE(flip, nullptr);
+    EXPECT_EQ(flip->orientation(), Orientation::FaceDown);
+    EXPECT_EQ(flip->render_mode(), RenderMode::Detailed)
+        << "flip-chip die must be auto-promoted to Detailed on parse";
+}
+
+TEST(RenderModeTest, FaceUpDieKeepsTransparentDefault)
+{
+    ChipletFormat format;
+    auto assembly = format.load(renderModeFixturePath("flip_chip_render_mode.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    Component* faceup = assembly->component("U_faceup");
+    ASSERT_NE(faceup, nullptr);
+    EXPECT_EQ(faceup->orientation(), Orientation::FaceUp);
+    EXPECT_EQ(faceup->render_mode(), RenderMode::Transparent)
+        << "face-up die must keep the constructor default";
+}
+
+TEST(RenderModeTest, ProgrammaticOrientationDoesNotChangeRenderMode)
+{
+    // The auto-promote policy is parser-side (Option B). Calling
+    // set_orientation programmatically (no loader involved) must NOT
+    // mutate render_mode — the Component class is a pure data carrier.
+    Component die("test_die", ComponentType::Die);
+    ASSERT_EQ(die.render_mode(), RenderMode::Transparent);
+
+    die.set_orientation(Orientation::FaceDown);
+    EXPECT_EQ(die.orientation(), Orientation::FaceDown);
+    EXPECT_EQ(die.render_mode(), RenderMode::Transparent)
+        << "set_orientation alone must not promote render_mode "
+           "(policy lives in the loader, not the data class)";
+}
+
+TEST(RenderModeTest, WirebondDemoU1AutoPromotedToDetailed)
+{
+    // Integration check on the canonical wire-bond demo .chiplet: U1
+    // is declared flip_chip there, so post-Gate-7 it must load with
+    // render_mode == Detailed without manual user intervention. This
+    // matches the visual state used during Gate 4 verification.
+    auto path = locateWirebondDemoChiplet();
+    if (!path) {
+        GTEST_SKIP() << "wire-bond demo .chiplet not located (set "
+                        "WIREBOND_DEMO_CHIPLET to enable this test)";
+    }
+
+    ChipletFormat format;
+    auto assembly = format.load(*path);
+    ASSERT_NE(assembly, nullptr);
+
+    Component* u1 = assembly->component("U1");
+    ASSERT_NE(u1, nullptr) << "U1 not found in " << *path;
+    EXPECT_EQ(u1->orientation(), Orientation::FaceDown);
+    EXPECT_EQ(u1->render_mode(), RenderMode::Detailed)
+        << "wire-bond demo U1 (flip_chip) must auto-promote to Detailed";
 }
