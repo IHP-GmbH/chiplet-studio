@@ -371,21 +371,17 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
         component->set_rotation(parseRotation3D(node["rotation"]));
     }
 
-    // Orientation (face-up or flip-chip)
+    // Orientation (face-up or flip-chip). Render mode stays at the
+    // constructor default (Transparent for dies, Solid for substrates)
+    // regardless of orientation: a Transparent overview opens faster
+    // and lets the user see the whole assembly at a glance. Users
+    // promote individual components to Detailed via the Hierarchy
+    // panel when they need to inspect cu-pillar contact / GDS
+    // tessellation.
     if (node["orientation"]) {
         std::string orient = node["orientation"].as<std::string>("face_up");
-        if (orient == "flip_chip" || orient == "face_down") {
+        if (orient == "flip_chip" || orient == "face_down")
             component->set_orientation(Orientation::FaceDown);
-            // Auto-promote to Detailed: flip-chip dies mount face-down
-            // against the interposer cu-pillars, so the meaningful visual
-            // is the GDS tessellation (active surface contacting the
-            // pillar tips), not the bbox silhouette. Only promote when
-            // the render mode is still the constructor default; a future
-            // render_mode persistence layer would write explicit values
-            // that must win over this default policy.
-            if (component->render_mode() == RenderMode::Transparent)
-                component->set_render_mode(RenderMode::Detailed);
-        }
     }
 
     // Anchor convention (see coord_frame_contract.md §2). Drives mesh

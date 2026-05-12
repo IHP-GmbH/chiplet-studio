@@ -250,16 +250,22 @@ TEST(RenderSortingTest, BackToFrontOrder)
     EXPECT_EQ(distances[2].first, "near");
 }
 
-// --- Auto-Detailed promotion for flip-chip dies (task #8) ---
+// --- Render mode on .chiplet load (task #8 final policy) ---
 //
-// Loading a .chiplet whose component declares `orientation: flip_chip`
-// (or `face_down`) promotes its render_mode from the constructor
-// default (Transparent) to Detailed. The promotion only fires when
-// render_mode is still the default, so future render_mode persistence
-// can override the policy.
+// Loading a .chiplet leaves every component at its constructor default
+// render_mode regardless of orientation: Transparent for die /
+// die_array / interposer, Solid for substrate. The Transparent
+// overview opens faster and gives a clearer system-level view than
+// auto-promoting flip-chip dies to Detailed; users opt in to Detailed
+// per-component via the Hierarchy panel / CmdSetRenderMode.
 //
-// Implementation lives in ChipletFormat::parse_component (loader-side
-// policy, not a Component invariant — keeps the data class pure).
+// History: an auto-Detailed promotion for flip-chip dies was tried
+// in c7db675 but rolled back after visual testing on the wire-bond
+// demo — opening time and overview clarity won over default
+// cu-pillar-contact detail. The data-class purity guard
+// (Component::set_orientation does not mutate render_mode) is kept
+// so a future persisted render_mode value is the single source of
+// truth.
 
 namespace {
 
@@ -292,7 +298,7 @@ std::optional<std::string> locateWirebondDemoChiplet()
 
 }  // namespace
 
-TEST(RenderModeTest, FlipChipDieAutoPromotedToDetailed)
+TEST(RenderModeTest, FlipChipDieKeepsTransparentDefaultOnLoad)
 {
     ChipletFormat format;
     auto assembly = format.load(renderModeFixturePath("flip_chip_render_mode.chiplet"));
@@ -301,8 +307,10 @@ TEST(RenderModeTest, FlipChipDieAutoPromotedToDetailed)
     Component* flip = assembly->component("U_flip");
     ASSERT_NE(flip, nullptr);
     EXPECT_EQ(flip->orientation(), Orientation::FaceDown);
-    EXPECT_EQ(flip->render_mode(), RenderMode::Detailed)
-        << "flip-chip die must be auto-promoted to Detailed on parse";
+    EXPECT_EQ(flip->render_mode(), RenderMode::Transparent)
+        << "loading a flip-chip die must leave render_mode at the "
+           "constructor default; auto-promotion was rolled back for "
+           "faster open + clearer overview";
 }
 
 TEST(RenderModeTest, FaceUpDieKeepsTransparentDefault)
@@ -333,12 +341,13 @@ TEST(RenderModeTest, ProgrammaticOrientationDoesNotChangeRenderMode)
            "(policy lives in the loader, not the data class)";
 }
 
-TEST(RenderModeTest, WirebondDemoU1AutoPromotedToDetailed)
+TEST(RenderModeTest, WirebondDemoLoadsWithTransparentDefaults)
 {
     // Integration check on the canonical wire-bond demo .chiplet: U1
-    // is declared flip_chip there, so post-Gate-7 it must load with
-    // render_mode == Detailed without manual user intervention. This
-    // matches the visual state used during Gate 4 verification.
+    // is declared flip_chip there. Per the final task #8 policy,
+    // every component (interposer + U1) loads at the constructor
+    // default (Transparent). Users opt in to Detailed when they
+    // need to inspect the cu-pillar contact visually.
     auto path = locateWirebondDemoChiplet();
     if (!path) {
         GTEST_SKIP() << "wire-bond demo .chiplet not located (set "
@@ -352,6 +361,13 @@ TEST(RenderModeTest, WirebondDemoU1AutoPromotedToDetailed)
     Component* u1 = assembly->component("U1");
     ASSERT_NE(u1, nullptr) << "U1 not found in " << *path;
     EXPECT_EQ(u1->orientation(), Orientation::FaceDown);
-    EXPECT_EQ(u1->render_mode(), RenderMode::Detailed)
-        << "wire-bond demo U1 (flip_chip) must auto-promote to Detailed";
+    EXPECT_EQ(u1->render_mode(), RenderMode::Transparent)
+        << "wire-bond demo U1 (flip_chip) must load at the Transparent "
+           "default — the user promotes to Detailed via the Hierarchy "
+           "panel when needed";
+
+    Component* interposer = assembly->component("interposer");
+    ASSERT_NE(interposer, nullptr) << "interposer not found in " << *path;
+    EXPECT_EQ(interposer->render_mode(), RenderMode::Transparent)
+        << "interposer must load at the Transparent default";
 }
