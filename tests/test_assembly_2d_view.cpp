@@ -42,7 +42,7 @@ static std::unique_ptr<Assembly> makeTestAssembly()
 TEST(CellComponentMapper, BuildWithMatchingCells)
 {
     auto assembly = makeTestAssembly();
-    QStringList cells = {"TOP", "TOP_ROUTING", "CUPILLARS_U1",
+    QStringList cells = {"INTERPOSER", "INTERPOSER_ROUTING", "CUPILLARS_U1",
                          "U1_Interposer_ANT", "U2_FMD_QNC", "U3_SystemLevel"};
 
     CellComponentMapper mapper;
@@ -57,14 +57,14 @@ TEST(CellComponentMapper, BuildWithMatchingCells)
 TEST(CellComponentMapper, UnmappedCellsReturnEmpty)
 {
     auto assembly = makeTestAssembly();
-    QStringList cells = {"TOP", "TOP_ROUTING", "CUPILLARS_U1",
+    QStringList cells = {"INTERPOSER", "INTERPOSER_ROUTING", "CUPILLARS_U1",
                          "U1_Interposer_ANT"};
 
     CellComponentMapper mapper;
     mapper.build(*assembly, cells);
 
-    EXPECT_EQ(mapper.componentForCell("TOP"), "");
-    EXPECT_EQ(mapper.componentForCell("TOP_ROUTING"), "");
+    EXPECT_EQ(mapper.componentForCell("INTERPOSER"), "");
+    EXPECT_EQ(mapper.componentForCell("INTERPOSER_ROUTING"), "");
     EXPECT_EQ(mapper.componentForCell("CUPILLARS_U1"), "");
     EXPECT_EQ(mapper.componentForCell("nonexistent"), "");
 }
@@ -110,7 +110,7 @@ TEST(CellComponentMapper, ComponentToCell)
 TEST(CellComponentMapper, NoMatchingComponents)
 {
     auto assembly = makeTestAssembly();
-    QStringList cells = {"TOP", "TOP_ROUTING", "SOME_CELL"};
+    QStringList cells = {"INTERPOSER", "INTERPOSER_ROUTING", "SOME_CELL"};
 
     CellComponentMapper mapper;
     mapper.build(*assembly, cells);
