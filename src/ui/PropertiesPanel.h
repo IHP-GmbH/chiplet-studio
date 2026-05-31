@@ -10,6 +10,7 @@
 
 #include <QWidget>
 #include <memory>
+#include <functional>
 #include "core/Component.h"
 #include "core/ComponentID.h"
 #include "view2d/LayerProperties.h"
@@ -20,7 +21,9 @@ class QHBoxLayout;
 class QGroupBox;
 class QLabel;
 class QComboBox;
+class QLineEdit;
 class QTreeWidget;
+class QTreeWidgetItem;
 class QFormLayout;
 
 namespace chiplet {
@@ -63,15 +66,36 @@ public slots:
      */
     void clearSelection();
 
+public:
+    /**
+     * Install a resolver that reports a layer's current visibility
+     * (componentId, layer, datatype) -> visible. Used to seed each layer
+     * checkbox's initial state so the panel mirrors the 3D view across
+     * selection changes. When unset, layers default to visible.
+     *
+     * Not a slot: it takes a std::function (which Qt's MOC cannot parse) and
+     * is wired directly by MainWindow rather than via signal/slot.
+     */
+    void setLayerVisibilityResolver(std::function<bool(const QString&, int, int)> resolver);
+
 signals:
     /**
      * Emitted when component is modified (future use for editing)
      */
     void componentModified(const QString& componentId);
 
+    /**
+     * Emitted when the user toggles a layer's show/hide checkbox. Carries the
+     * selected component and the GDS layer/datatype so the 3D view can flip the
+     * matching LayerMesh visibility. Not emitted while the list repopulates.
+     */
+    void layerVisibilityChanged(const QString& componentId, int layer, int datatype, bool visible);
+
 private slots:
     void onUnitChanged(int index);
     void onGroupToggled(bool checked);
+    void onLayerItemChanged(QTreeWidgetItem* item, int column);
+    void onLayerFilterChanged(const QString& text);
 
 private:
     void setupUI();
@@ -141,8 +165,12 @@ private:
     QLabel* m_cellCountLabel = nullptr;
     QLabel* m_bboxLabel = nullptr;
 
-    // Layers tree
+    // Layers tree + name/datatype filter
+    QLineEdit* m_layerFilter = nullptr;
     QTreeWidget* m_layerTree = nullptr;
+    bool m_blockLayerSync = false;        // suppress itemChanged emits while populating
+    ComponentID m_layersForComponent;     // component the layer tree is currently built for
+    std::function<bool(const QString&, int, int)> m_layerVisibilityResolver;  // seeds checkbox state
 
     // Value labels - Array
     QLabel* m_arrayPatternLabel = nullptr;

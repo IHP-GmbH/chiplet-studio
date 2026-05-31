@@ -246,6 +246,18 @@ void MainWindow::setupPanels()
     connect(m_hierarchyPanel, &HierarchyPanel::componentVisibilityChanged,
             m_assemblyView, &AssemblyView::setComponentVisibility);
 
+    // Properties panel per-layer show/hide -> 3D View
+    connect(m_propertiesPanel, &PropertiesPanel::layerVisibilityChanged,
+            m_assemblyView, &AssemblyView::setLayerVisible);
+
+    // Seed the Properties panel layer checkboxes from the 3D view's current
+    // visibility, so revisiting a component with hidden layers shows them unchecked.
+    m_propertiesPanel->setLayerVisibilityResolver(
+        [this](const QString& componentId, int layer, int datatype) {
+            return m_assemblyView ? m_assemblyView->isLayerVisible(componentId, layer, datatype)
+                                  : true;
+        });
+
     // 3D View double-click for drill-down (if signal exists)
     connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
