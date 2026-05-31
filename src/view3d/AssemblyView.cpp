@@ -1546,6 +1546,26 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         polygons = ShapeFilter::filter(polygons, threshold);
     }
 
+    // Black-box / no-LYP chiplet (commercial / closed PDK node): the fallback
+    // stackup does not model this die's layers, so LayerMeshBuilder would skip
+    // them (it intentionally drops layers absent from the stackup) and the
+    // component would render empty in 3D. Augment a LOCAL copy of the stackup
+    // (the cached one is untouched) with every present GDS layer it does not
+    // already model, as thin slabs, so the pads and any other geometry stay
+    // visible. Gated on the no-LYP case so known PDKs are never perturbed.
+    if (!lyp) {
+        constexpr double kBlackBoxSlabUm = 1.0;
+        double zTop = stackup.totalHeight();
+        for (const auto& entry : polygons) {
+            const LayerKey& key = entry.first;
+            if (!stackup.find(key)) {
+                stackup.addLayer(key.layer, key.datatype, zTop,
+                                 kBlackBoxSlabUm, "blackbox");
+                zTop += kBlackBoxSlabUm;
+            }
+        }
+    }
+
     // Build 3D geometry from polygons
     // For flip-chip (FaceDown) dies, invert layer z-positions so that
     // the topmost metal (e.g. TopMetal2) sits at z=0 and lower metals

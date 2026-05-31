@@ -10,7 +10,14 @@
 #include <gtest/gtest.h>
 #include <QApplication>
 #include <QSignalSpy>
+#include <QFile>
 #include "view2d/KLayout2DView.h"
+
+#ifdef HAVE_KLAYOUT
+#include <QMenu>
+#include "view2d/EmbeddedDispatcher.h"
+#include "layAbstractMenu.h"
+#endif
 
 namespace chiplet {
 
@@ -227,6 +234,46 @@ TEST_F(KLayout2DViewTest, LoadRealGdsIfDisplayAvailable) {
     EXPECT_TRUE(result) << "Failed to load " << testFile.toStdString();
     EXPECT_TRUE(view.hasLayout());
     EXPECT_EQ(view.currentPath(), testFile);
+}
+
+// Regression test for the SIGSEGV when right-clicking KLayout's hierarchy/layer
+// side panels. Root cause: a LayoutViewWidget driven by an EXTERNAL dispatcher
+// never runs lay::LayoutViewBase::init_menu()/build() (that path only fires when
+// dispatcher() == view). The detached context menus were therefore never built,
+// so detached_menu("hcp_context_menu") returned a null QMenu and
+// HierarchyControlPanel::context_menu() crashed in QMenu::exec().
+// EmbeddedDispatcher must populate and build those detached menus itself.
+TEST_F(KLayout2DViewTest, EmbeddedDispatcherBuildsContextMenus) {
+    EmbeddedDispatcher dispatcher(nullptr);
+    ASSERT_TRUE(dispatcher.isInitialized());
+
+    lay::AbstractMenu* menu = dispatcher.menu();
+    ASSERT_NE(menu, nullptr);
+
+    // The detached context menus the side panels look up must exist.
+    ASSERT_TRUE(menu->is_valid("@hcp_context_menu"));
+    ASSERT_TRUE(menu->is_valid("@lcp_context_menu"));
+
+    // They must resolve to a real (non-null) QMenu - the null deref here was the
+    // crash. detached_menu() asserts the item exists, then returns its QMenu.
+    QMenu* hcp = menu->detached_menu("hcp_context_menu");
+    QMenu* lcp = menu->detached_menu("lcp_context_menu");
+    ASSERT_NE(hcp, nullptr);
+    ASSERT_NE(lcp, nullptr);
+
+    // And the hierarchy context menu should carry the navigation actions
+    // (e.g. "Show As New Top") contributed by the hierarchy panel plugin.
+    EXPECT_GT(hcp->actions().size(), 0);
+}
+
+// Hierarchy depth controls must be safe no-ops when no layout/view is present.
+TEST_F(KLayout2DViewTest, HierLevelControlsSafeWhenEmpty) {
+    KLayout2DView view;
+    // No view widget yet: getter reports "unknown", setter must not crash.
+    EXPECT_EQ(view.maxHierLevels(), -1);
+    view.setMaxHierLevels(5);
+    view.setMaxHierLevels(-3);  // negative clamps internally, still safe
+    EXPECT_FALSE(view.hasLayout());
 }
 
 #endif // HAVE_KLAYOUT
