@@ -1,0 +1,54 @@
+format_version: "1.0"
+
+# Synthetic verification fixture for the coord-frame contract.
+# See chiplet-studio/docs/coord_frame_contract.md §7.1 for the spec.
+#
+# 1000 x 1000 um interposer (bbox_center anchor), 2 dies (gds_origin),
+# 4 io_pads at the interposer corners. Positions and dimensions chosen
+# so test_coord_frame_contract.cpp can assert exact values without any
+# tolerance.
+
+assembly:
+  name: "Coord Frame Contract Synthetic Fixture"
+  description: "Verification fixture for chiplet-studio/docs/coord_frame_contract.md"
+  units: "um"
+
+components:
+  - id: interposer
+    type: interposer
+    anchor: bbox_center
+    dimensions: {width: 1000, height: 1000, thickness: 13.83}
+    position: {x: 500, y: 500, z: 0}
+    io_pads:
+      - id: P_BL
+        io_class: wire_bond
+        position: {x: 50, y: 50}
+        size: {x: 50, y: 50}
+        layer: TopMetal2
+      - id: P_BR
+        io_class: wire_bond
+        position: {x: 950, y: 50}
+        size: {x: 50, y: 50}
+        layer: TopMetal2
+      - id: P_TL
+        io_class: wire_bond
+        position: {x: 50, y: 950}
+        size: {x: 50, y: 50}
+        layer: TopMetal2
+      - id: P_TR
+        io_class: wire_bond
+        position: {x: 950, y: 950}
+        size: {x: 50, y: 50}
+        layer: TopMetal2
+
+  - id: U_A
+    type: die
+    anchor: gds_origin
+    dimensions: {width: 100, height: 100, thickness: 50}
+    position: {x: 250, y: 250, z: 50}
+
+  - id: U_B
+    type: die
+    anchor: gds_origin
+    dimensions: {width: 100, height: 100, thickness: 50}
+    position: {x: 750, y: 750, z: 50}

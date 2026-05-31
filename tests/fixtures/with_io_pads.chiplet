@@ -1,0 +1,70 @@
+format_version: "1.0"
+
+assembly:
+  name: "Wirebond Package Test"
+  description: "Smoke fixture for io_pads schema"
+  units: "um"
+  io_technology: "wire_bond"
+
+technologies:
+  interposer_tech:
+    description: "Interposer (TopMetal2 routing)"
+    layer_properties: "./tech/test.lyp"
+    dbu: 0.001
+
+components:
+  - id: interposer
+    type: interposer
+    technology: interposer_tech
+    dimensions: {width: 4000, height: 3000, thickness: 13.83}
+    position: {x: 0, y: 0, z: 0}
+    io_pads:
+      - id: J1
+        io_class: wire_bond
+        net: VDD_EXT
+        position: {x: -1500.0, y: 1200.0}
+        size: {x: 100.0, y: 100.0}
+        layer: TopMetal2
+      - id: J2
+        io_class: wire_bond
+        net: GND_EXT
+        position: {x: 1500.0, y: 1200.0}
+        size: {x: 100.0, y: 100.0}
+        layer: TopMetal2
+      - id: J3
+        io_class: wire_bond
+        net: OUT0
+        position: {x: 0.0, y: -1300.0}
+        size: {x: 150.0, y: 150.0}
+        layer: TopMetal2
+
+  - id: U1
+    type: die
+    technology: interposer_tech
+    dimensions: {width: 1000, height: 1000, thickness: 100}
+    position: {x: 0, y: 0, z: 14}
+
+netlist:
+  nets:
+    - name: VDD_EXT
+      class: power
+      external: true
+      connections:
+        - {component: U1, pin: VDD}
+        - {component: interposer, pin: J1}
+    - name: GND_EXT
+      class: ground
+      external: true
+      connections:
+        - {component: U1, pin: GND}
+        - {component: interposer, pin: J2}
+    - name: OUT0
+      class: signal
+      external: true
+      connections:
+        - {component: U1, pin: OUT}
+        - {component: interposer, pin: J3}
+    - name: INTERNAL_NET
+      class: signal
+      connections:
+        - {component: U1, pin: NA}

@@ -12,9 +12,11 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QComboBox>
+#include <QLineEdit>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QHeaderView>
+#include <QMenu>
 #include <QPixmap>
 #include <QIcon>
 #include <QFileInfo>
@@ -134,15 +136,31 @@ void PropertiesPanel::createGroupBoxes()
     m_layersGroup = createCollapsibleGroup("Layers (0)");
     QVBoxLayout* layersLayout = new QVBoxLayout(m_layersGroup);
     layersLayout->setContentsMargins(8, 8, 8, 8);
+
+    m_layerFilter = new QLineEdit();
+    m_layerFilter->setObjectName("layerFilter");
+    m_layerFilter->setPlaceholderText("Filter layers (name or L/D)...");
+    m_layerFilter->setClearButtonEnabled(true);
+    layersLayout->addWidget(m_layerFilter);
+
     m_layerTree = new QTreeWidget();
+    m_layerTree->setObjectName("layerTree");
     m_layerTree->setHeaderLabels({"Layer", "L/D"});
     m_layerTree->setRootIsDecorated(false);
     m_layerTree->setMaximumHeight(150);
     m_layerTree->header()->setStretchLastSection(false);
     m_layerTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_layerTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_layerTree->setContextMenuPolicy(Qt::CustomContextMenu);
     layersLayout->addWidget(m_layerTree);
     m_mainLayout->addWidget(m_layersGroup);
+
+    connect(m_layerFilter, &QLineEdit::textChanged,
+            this, &PropertiesPanel::onLayerFilterChanged);
+    connect(m_layerTree, &QTreeWidget::itemChanged,
+            this, &PropertiesPanel::onLayerItemChanged);
+    connect(m_layerTree, &QTreeWidget::customContextMenuRequested,
+            this, &PropertiesPanel::onLayerContextMenu);
 
     // Array Group (hidden by default)
     m_arrayGroup = createCollapsibleGroup("Array Configuration");
@@ -194,6 +212,11 @@ void PropertiesPanel::setAssembly(Assembly* assembly)
     m_assembly = assembly;
 }
 
+void PropertiesPanel::setLayerVisibilityResolver(std::function<bool(const QString&, int, int)> resolver)
+{
+    m_layerVisibilityResolver = std::move(resolver);
+}
+
 void PropertiesPanel::clearSelection()
 {
     m_selectedComponentId = INVALID_COMPONENT_ID;
@@ -214,7 +237,13 @@ void PropertiesPanel::clearSelection()
     m_topCellLabel->setText("-");
 
     // Clear trees
+    m_blockLayerSync = true;
     m_layerTree->clear();
+    if (m_layerFilter) {
+        m_layerFilter->clear();
+    }
+    m_layersForComponent = INVALID_COMPONENT_ID;
+    m_blockLayerSync = false;
     m_layersGroup->setTitle("Layers (0)");
     m_metadataTree->clear();
 
@@ -447,11 +476,25 @@ QPixmap createPatternSwatch(const LayerStyle& layer, int swatchSize = 16)
 
 void PropertiesPanel::updateLayersGroup()
 {
+    // Layers depend only on the component's technology, not on the display unit.
+    // Skip the (hundreds-of-rows) rebuild when the selected component is unchanged
+    // so the user's show/hide checkbox states survive unit-change refreshes.
+    if (m_selectedComponentId == m_layersForComponent &&
+        m_layerTree->topLevelItemCount() > 0) {
+        return;
+    }
+
+    m_blockLayerSync = true;
     m_layerTree->clear();
+    if (m_layerFilter) {
+        m_layerFilter->clear();
+    }
     loadLayerProperties();
+    m_layersForComponent = m_selectedComponentId;
 
     if (m_layerProps.layers().empty()) {
         m_layersGroup->setTitle("Layers (0)");
+        m_blockLayerSync = false;
         return;
     }
 
@@ -472,6 +515,19 @@ void PropertiesPanel::updateLayersGroup()
         item->setText(0, name);
         item->setText(1, QString("%1/%2").arg(layer.key.layer).arg(layer.key.datatype));
 
+        // Per-layer show/hide checkbox; the layer/datatype is stashed so the
+        // toggle slot can address the matching LayerMesh in the 3D view. Initial
+        // state mirrors the 3D view's current visibility (via the resolver), so
+        // it stays correct when revisiting a component with hidden layers.
+        bool visible = m_layerVisibilityResolver
+            ? m_layerVisibilityResolver(QString::fromStdString(m_selectedComponentId),
+                                        layer.key.layer, layer.key.datatype)
+            : true;
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+        item->setData(0, Qt::UserRole, layer.key.layer);
+        item->setData(0, Qt::UserRole + 1, layer.key.datatype);
+
         // Tooltip with full layer info
         QString tooltip = QString("Layer: %1\nL/D: %2/%3\nPattern: %4")
             .arg(QString::fromStdString(layer.name))
@@ -484,6 +540,150 @@ void PropertiesPanel::updateLayersGroup()
 
         m_layerTree->addTopLevelItem(item);
     }
+
+    m_blockLayerSync = false;
+}
+
+void PropertiesPanel::onLayerItemChanged(QTreeWidgetItem* item, int column)
+{
+    Q_UNUSED(column);
+    if (m_blockLayerSync || !item) {
+        return;
+    }
+    if (!is_valid_id(m_selectedComponentId)) {
+        return;
+    }
+
+    int layer = item->data(0, Qt::UserRole).toInt();
+    int datatype = item->data(0, Qt::UserRole + 1).toInt();
+    bool visible = (item->checkState(0) == Qt::Checked);
+
+    emit layerVisibilityChanged(QString::fromStdString(m_selectedComponentId),
+                                layer, datatype, visible);
+}
+
+void PropertiesPanel::onLayerFilterChanged(const QString& text)
+{
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        bool match = text.isEmpty() ||
+                     item->text(0).contains(text, Qt::CaseInsensitive) ||
+                     item->text(1).contains(text, Qt::CaseInsensitive);
+        item->setHidden(!match);
+    }
+}
+
+void PropertiesPanel::setAllLayersVisible(bool visible)
+{
+    const Qt::CheckState target = visible ? Qt::Checked : Qt::Unchecked;
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        if (item->isHidden()) continue;  // filter-hidden rows untouched
+        if (item->checkState(0) != target) {
+            item->setCheckState(0, target);
+        }
+    }
+}
+
+void PropertiesPanel::showOnlyLayer(int layer, int datatype)
+{
+    // Operates on every row (not the filtered set): the user picked one specific
+    // layer to isolate, so filter-hidden rows must also go off in 3D — otherwise
+    // "only this" would silently leave them visible.
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        const int l = item->data(0, Qt::UserRole).toInt();
+        const int d = item->data(0, Qt::UserRole + 1).toInt();
+        const Qt::CheckState target = (l == layer && d == datatype)
+                                          ? Qt::Checked : Qt::Unchecked;
+        if (item->checkState(0) != target) {
+            item->setCheckState(0, target);
+        }
+    }
+}
+
+void PropertiesPanel::invertLayerVisibility()
+{
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        if (item->isHidden()) continue;  // filter-hidden rows untouched
+        const Qt::CheckState target =
+            item->checkState(0) == Qt::Checked ? Qt::Unchecked : Qt::Checked;
+        item->setCheckState(0, target);
+    }
+}
+
+void PropertiesPanel::showOnlyMatchingFilter()
+{
+    // Forces 3D visibility to mirror the filter: filter-visible rows get checked,
+    // filter-hidden rows get unchecked. The one bulk op that does touch hidden rows.
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        const Qt::CheckState target =
+            item->isHidden() ? Qt::Unchecked : Qt::Checked;
+        if (item->checkState(0) != target) {
+            item->setCheckState(0, target);
+        }
+    }
+}
+
+void PropertiesPanel::onLayerContextMenu(const QPoint& pos)
+{
+    if (!m_layerTree || m_layerTree->topLevelItemCount() == 0) {
+        return;
+    }
+
+    QTreeWidgetItem* item = m_layerTree->itemAt(pos);
+
+    QMenu menu(this);
+    menu.setStyleSheet(
+        "QMenu { background-color: #3a3a3a; color: #ddd; border: 1px solid #555; }"
+        "QMenu::item { padding: 4px 20px; }"
+        "QMenu::item:selected { background-color: #3daee9; color: #fff; }"
+        "QMenu::separator { height: 1px; background: #555; margin: 2px 8px; }"
+    );
+
+    if (item) {
+        const bool isVisible = (item->checkState(0) == Qt::Checked);
+        const int layer = item->data(0, Qt::UserRole).toInt();
+        const int datatype = item->data(0, Qt::UserRole + 1).toInt();
+
+        QAction* toggle = menu.addAction(isVisible ? "Hide" : "Show");
+        connect(toggle, &QAction::triggered, this, [item, isVisible]() {
+            item->setCheckState(0, isVisible ? Qt::Unchecked : Qt::Checked);
+        });
+
+        QAction* only = menu.addAction("Show only this");
+        connect(only, &QAction::triggered, this, [this, layer, datatype]() {
+            showOnlyLayer(layer, datatype);
+        });
+
+        menu.addSeparator();
+    }
+
+    QAction* showAll = menu.addAction("Show all");
+    connect(showAll, &QAction::triggered, this, [this]() {
+        setAllLayersVisible(true);
+    });
+
+    QAction* hideAll = menu.addAction("Hide all");
+    connect(hideAll, &QAction::triggered, this, [this]() {
+        setAllLayersVisible(false);
+    });
+
+    QAction* invert = menu.addAction("Invert visibility");
+    connect(invert, &QAction::triggered, this, [this]() {
+        invertLayerVisibility();
+    });
+
+    const bool hasFilter = m_layerFilter && !m_layerFilter->text().isEmpty();
+    QAction* matchFilter = menu.addAction("Show only matching filter");
+    matchFilter->setEnabled(hasFilter);
+    connect(matchFilter, &QAction::triggered, this, [this]() {
+        showOnlyMatchingFilter();
+    });
+
+    menu.exec(m_layerTree->viewport()->mapToGlobal(pos));
 }
 
 void PropertiesPanel::updateArrayGroup()

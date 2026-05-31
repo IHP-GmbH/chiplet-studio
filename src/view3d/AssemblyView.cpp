@@ -379,7 +379,9 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_layerProps.clear();
     m_polygonCache.clear();
     m_areaStats.clear();
-    m_shapeFilterPercent = 0.0;
+    m_layerVisibilityOverride.clear();
+    m_shapeFilterByComponent.clear();
+    m_pendingFilterComponent.clear();
     m_debugPrinted = false;
 
     if (!assembly) {
@@ -489,6 +491,76 @@ bool AssemblyView::isComponentVisible(const QString& componentId) const
         return it->second;
     }
     return true;  // Default to visible
+}
+
+void AssemblyView::setLayerVisible(const QString& componentId, int layer, int datatype, bool visible)
+{
+    if (componentId.isEmpty()) {
+        return;
+    }
+
+    // Record the intent first so it survives geometry rebuilds (e.g. shape filter)
+    // and can be read back by the Properties panel, even if no geometry exists yet.
+    m_layerVisibilityOverride[componentId][LayerKey(layer, datatype)] = visible;
+
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return;  // No built geometry yet; override applies when it is built
+    }
+
+    bool changed = false;
+    for (LayerMesh& mesh : it->second.layers) {
+        if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+            if (mesh.visible != visible) {
+                mesh.visible = visible;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        update();
+    }
+}
+
+bool AssemblyView::isLayerVisible(const QString& componentId, int layer, int datatype) const
+{
+    // User intent wins (set even when the component has no built geometry).
+    auto co = m_layerVisibilityOverride.find(componentId);
+    if (co != m_layerVisibilityOverride.end()) {
+        auto lo = co->second.find(LayerKey(layer, datatype));
+        if (lo != co->second.end()) {
+            return lo->second;
+        }
+    }
+
+    auto it = m_layerGeometry.find(componentId);
+    if (it != m_layerGeometry.end()) {
+        for (const LayerMesh& mesh : it->second.layers) {
+            if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+                return mesh.visible;
+            }
+        }
+    }
+    return true;  // No override, no geometry: visible by default
+}
+
+void AssemblyView::applyLayerVisibilityOverrides(const QString& componentId)
+{
+    auto co = m_layerVisibilityOverride.find(componentId);
+    if (co == m_layerVisibilityOverride.end()) {
+        return;
+    }
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return;
+    }
+    for (LayerMesh& mesh : it->second.layers) {
+        auto lo = co->second.find(mesh.key);
+        if (lo != co->second.end()) {
+            mesh.visible = lo->second;
+        }
+    }
 }
 
 void AssemblyView::fitToAssembly()
@@ -823,16 +895,15 @@ void AssemblyView::buildMeshes()
             float d = static_cast<float>(dims.thickness / 1000.0);
             float h = static_cast<float>(bbox.height() / 1000.0);
 
-            // Position the box to align with GDS coordinates.
-            // GDS geometry is at (gds_x, gds_y) in cell space, then translated
-            // by component position. Box must match.
-            // Flip-chip dies get scale(-1,1,1) in LayerMode, so the GDS center X
-            // must be negated to keep the box aligned with the mirrored geometry.
-            bool isFlipChip = (comp->orientation() == Orientation::FaceDown);
-            float gdsCenterX = static_cast<float>((bbox.x_min + bbox.x_max) / 2000.0);
-            float offsetX = static_cast<float>(pos.x / 1000.0) + (isFlipChip ? -gdsCenterX : gdsCenterX);
+            // Box is sized from the GDS bbox and positioned by .chiplet position.
+            // LayerMode centers each mesh on its own GDS bbox center so that
+            // .chiplet position consistently means "where the component's center
+            // sits in assembly space". BoxMode follows the same convention here.
+            // buildBox() centers along X and Y but treats offsetZ as the +Z face,
+            // so add h/2 to land the box centered on -pos.y in 3D Z.
+            float offsetX = static_cast<float>(pos.x / 1000.0);
             float offsetY = static_cast<float>(pos.z / 1000.0);     // Elevation
-            float offsetZ = static_cast<float>(-pos.y / 1000.0 - bbox.y_min / 1000.0);  // Near Z face
+            float offsetZ = static_cast<float>(-pos.y / 1000.0) + h / 2.0f;
 
             mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
             mesh.setColor(MeshBuilder::colorForComponent(*comp, lyp));
@@ -853,6 +924,7 @@ void AssemblyView::buildMeshes()
         if (!comp) continue;
 
         bool needsDetail = (comp->render_mode() == RenderMode::Detailed)
+                        || (comp->render_mode() == RenderMode::DetailedNoSubstrate)
                         || (m_viewMode == ViewMode::LayerMode);
 
         if (needsDetail) {
@@ -951,6 +1023,7 @@ void AssemblyView::renderComponents()
                 break;
             case RenderMode::Solid:
             case RenderMode::Detailed:
+            case RenderMode::DetailedNoSubstrate:
                 opaqueIds.push_back(id);
                 break;
             default:
@@ -1026,8 +1099,11 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
         bool isFlipped = (comp->orientation() == Orientation::FaceDown);
         if (isFlipped) glFrontFace(GL_CW);
 
-        // If Detailed and has layer geometry, render that
-        if (comp->render_mode() == RenderMode::Detailed && m_layerGeometry.count(id)) {
+        // If Detailed (with or without substrate) and has layer geometry, render that
+        bool isDetailedMode = (comp->render_mode() == RenderMode::Detailed)
+                           || (comp->render_mode() == RenderMode::DetailedNoSubstrate);
+        bool hideSubstrate  = (comp->render_mode() == RenderMode::DetailedNoSubstrate);
+        if (isDetailedMode && m_layerGeometry.count(id)) {
             auto& geometry = m_layerGeometry[id];
 
             float aspect = static_cast<float>(width()) / height();
@@ -1052,6 +1128,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
 
             for (auto& layer : geometry.layers) {
                 if (!layer.visible) continue;
+                if (hideSubstrate && layer.name == "Substrate") continue;
                 QColor lc = layer.color;
                 m_componentShader.setUniformVec4("objectColor",
                     QVector4D(lc.redF(), lc.greenF(), lc.blueF(), 1.0f));
@@ -1178,7 +1255,7 @@ void AssemblyView::onComponentRenderModeChanged(const QString& componentId, Rend
 {
     if (!m_initialized || !m_assembly) return;
 
-    if (newMode == RenderMode::Detailed) {
+    if (newMode == RenderMode::Detailed || newMode == RenderMode::DetailedNoSubstrate) {
         // Build layer geometry for this component if not already present
         if (!m_layerGeometry.count(componentId)) {
             Component* comp = m_assembly->component(componentId.toStdString());
@@ -1460,11 +1537,33 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     m_polygonCache[compId] = polygons;
     m_areaStats[compId] = ShapeFilter::computeStatistics(polygons);
 
-    // Apply active shape filter
-    if (m_shapeFilterPercent > 0.0 && m_areaStats[compId].total_polygons > 0) {
+    // Apply active per-component shape filter (if the user previously set one
+    // for this component, e.g. .chiplet reload preserves the slider value).
+    double compFilter = shapeFilterPercent(compId);
+    if (compFilter > 0.0 && m_areaStats[compId].total_polygons > 0) {
         double threshold = ShapeFilter::thresholdFromPercentage(
-            m_shapeFilterPercent, m_areaStats[compId]);
+            compFilter, m_areaStats[compId]);
         polygons = ShapeFilter::filter(polygons, threshold);
+    }
+
+    // Black-box / no-LYP chiplet (commercial / closed PDK node): the fallback
+    // stackup does not model this die's layers, so LayerMeshBuilder would skip
+    // them (it intentionally drops layers absent from the stackup) and the
+    // component would render empty in 3D. Augment a LOCAL copy of the stackup
+    // (the cached one is untouched) with every present GDS layer it does not
+    // already model, as thin slabs, so the pads and any other geometry stay
+    // visible. Gated on the no-LYP case so known PDKs are never perturbed.
+    if (!lyp) {
+        constexpr double kBlackBoxSlabUm = 1.0;
+        double zTop = stackup.totalHeight();
+        for (const auto& entry : polygons) {
+            const LayerKey& key = entry.first;
+            if (!stackup.find(key)) {
+                stackup.addLayer(key.layer, key.datatype, zTop,
+                                 kBlackBoxSlabUm, "blackbox");
+                zTop += kBlackBoxSlabUm;
+            }
+        }
     }
 
     // Build 3D geometry from polygons
@@ -1473,12 +1572,17 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     // stack upward, matching the physical face-down orientation.
     bool flipZ = (comp.orientation() == Orientation::FaceDown);
     double beolTop = flipZ ? stackup.totalHeight() : 0.0;
+    // Mesh anchor convention is now schema-driven (per
+    // coord_frame_contract.md §2): each component declares
+    // `anchor: gds_origin` or `anchor: bbox_center`. Legacy files
+    // without the field default to BboxCenter (the parser warns).
+    Anchor anchor = comp.anchor();
 
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
         polygons, stackup, lyp,
         hasColorScheme ? &colorScheme : nullptr,
-        1.0, flipZ, beolTop);
+        1.0, flipZ, beolTop, anchor);
 
     // Set component ID and apply transform
     geometry.componentId = compId;
@@ -1502,6 +1606,7 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     }
 
     m_layerGeometry[compId] = std::move(geometry);
+    applyLayerVisibilityOverrides(compId);
 
     qDebug() << "Built layer geometry for" << compId << ":"
              << m_layerGeometry[compId].layerCount() << "layers,"
@@ -1512,27 +1617,45 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
 #endif
 }
 
-void AssemblyView::setShapeFilterPercent(double percent)
+void AssemblyView::setShapeFilterPercent(const QString& componentId, double percent)
 {
+    if (componentId.isEmpty()) return;
     percent = std::clamp(percent, 0.0, 100.0);
-    if (std::abs(percent - m_shapeFilterPercent) < 0.01) return;
-    m_shapeFilterPercent = percent;
+    double& stored = m_shapeFilterByComponent[componentId];  // inserts 0.0 default
+    if (std::abs(percent - stored) < 0.01) return;
+    stored = percent;
+
+    // Debounce rapid slider drags. The pending compId is overwritten on every
+    // call; if the user drags another component's slider mid-debounce, the
+    // previous edit is already stored — only the rebuild for it is skipped, which
+    // the next selection-driven rebuild (or selecting it again and nudging) will
+    // catch. In practice the slider only edits the currently selected component.
+    m_pendingFilterComponent = componentId;
     if (m_filterDebounceTimer) {
         m_filterDebounceTimer->start(150);
     }
-    emit shapeFilterChanged(percent);
+    emit shapeFilterChanged(componentId, percent);
+}
+
+double AssemblyView::shapeFilterPercent(const QString& componentId) const
+{
+    auto it = m_shapeFilterByComponent.find(componentId);
+    return it == m_shapeFilterByComponent.end() ? 0.0 : it->second;
 }
 
 void AssemblyView::applyShapeFilter()
 {
-    if (!m_initialized || m_polygonCache.empty()) return;
+    if (!m_initialized) return;
+    if (m_pendingFilterComponent.isEmpty()) return;
+    const QString compId = m_pendingFilterComponent;
+    m_pendingFilterComponent.clear();
+
+    if (!m_polygonCache.count(compId) || !m_layerGeometry.count(compId)) {
+        return;
+    }
 
     makeCurrent();
-    for (const auto& [compId, cachedPolygons] : m_polygonCache) {
-        if (m_layerGeometry.count(compId)) {
-            rebuildFilteredGeometry(compId);
-        }
-    }
+    rebuildFilteredGeometry(compId);
     doneCurrent();
 
     updateSceneBounds();
@@ -1548,11 +1671,12 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
     auto statsIt = m_areaStats.find(compId);
     if (statsIt == m_areaStats.end()) return;
 
-    // Filter polygons
+    // Filter polygons using this component's own percent
     auto polygons = cacheIt->second;
-    if (m_shapeFilterPercent > 0.0 && statsIt->second.total_polygons > 0) {
+    double compFilter = shapeFilterPercent(compId);
+    if (compFilter > 0.0 && statsIt->second.total_polygons > 0) {
         double threshold = ShapeFilter::thresholdFromPercentage(
-            m_shapeFilterPercent, statsIt->second);
+            compFilter, statsIt->second);
         polygons = ShapeFilter::filter(polygons, threshold);
     }
 
@@ -1595,15 +1719,17 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
         transform = geomIt->second.transform;
     }
 
-    // Rebuild mesh (preserve flip-chip z-inversion from initial build)
+    // Rebuild mesh (preserve flip-chip z-inversion from initial build).
+    // Anchor is schema-driven per coord_frame_contract.md §2.
     bool flipZ = (comp->orientation() == Orientation::FaceDown);
     double beolTop = flipZ ? stackup.totalHeight() : 0.0;
+    Anchor anchor = comp->anchor();
 
     LayerMeshBuilder meshBuilder;
     Component3DGeometry geometry = meshBuilder.build(
         polygons, stackup, lyp,
         hasColorScheme ? &colorScheme : nullptr,
-        1.0, flipZ, beolTop);
+        1.0, flipZ, beolTop, anchor);
 
     geometry.componentId = compId;
     geometry.transform = transform;
@@ -1614,6 +1740,7 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
     }
 
     m_layerGeometry[compId] = std::move(geometry);
+    applyLayerVisibilityOverrides(compId);
 #else
     Q_UNUSED(compId);
 #endif

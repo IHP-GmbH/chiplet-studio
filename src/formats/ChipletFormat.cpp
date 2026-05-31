@@ -5,8 +5,12 @@
 #include "ChipletFormat.h"
 #include "core/Technology.h"
 #include "core/ConnectionStack.h"
+#include "core/IOPad.h"
 #include "core/flow/FlowConfig.h"
 #include <yaml-cpp/yaml.h>
+#include <QDebug>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <filesystem>
 
@@ -127,6 +131,25 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         throw ChipletFormatException("Missing required field", 0, "format_version");
     }
 
+    // Refuse to load intermediate output (KiCad export marks .chiplet
+    // files as intermediate when they live in PCB-bbox-corner instead
+    // of the canonical GDS-bbox-corner frame). The finalizer is
+    // hyp_to_gds.py --update-chiplet-file, which strips this block.
+    // See coord_frame_contract.md §4.1 (Option a) and §5.1.
+    if (root["_metadata"]
+        && root["_metadata"]["finalize_required"]
+        && root["_metadata"]["finalize_required"].as<bool>(false)) {
+        std::string finalizer = "hyp_to_gds.py --update-chiplet-file";
+        if (root["_metadata"]["finalizer"]) {
+            finalizer = root["_metadata"]["finalizer"].as<std::string>(finalizer);
+        }
+        throw ChipletFormatException(
+            "this .chiplet is intermediate (PCB-bbox-corner frame); "
+            "run " + finalizer + " to finalize",
+            0,
+            "_metadata.finalize_required");
+    }
+
     auto assembly = std::make_unique<Assembly>();
 
     // Parse sections
@@ -204,6 +227,10 @@ void ChipletFormat::parse_assembly_metadata(const YAML::Node& node, Assembly& as
     if (node["assembly_gds"]) {
         assembly.set_assembly_gds(resolve_path(node["assembly_gds"].as<std::string>()));
     }
+
+    if (node["io_technology"]) {
+        assembly.set_io_technology(node["io_technology"].as<std::string>());
+    }
 }
 
 void ChipletFormat::parse_technologies(const YAML::Node& node, Assembly& assembly)
@@ -256,8 +283,32 @@ void ChipletFormat::parse_components(const YAML::Node& node, Assembly& assembly)
         throw ChipletFormatException("Expected a sequence", 0, "components");
     }
 
+    // Track components that did not declare `anchor:` so we can emit a
+    // single file-level warning instead of one per component.
+    // Per coord_frame_contract.md §2.2, the reader defaults to
+    // bbox_center on absence and must warn (helps catch legacy files
+    // before they cause silent geometry mismatches).
+    std::vector<std::string> missingAnchor;
+
     for (const auto& compNode : node) {
         parse_component(compNode, assembly);
+        const auto& comp = assembly.components().back();
+        if (!comp->anchor_declared()) {
+            missingAnchor.push_back(comp->id());
+        }
+    }
+
+    if (!missingAnchor.empty()) {
+        std::string idList;
+        for (size_t i = 0; i < missingAnchor.size(); ++i) {
+            if (i > 0) idList += ", ";
+            idList += missingAnchor[i];
+        }
+        qWarning("[chiplet] %zu component(s) without explicit 'anchor' "
+                 "field; defaulted to bbox_center: %s",
+                 missingAnchor.size(), idList.c_str());
+        qWarning("[chiplet] See chiplet-studio/docs/coord_frame_contract.md "
+                 "section 2 for the anchor contract.");
     }
 }
 
@@ -320,11 +371,51 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
         component->set_rotation(parseRotation3D(node["rotation"]));
     }
 
-    // Orientation (face-up or flip-chip)
+    // Orientation (face-up or flip-chip). Render mode stays at the
+    // constructor default (Transparent for dies, Solid for substrates)
+    // regardless of orientation: a Transparent overview opens faster
+    // and lets the user see the whole assembly at a glance. Users
+    // promote individual components to Detailed via the Hierarchy
+    // panel when they need to inspect cu-pillar contact / GDS
+    // tessellation.
     if (node["orientation"]) {
         std::string orient = node["orientation"].as<std::string>("face_up");
         if (orient == "flip_chip" || orient == "face_down")
             component->set_orientation(Orientation::FaceDown);
+    }
+
+    // Anchor convention (see coord_frame_contract.md §2). Drives mesh
+    // centering downstream. When absent, default to BboxCenter (the
+    // pre-contract behavior for interposers); the file-level warning
+    // is emitted by parse_components.
+    if (node["anchor"]) {
+        std::string anchorStr = node["anchor"].as<std::string>();
+        auto parsed = string_to_anchor(anchorStr);
+        if (parsed.has_value()) {
+            component->set_anchor(parsed.value());
+            component->set_anchor_declared(true);
+        } else {
+            qWarning("[chiplet] component '%s': unknown anchor value '%s' "
+                     "(expected gds_origin or bbox_center); defaulting to "
+                     "bbox_center",
+                     id.c_str(), anchorStr.c_str());
+            // Treat as undeclared so the file-level summary warns too.
+        }
+    }
+
+    // Heuristic guard against HYP-absolute or other foreign-frame leaks
+    // (per contract §5: warn loudly when |position.x| or |position.y|
+    // exceeds 1e5 µm — the wire-bond demo io_pads bug surfaced exactly
+    // there).
+    const auto& posCheck = component->position();
+    constexpr double kPositionWarnThreshold_um = 1.0e5;
+    if (std::fabs(posCheck.x) > kPositionWarnThreshold_um
+        || std::fabs(posCheck.y) > kPositionWarnThreshold_um) {
+        qWarning("[chiplet] component '%s': position (%.3f, %.3f) µm "
+                 "exceeds %.0e µm — likely a foreign-frame leak (e.g. "
+                 "HYP-absolute). See coord_frame_contract.md §1.",
+                 id.c_str(), posCheck.x, posCheck.y,
+                 kPositionWarnThreshold_um);
     }
 
     // Dimensions
@@ -368,6 +459,75 @@ void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
                     item.second.as<std::string>()
                 );
             }
+        }
+    }
+
+    // External I/O pads (e.g. wire-bond pads on the interposer).
+    // Optional and additive: existing files without io_pads are unaffected.
+    if (node["io_pads"] && node["io_pads"].IsSequence()) {
+        // Track io_pads whose declared position falls outside the
+        // plausible range for the canonical frame — a heuristic to
+        // catch HYP-absolute leaks (wire-bond demo bug, see contract
+        // §6). One warning per parent component, listing pad ids.
+        std::vector<std::string> oobPads;
+
+        for (const auto& padNode : node["io_pads"]) {
+            IOPad pad;
+            if (padNode["id"]) {
+                pad.set_id(padNode["id"].as<std::string>());
+            }
+            if (padNode["io_class"]) {
+                pad.set_io_class(string_to_io_class(
+                    padNode["io_class"].as<std::string>()));
+            }
+            if (padNode["net"]) {
+                pad.set_net(padNode["net"].as<std::string>());
+            }
+            if (padNode["position"]) {
+                IOPadPosition p;
+                if (padNode["position"]["x"]) {
+                    p.x = padNode["position"]["x"].as<double>();
+                }
+                if (padNode["position"]["y"]) {
+                    p.y = padNode["position"]["y"].as<double>();
+                }
+                pad.set_position(p);
+            }
+            if (padNode["size"]) {
+                IOPadSize sz;
+                if (padNode["size"]["x"]) {
+                    sz.x = padNode["size"]["x"].as<double>();
+                }
+                if (padNode["size"]["y"]) {
+                    sz.y = padNode["size"]["y"].as<double>();
+                }
+                pad.set_size(sz);
+            }
+            if (padNode["layer"]) {
+                pad.set_layer(padNode["layer"].as<std::string>());
+            }
+
+            constexpr double kPositionWarnThreshold_um = 1.0e5;
+            const auto& padPos = pad.position();
+            if (std::fabs(padPos.x) > kPositionWarnThreshold_um
+                || std::fabs(padPos.y) > kPositionWarnThreshold_um) {
+                oobPads.push_back(pad.id());
+            }
+
+            component->add_io_pad(pad);
+        }
+
+        if (!oobPads.empty()) {
+            std::string idList;
+            for (size_t i = 0; i < oobPads.size(); ++i) {
+                if (i > 0) idList += ", ";
+                idList += oobPads[i];
+            }
+            qWarning("[chiplet] component '%s': %zu io_pad(s) with "
+                     "position outside ±1e5 µm — likely HYP-absolute "
+                     "leak. Affected pads: %s. See "
+                     "coord_frame_contract.md section 6.",
+                     id.c_str(), oobPads.size(), idList.c_str());
         }
     }
 
@@ -470,6 +630,10 @@ void ChipletFormat::parse_netlist(const YAML::Node& node, Assembly& assembly)
 
             Net net(name, nc);
 
+            if (netNode["external"]) {
+                net.set_external(netNode["external"].as<bool>());
+            }
+
             if (netNode["connections"] && netNode["connections"].IsSequence()) {
                 for (const auto& connNode : netNode["connections"]) {
                     NetConnection conn;
@@ -539,6 +703,9 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     if (!assembly.assembly_gds().empty()) {
         out << YAML::Key << "assembly_gds" << YAML::Value << assembly.assembly_gds();
     }
+    if (!assembly.io_technology().empty()) {
+        out << YAML::Key << "io_technology" << YAML::Value << assembly.io_technology();
+    }
     out << YAML::EndMap;
 
     // Technologies
@@ -602,6 +769,13 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             out << YAML::BeginMap;
             out << YAML::Key << "id" << YAML::Value << comp->id();
             out << YAML::Key << "type" << YAML::Value << component_type_to_string(comp->type());
+
+            // Anchor convention is part of the canonical contract and
+            // must always be emitted explicitly so downstream readers
+            // never have to guess (see coord_frame_contract.md §2,
+            // §4 Writer Contract).
+            out << YAML::Key << "anchor" << YAML::Value
+                << anchor_to_string(comp->anchor());
 
             if (!comp->technology().empty()) {
                 out << YAML::Key << "technology" << YAML::Value << comp->technology();
@@ -695,6 +869,35 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::EndMap;
             }
 
+            // I/O pads
+            if (!comp->io_pads().empty()) {
+                out << YAML::Key << "io_pads" << YAML::Value << YAML::BeginSeq;
+                for (const auto& pad : comp->io_pads()) {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "id" << YAML::Value << pad.id();
+                    out << YAML::Key << "io_class" << YAML::Value
+                        << io_class_to_string(pad.io_class());
+                    if (!pad.net().empty()) {
+                        out << YAML::Key << "net" << YAML::Value << pad.net();
+                    }
+                    out << YAML::Key << "position" << YAML::Value
+                        << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "x" << YAML::Value << pad.position().x;
+                    out << YAML::Key << "y" << YAML::Value << pad.position().y;
+                    out << YAML::EndMap;
+                    out << YAML::Key << "size" << YAML::Value
+                        << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "x" << YAML::Value << pad.size().x;
+                    out << YAML::Key << "y" << YAML::Value << pad.size().y;
+                    out << YAML::EndMap;
+                    if (!pad.layer().empty()) {
+                        out << YAML::Key << "layer" << YAML::Value << pad.layer();
+                    }
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
+
             out << YAML::EndMap;
         }
 
@@ -758,6 +961,10 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::BeginMap;
                 out << YAML::Key << "name" << YAML::Value << net.name();
                 out << YAML::Key << "class" << YAML::Value << net_class_to_string(net.net_class());
+
+                if (net.external()) {
+                    out << YAML::Key << "external" << YAML::Value << net.external();
+                }
 
                 if (net.connection_count() > 0) {
                     out << YAML::Key << "connections" << YAML::Value << YAML::BeginSeq;

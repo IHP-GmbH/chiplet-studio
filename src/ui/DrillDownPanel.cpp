@@ -244,12 +244,32 @@ void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPa
 
     if (m_view2d->loadLayout(gdsPath, lypPath)) {
         m_cellMapper->build(assembly, m_view2d->cellNames());
+        m_assemblyTopCell = m_view2d->currentCellName();
         m_panelMode = PanelMode::Assembly;
-        m_backButton->setVisible(false);
+        // Keep the back button visible in assembly mode: it resets the view to
+        // the full top-level layout (the user's "return to the whole system"),
+        // undoing any navigation done through KLayout's hierarchy panel.
+        m_backButton->setVisible(true);
+        m_backButton->setToolTip("Show full assembly view");
         m_cellNavLabel->setVisible(false);
         m_cellCombo->setVisible(false);
-        m_contextLabel->setText("Assembly");
+        m_contextLabel->setText(lypPath.isEmpty()
+                                ? "Assembly (black-box / default layers)"
+                                : "Assembly");
         populateLayerList();
+    }
+}
+
+void DrillDownPanel::showFullAssembly()
+{
+    if (m_panelMode != PanelMode::Assembly) {
+        return;
+    }
+    if (!m_assemblyTopCell.isEmpty() &&
+        m_view2d->currentCellName() != m_assemblyTopCell) {
+        m_view2d->setCurrentCell(m_assemblyTopCell);
+    } else {
+        m_view2d->zoomFit();
     }
 }
 
@@ -260,8 +280,10 @@ void DrillDownPanel::returnToAssembly()
     }
 
     m_view2d->loadLayout(m_assemblyGdsPath, m_assemblyLypPath);
+    m_assemblyTopCell = m_view2d->currentCellName();
     m_panelMode = PanelMode::Assembly;
-    m_backButton->setVisible(false);
+    m_backButton->setVisible(true);
+    m_backButton->setToolTip("Show full assembly view");
     m_cellNavLabel->setVisible(false);
     m_cellCombo->setVisible(false);
     m_contextLabel->setText("Assembly");
@@ -276,6 +298,12 @@ void DrillDownPanel::setContext(const QString& componentId,
     m_componentId = componentId;
     m_panelMode = PanelMode::DrillDown;
     m_backButton->setVisible(true);
+    // The back button returns to the full assembly GDS when one is loaded,
+    // otherwise it hides the 2D dock and goes back to the 3D view. Keep the
+    // tooltip honest so the way back is discoverable.
+    m_backButton->setToolTip(m_assemblyGdsPath.isEmpty()
+        ? "Return to 3D view"
+        : "Back to full assembly view");
 
     QString label = "Component: " + componentName;
     if (!technologyName.isEmpty()) {

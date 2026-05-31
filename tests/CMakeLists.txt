@@ -21,6 +21,7 @@ enable_testing()
 add_executable(chiplet_tests
     test_main.cpp  # Custom main with early Python initialization
     test_chiplet_format.cpp
+    test_chiplet_format_io_pads.cpp
     test_interfaces.cpp
     test_netlist.cpp
     test_validation.cpp
@@ -51,6 +52,8 @@ add_executable(chiplet_tests
     test_assembly_2d_view.cpp
     test_shape_filter.cpp
     test_net_graph.cpp
+    test_coord_frame_contract.cpp
+    test_blackbox_stackup.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -82,6 +85,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/Assembly.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Component.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Interface.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/IOPad.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Netlist.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Technology.cpp
     ${CMAKE_SOURCE_DIR}/src/core/LayerStackup.cpp

@@ -168,9 +168,10 @@ void HierarchyPanel::onCustomContextMenu(const QPoint& pos)
 
             struct ModeEntry { RenderMode mode; const char* label; };
             ModeEntry modes[] = {
-                {RenderMode::Wireframe,   "Wireframe"},
-                {RenderMode::Transparent, "Transparent"},
-                {RenderMode::Detailed,    "Detailed"},
+                {RenderMode::Wireframe,           "Wireframe"},
+                {RenderMode::Transparent,         "Transparent"},
+                {RenderMode::Detailed,            "Detailed (with Si bulk)"},
+                {RenderMode::DetailedNoSubstrate, "Detailed (no Si bulk)"},
             };
 
             for (const auto& entry : modes) {
@@ -307,11 +308,12 @@ void HierarchyPanel::updateRenderModeDisplay(const QString& componentId)
 QString HierarchyPanel::renderModeToString(RenderMode mode)
 {
     switch (mode) {
-        case RenderMode::Hidden:      return "Hidden";
-        case RenderMode::Wireframe:   return "Wire";
-        case RenderMode::Transparent: return "Trans";
-        case RenderMode::Solid:       return "Solid";
-        case RenderMode::Detailed:    return "Detail";
+        case RenderMode::Hidden:               return "Hidden";
+        case RenderMode::Wireframe:            return "Wire";
+        case RenderMode::Transparent:          return "Trans";
+        case RenderMode::Solid:                return "Solid";
+        case RenderMode::Detailed:             return "Detail";
+        case RenderMode::DetailedNoSubstrate:  return "Detail-NoSi";
     }
     return "?";
 }

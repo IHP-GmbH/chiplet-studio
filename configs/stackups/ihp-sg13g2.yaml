@@ -2,6 +2,20 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+# Si bulk visualized at 50 um -- aesthetic, NOT physically accurate.
+# IHP SG13G2 Process Specification Rev 1.2 specifies 750 um wafer (Si bulk)
+# plus 3.75 um epi. We render a much thinner slab so the BEOL (~14 um) and
+# the connection stack (cu-pillars ~48 um) remain visible at usable camera
+# distances; a true-scale 750 um substrate dwarfs everything else and
+# makes the assembly view unusable.
+# If physical accuracy is required (e.g. thermal/mechanical sims), restore
+# height: 750.0 here. Layer 40/0 = Substrate.drawing in sg13g2.lyp.
+Substrate:
+  index: 40
+  type: 0
+  z: -50.0
+  height: 50.0
+
 Activ:
   index: 1
   type: 0

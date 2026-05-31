@@ -81,6 +81,7 @@ public:
     const string_type& modified() const;
     const string_type& units() const;
     const string_type& assembly_gds() const;
+    const string_type& io_technology() const;
 
     // Setters - metadata
     void set_name(const string_type& name);
@@ -90,6 +91,7 @@ public:
     void set_modified(const string_type& modified);
     void set_units(const string_type& units);
     void set_assembly_gds(const string_type& path);
+    void set_io_technology(const string_type& tech);
 
     // Components
     void add_component(std::unique_ptr<Component> component);
@@ -163,6 +165,7 @@ private:
     string_type m_modified;
     string_type m_units = "um";  // Default to micrometers
     string_type m_assembly_gds;
+    string_type m_io_technology;  // wire_bond, flipped_bump, tsv_bump (informative)
     component_list_type m_components;
     std::unordered_map<ComponentID, Component*> m_component_index;  // O(1) lookup
     interface_list_type m_interfaces;
