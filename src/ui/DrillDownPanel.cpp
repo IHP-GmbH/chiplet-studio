@@ -248,7 +248,9 @@ void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPa
         m_backButton->setVisible(false);
         m_cellNavLabel->setVisible(false);
         m_cellCombo->setVisible(false);
-        m_contextLabel->setText("Assembly");
+        m_contextLabel->setText(lypPath.isEmpty()
+                                ? "Assembly (black-box / default layers)"
+                                : "Assembly");
         populateLayerList();
     }
 }
