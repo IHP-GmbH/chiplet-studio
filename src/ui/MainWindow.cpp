@@ -235,14 +235,24 @@ void MainWindow::setupPanels()
     // DrillDownPanel back button -> context-dependent behavior
     connect(m_drillDownPanel, &DrillDownPanel::backRequested,
             this, [this]() {
-                if (m_drillDownPanel->panelMode() == DrillDownPanel::PanelMode::DrillDown) {
-                    // Return to assembly mode (DrillDownPanel reloads assembly GDS)
+                switch (m_drillDownPanel->panelMode()) {
+                case DrillDownPanel::PanelMode::DrillDown:
+                    // From an individual chiplet GDS, return to the assembly view
+                    // (DrillDownPanel reloads the full assembly GDS).
                     m_drillDownPanel->clearContext();
-                } else {
-                    // From assembly or empty mode, hide dock
+                    break;
+                case DrillDownPanel::PanelMode::Assembly:
+                    // Already in the assembly GDS: reset to the full top-level
+                    // layout, undoing any in-place hierarchy navigation. The 2D
+                    // dock's own close button handles going back to the 3D view.
+                    m_drillDownPanel->showFullAssembly();
+                    break;
+                default:
+                    // Empty mode: nothing loaded, just hide the dock.
                     m_klayout2DDock->hide();
                     m_propertiesDock->show();
                     m_propertiesDock->raise();
+                    break;
                 }
             });
 
