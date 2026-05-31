@@ -78,6 +78,16 @@ public:
      */
     void setLayerVisibilityResolver(std::function<bool(const QString&, int, int)> resolver);
 
+    // Bulk visibility ops for the layer tree. Each flips the check state via
+    // setCheckState, which fans out to layerVisibilityChanged once per row that
+    // actually changed. Operate on the rows currently visible after the search
+    // filter (filter-hidden rows are untouched), except showOnlyMatchingFilter
+    // which forces every row to mirror its filter-visibility.
+    void setAllLayersVisible(bool visible);
+    void showOnlyLayer(int layer, int datatype);
+    void invertLayerVisibility();
+    void showOnlyMatchingFilter();
+
 signals:
     /**
      * Emitted when component is modified (future use for editing)
@@ -96,6 +106,7 @@ private slots:
     void onGroupToggled(bool checked);
     void onLayerItemChanged(QTreeWidgetItem* item, int column);
     void onLayerFilterChanged(const QString& text);
+    void onLayerContextMenu(const QPoint& pos);
 
 private:
     void setupUI();

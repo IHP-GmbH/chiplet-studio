@@ -469,5 +469,187 @@ TEST_F(PropertiesPanelTest, CheckboxStateSeededFromResolver)
     EXPECT_EQ(tree->topLevelItem(1)->checkState(0), Qt::Checked);
 }
 
+// =============================================================================
+// Bulk visibility ops (Show all / Hide all / Show only / Invert / Match filter)
+// =============================================================================
+
+// Count how many rows currently have the given check state.
+static int countWithState(QTreeWidget* tree, Qt::CheckState state) {
+    int n = 0;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (tree->topLevelItem(i)->checkState(0) == state) ++n;
+    }
+    return n;
+}
+
+TEST_F(PropertiesPanelTest, BulkHideAllUnchecksEveryVisibleRow)
+{
+    PropertiesPanel panel;
+    auto assembly = createLypAssembly();
+    panel.setComponent("die_lyp", assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>("layerTree");
+    ASSERT_NE(tree, nullptr);
+    const int total = tree->topLevelItemCount();
+    ASSERT_GT(total, 0);
+
+    QSignalSpy spy(&panel, &PropertiesPanel::layerVisibilityChanged);
+    ASSERT_TRUE(spy.isValid());
+
+    panel.setAllLayersVisible(false);
+
+    EXPECT_EQ(countWithState(tree, Qt::Unchecked), total);
+    EXPECT_EQ(spy.count(), total);  // one emit per row that flipped
+    // every emit carries visible=false
+    while (!spy.isEmpty()) {
+        EXPECT_FALSE(spy.takeFirst().at(3).toBool());
+    }
+}
+
+TEST_F(PropertiesPanelTest, BulkShowAllOnlyEmitsForChangedRows)
+{
+    PropertiesPanel panel;
+    auto assembly = createLypAssembly();
+    panel.setComponent("die_lyp", assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>("layerTree");
+    ASSERT_NE(tree, nullptr);
+    const int total = tree->topLevelItemCount();
+    ASSERT_GT(total, 2);
+
+    // Uncheck three known rows, then bulk-show-all and expect exactly three emits.
+    tree->topLevelItem(0)->setCheckState(0, Qt::Unchecked);
+    tree->topLevelItem(1)->setCheckState(0, Qt::Unchecked);
+    tree->topLevelItem(2)->setCheckState(0, Qt::Unchecked);
+
+    QSignalSpy spy(&panel, &PropertiesPanel::layerVisibilityChanged);
+    ASSERT_TRUE(spy.isValid());
+
+    panel.setAllLayersVisible(true);
+
+    EXPECT_EQ(countWithState(tree, Qt::Checked), total);
+    EXPECT_EQ(spy.count(), 3);
+}
+
+TEST_F(PropertiesPanelTest, BulkOpsSkipFilterHiddenRows)
+{
+    PropertiesPanel panel;
+    auto assembly = createLypAssembly();
+    panel.setComponent("die_lyp", assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>("layerTree");
+    QLineEdit* filter = panel.findChild<QLineEdit*>("layerFilter");
+    ASSERT_NE(tree, nullptr);
+    ASSERT_NE(filter, nullptr);
+
+    // Filter down to a single family so most rows are filter-hidden.
+    filter->setText("TopMetal2");
+    const int visibleRows = visibleLayerRows(tree);
+    ASSERT_GT(visibleRows, 0);
+    ASSERT_LT(visibleRows, tree->topLevelItemCount());
+
+    panel.setAllLayersVisible(false);
+
+    // Filter-hidden rows must still be checked; only filter-visible rows flipped.
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = tree->topLevelItem(i);
+        if (item->isHidden()) {
+            EXPECT_EQ(item->checkState(0), Qt::Checked)
+                << "filter-hidden row " << i << " was wrongly flipped";
+        } else {
+            EXPECT_EQ(item->checkState(0), Qt::Unchecked);
+        }
+    }
+}
+
+TEST_F(PropertiesPanelTest, ShowOnlyLayerIsolatesOneRow)
+{
+    PropertiesPanel panel;
+    auto assembly = createLypAssembly();
+    panel.setComponent("die_lyp", assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>("layerTree");
+    ASSERT_NE(tree, nullptr);
+    ASSERT_GT(tree->topLevelItemCount(), 1);
+
+    // Pick row 3 as the keep-target (avoids any default-first-row corner case).
+    QTreeWidgetItem* keep = tree->topLevelItem(3);
+    const int keepLayer = keep->data(0, Qt::UserRole).toInt();
+    const int keepDatatype = keep->data(0, Qt::UserRole + 1).toInt();
+
+    panel.showOnlyLayer(keepLayer, keepDatatype);
+
+    int checkedCount = 0;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = tree->topLevelItem(i);
+        const int l = item->data(0, Qt::UserRole).toInt();
+        const int d = item->data(0, Qt::UserRole + 1).toInt();
+        const bool match = (l == keepLayer && d == keepDatatype);
+        EXPECT_EQ(item->checkState(0),
+                  match ? Qt::Checked : Qt::Unchecked);
+        if (item->checkState(0) == Qt::Checked) ++checkedCount;
+    }
+    // The lyp could in theory hold duplicate keys; we only require >= 1 row matches.
+    EXPECT_GE(checkedCount, 1);
+}
+
+TEST_F(PropertiesPanelTest, InvertFlipsEveryVisibleRow)
+{
+    PropertiesPanel panel;
+    auto assembly = createLypAssembly();
+    panel.setComponent("die_lyp", assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>("layerTree");
+    ASSERT_NE(tree, nullptr);
+    const int total = tree->topLevelItemCount();
+    ASSERT_GT(total, 4);
+
+    // Start mixed: uncheck rows 0, 2, 4.
+    tree->topLevelItem(0)->setCheckState(0, Qt::Unchecked);
+    tree->topLevelItem(2)->setCheckState(0, Qt::Unchecked);
+    tree->topLevelItem(4)->setCheckState(0, Qt::Unchecked);
+
+    std::vector<Qt::CheckState> before;
+    before.reserve(total);
+    for (int i = 0; i < total; ++i) {
+        before.push_back(tree->topLevelItem(i)->checkState(0));
+    }
+
+    panel.invertLayerVisibility();
+
+    for (int i = 0; i < total; ++i) {
+        const Qt::CheckState expected =
+            before[i] == Qt::Checked ? Qt::Unchecked : Qt::Checked;
+        EXPECT_EQ(tree->topLevelItem(i)->checkState(0), expected)
+            << "row " << i << " did not invert";
+    }
+}
+
+TEST_F(PropertiesPanelTest, ShowOnlyMatchingFilterMatchesFilterVisibility)
+{
+    PropertiesPanel panel;
+    auto assembly = createLypAssembly();
+    panel.setComponent("die_lyp", assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>("layerTree");
+    QLineEdit* filter = panel.findChild<QLineEdit*>("layerFilter");
+    ASSERT_NE(tree, nullptr);
+    ASSERT_NE(filter, nullptr);
+
+    filter->setText("TopMetal2");
+    const int matched = visibleLayerRows(tree);
+    ASSERT_GT(matched, 0);
+    ASSERT_LT(matched, tree->topLevelItemCount());
+
+    panel.showOnlyMatchingFilter();
+
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = tree->topLevelItem(i);
+        const Qt::CheckState expected =
+            item->isHidden() ? Qt::Unchecked : Qt::Checked;
+        EXPECT_EQ(item->checkState(0), expected);
+    }
+}
+
 } // namespace
 } // namespace chiplet
