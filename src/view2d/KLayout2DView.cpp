@@ -207,6 +207,15 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
         // Load layer properties if provided
         if (!lypPath.isEmpty()) {
             view->load_layer_props(lypPath.toStdString());
+        } else {
+            // Black-box / no-LYP chiplet (commercial / closed PDK node): KLayout
+            // auto-creates a visible node for every detected GDS layer, so the
+            // metal pads render with default colors. Guarantee the pad-name text
+            // shows -- KLayout draws GDS TEXT records natively -- with a
+            // high-contrast color and no lazy drop on small pads.
+            view->text_visible(true);
+            view->text_lazy_rendering(false);
+            view->text_color(tl::Color(255, 255, 255));
         }
 
         // Zoom to fit
@@ -267,6 +276,38 @@ void KLayout2DView::zoomFit()
     if (m_viewWidget && m_viewWidget->view()) {
         m_viewWidget->view()->zoom_fit();
     }
+#endif
+}
+
+int KLayout2DView::maxHierLevels() const
+{
+#ifdef HAVE_KLAYOUT
+    if (m_viewWidget && m_viewWidget->view()) {
+        return m_viewWidget->view()->get_max_hier_levels();
+    }
+#endif
+    return -1;
+}
+
+void KLayout2DView::setMaxHierLevels(int levels)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return;
+    }
+    if (levels < 0) {
+        levels = 0;
+    }
+    lay::LayoutView* view = m_viewWidget->view();
+    try {
+        view->set_hier_levels(std::make_pair(view->get_min_hier_levels(), levels));
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::setMaxHierLevels failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::setMaxHierLevels failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(levels);
 #endif
 }
 

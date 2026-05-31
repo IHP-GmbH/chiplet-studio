@@ -193,6 +193,28 @@ void MainWindow::setupPanels()
     connect(m_assemblyView, &AssemblyView::selectionChanged,
             m_hierarchyPanel, &HierarchyPanel::selectComponent);
 
+    // Toolbar shape-filter slider tracks the selected component. blockSignals
+    // around setValue prevents the resync from being mistaken for a user edit
+    // (which would write 0 into the new component's stored percent).
+    connect(m_assemblyView, &AssemblyView::selectionChanged,
+            this, [this](const QString& componentId) {
+                if (!m_shapeFilterSlider || !m_shapeFilterLabel) return;
+                if (componentId.isEmpty()) {
+                    m_shapeFilterSlider->blockSignals(true);
+                    m_shapeFilterSlider->setValue(0);
+                    m_shapeFilterSlider->blockSignals(false);
+                    m_shapeFilterSlider->setEnabled(false);
+                    m_shapeFilterLabel->setText("--");
+                    return;
+                }
+                double percent = m_assemblyView->shapeFilterPercent(componentId);
+                m_shapeFilterSlider->blockSignals(true);
+                m_shapeFilterSlider->setValue(static_cast<int>(percent * 10.0 + 0.5));
+                m_shapeFilterSlider->blockSignals(false);
+                m_shapeFilterSlider->setEnabled(true);
+                m_shapeFilterLabel->setText(QString("%1%").arg(percent, 0, 'f', 1));
+            });
+
     // Hierarchy -> Properties panel
     connect(m_hierarchyPanel, &HierarchyPanel::componentSelected,
             this, [this](const QString& componentId) {
@@ -213,14 +235,24 @@ void MainWindow::setupPanels()
     // DrillDownPanel back button -> context-dependent behavior
     connect(m_drillDownPanel, &DrillDownPanel::backRequested,
             this, [this]() {
-                if (m_drillDownPanel->panelMode() == DrillDownPanel::PanelMode::DrillDown) {
-                    // Return to assembly mode (DrillDownPanel reloads assembly GDS)
+                switch (m_drillDownPanel->panelMode()) {
+                case DrillDownPanel::PanelMode::DrillDown:
+                    // From an individual chiplet GDS, return to the assembly view
+                    // (DrillDownPanel reloads the full assembly GDS).
                     m_drillDownPanel->clearContext();
-                } else {
-                    // From assembly or empty mode, hide dock
+                    break;
+                case DrillDownPanel::PanelMode::Assembly:
+                    // Already in the assembly GDS: reset to the full top-level
+                    // layout, undoing any in-place hierarchy navigation. The 2D
+                    // dock's own close button handles going back to the 3D view.
+                    m_drillDownPanel->showFullAssembly();
+                    break;
+                default:
+                    // Empty mode: nothing loaded, just hide the dock.
                     m_klayout2DDock->hide();
                     m_propertiesDock->show();
                     m_propertiesDock->raise();
+                    break;
                 }
             });
 
@@ -245,6 +277,18 @@ void MainWindow::setupPanels()
     // Hierarchy visibility toggle -> 3D View
     connect(m_hierarchyPanel, &HierarchyPanel::componentVisibilityChanged,
             m_assemblyView, &AssemblyView::setComponentVisibility);
+
+    // Properties panel per-layer show/hide -> 3D View
+    connect(m_propertiesPanel, &PropertiesPanel::layerVisibilityChanged,
+            m_assemblyView, &AssemblyView::setLayerVisible);
+
+    // Seed the Properties panel layer checkboxes from the 3D view's current
+    // visibility, so revisiting a component with hidden layers shows them unchecked.
+    m_propertiesPanel->setLayerVisibilityResolver(
+        [this](const QString& componentId, int layer, int datatype) {
+            return m_assemblyView ? m_assemblyView->isLayerVisible(componentId, layer, datatype)
+                                  : true;
+        });
 
     // 3D View double-click for drill-down (if signal exists)
     connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
@@ -950,10 +994,12 @@ void MainWindow::setupViewModeToolbar()
     m_shapeFilterSlider->setRange(0, 1000);
     m_shapeFilterSlider->setValue(0);
     m_shapeFilterSlider->setMinimumWidth(120);
-    m_shapeFilterSlider->setToolTip("Shape area filter: hide small polygons (0% = show all)");
+    m_shapeFilterSlider->setEnabled(false);  // no component selected yet
+    m_shapeFilterSlider->setToolTip(
+        "Shape area filter for the selected component: hide small polygons (0% = show all)");
     renderToolbar->addWidget(m_shapeFilterSlider);
 
-    m_shapeFilterLabel = new QLabel("0%", this);
+    m_shapeFilterLabel = new QLabel("--", this);
     m_shapeFilterLabel->setMinimumWidth(40);
     m_shapeFilterLabel->setAlignment(Qt::AlignCenter);
     renderToolbar->addWidget(m_shapeFilterLabel);
@@ -962,9 +1008,10 @@ void MainWindow::setupViewModeToolbar()
             this, [this](int value) {
         double percent = value / 10.0;
         m_shapeFilterLabel->setText(QString("%1%").arg(percent, 0, 'f', 1));
-        if (m_assemblyView) {
-            m_assemblyView->setShapeFilterPercent(percent);
-        }
+        if (!m_assemblyView) return;
+        const QString compId = m_assemblyView->selectedComponent();
+        if (compId.isEmpty()) return;  // slider should already be disabled
+        m_assemblyView->setShapeFilterPercent(compId, percent);
     });
 }
 

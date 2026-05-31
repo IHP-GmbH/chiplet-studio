@@ -67,6 +67,15 @@ public:
     void returnToAssembly();
 
     /**
+     * @brief Reset the assembly view to the full top-level layout
+     *
+     * Undoes any in-place navigation done through KLayout's hierarchy panel
+     * (descending into a cell, "show as new top", ...) by restoring the original
+     * assembly top cell and zooming to fit. No-op outside Assembly mode.
+     */
+    void showFullAssembly();
+
+    /**
      * @brief Current panel mode
      */
     PanelMode panelMode() const { return m_panelMode; }
@@ -168,6 +177,7 @@ private:
     PanelMode m_panelMode = PanelMode::Empty;
     QString m_assemblyGdsPath;
     QString m_assemblyLypPath;
+    QString m_assemblyTopCell;
     std::unique_ptr<CellComponentMapper> m_cellMapper;
 };
 

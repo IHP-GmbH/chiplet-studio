@@ -185,4 +185,63 @@ void Component::set_orientation(Orientation o)
     m_orientation = o;
 }
 
+Anchor Component::anchor() const
+{
+    return m_anchor;
+}
+
+void Component::set_anchor(Anchor a)
+{
+    m_anchor = a;
+}
+
+bool Component::anchor_declared() const
+{
+    return m_anchorDeclared;
+}
+
+void Component::set_anchor_declared(bool declared)
+{
+    m_anchorDeclared = declared;
+}
+
+void Component::add_io_pad(const IOPad& pad)
+{
+    m_ioPads.push_back(pad);
+}
+
+void Component::clear_io_pads()
+{
+    m_ioPads.clear();
+}
+
+const std::vector<IOPad>& Component::io_pads() const
+{
+    return m_ioPads;
+}
+
+size_t Component::io_pad_count() const
+{
+    return m_ioPads.size();
+}
+
+std::string anchor_to_string(Anchor a)
+{
+    switch (a) {
+        case Anchor::GdsOrigin:  return "gds_origin";
+        case Anchor::BboxCenter: return "bbox_center";
+    }
+    // Unreachable for a well-formed enum value; pick the safer default
+    // so a future Anchor variant added without updating this switch
+    // does not silently emit garbage.
+    return "bbox_center";
+}
+
+std::optional<Anchor> string_to_anchor(const std::string& s)
+{
+    if (s == "gds_origin")  return Anchor::GdsOrigin;
+    if (s == "bbox_center") return Anchor::BboxCenter;
+    return std::nullopt;
+}
+
 } // namespace chiplet

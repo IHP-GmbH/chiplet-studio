@@ -8,8 +8,12 @@
 #include "core/CommandProcessor.h"
 #include "core/CommandFactory.h"
 #include "core/commands/CmdSetRenderMode.h"
+#include "formats/ChipletFormat.h"
 #include <QApplication>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <optional>
 
 using namespace chiplet;
 
@@ -244,4 +248,126 @@ TEST(RenderSortingTest, BackToFrontOrder)
     EXPECT_EQ(distances[0].first, "far");
     EXPECT_EQ(distances[1].first, "mid");
     EXPECT_EQ(distances[2].first, "near");
+}
+
+// --- Render mode on .chiplet load (task #8 final policy) ---
+//
+// Loading a .chiplet leaves every component at its constructor default
+// render_mode regardless of orientation: Transparent for die /
+// die_array / interposer, Solid for substrate. The Transparent
+// overview opens faster and gives a clearer system-level view than
+// auto-promoting flip-chip dies to Detailed; users opt in to Detailed
+// per-component via the Hierarchy panel / CmdSetRenderMode.
+//
+// History: an auto-Detailed promotion for flip-chip dies was tried
+// in c7db675 but rolled back after visual testing on the wire-bond
+// demo — opening time and overview clarity won over default
+// cu-pillar-contact detail. The data-class purity guard
+// (Component::set_orientation does not mutate render_mode) is kept
+// so a future persisted render_mode value is the single source of
+// truth.
+
+namespace {
+
+std::string renderModeFixturePath(const std::string& filename)
+{
+    return std::string(FIXTURES_DIR) + "/" + filename;
+}
+
+// Locate the canonical wire-bond demo .chiplet so the integration
+// test below can pin the post-Gate-7 invariant "U1 (flip_chip) loads
+// with render_mode == Detailed" on the real demo, not just synthetics.
+// Resolution order: env var (set by CI/Docker), workspace-relative
+// fallback, then GTEST_SKIP so the test stays portable.
+std::optional<std::string> locateWirebondDemoChiplet()
+{
+    if (const char* env = std::getenv("WIREBOND_DEMO_CHIPLET")) {
+        std::filesystem::path p(env);
+        if (std::filesystem::exists(p))
+            return p.string();
+    }
+    std::filesystem::path fixtures(FIXTURES_DIR);
+    std::filesystem::path candidate = fixtures.parent_path()
+        .parent_path().parent_path()
+        / "kicad_designs" / "interposer_wire_bonding_demo"
+        / "interposer_wire_bonding_demo.chiplet";
+    if (std::filesystem::exists(candidate))
+        return candidate.string();
+    return std::nullopt;
+}
+
+}  // namespace
+
+TEST(RenderModeTest, FlipChipDieKeepsTransparentDefaultOnLoad)
+{
+    ChipletFormat format;
+    auto assembly = format.load(renderModeFixturePath("flip_chip_render_mode.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    Component* flip = assembly->component("U_flip");
+    ASSERT_NE(flip, nullptr);
+    EXPECT_EQ(flip->orientation(), Orientation::FaceDown);
+    EXPECT_EQ(flip->render_mode(), RenderMode::Transparent)
+        << "loading a flip-chip die must leave render_mode at the "
+           "constructor default; auto-promotion was rolled back for "
+           "faster open + clearer overview";
+}
+
+TEST(RenderModeTest, FaceUpDieKeepsTransparentDefault)
+{
+    ChipletFormat format;
+    auto assembly = format.load(renderModeFixturePath("flip_chip_render_mode.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    Component* faceup = assembly->component("U_faceup");
+    ASSERT_NE(faceup, nullptr);
+    EXPECT_EQ(faceup->orientation(), Orientation::FaceUp);
+    EXPECT_EQ(faceup->render_mode(), RenderMode::Transparent)
+        << "face-up die must keep the constructor default";
+}
+
+TEST(RenderModeTest, ProgrammaticOrientationDoesNotChangeRenderMode)
+{
+    // The auto-promote policy is parser-side (Option B). Calling
+    // set_orientation programmatically (no loader involved) must NOT
+    // mutate render_mode — the Component class is a pure data carrier.
+    Component die("test_die", ComponentType::Die);
+    ASSERT_EQ(die.render_mode(), RenderMode::Transparent);
+
+    die.set_orientation(Orientation::FaceDown);
+    EXPECT_EQ(die.orientation(), Orientation::FaceDown);
+    EXPECT_EQ(die.render_mode(), RenderMode::Transparent)
+        << "set_orientation alone must not promote render_mode "
+           "(policy lives in the loader, not the data class)";
+}
+
+TEST(RenderModeTest, WirebondDemoLoadsWithTransparentDefaults)
+{
+    // Integration check on the canonical wire-bond demo .chiplet: U1
+    // is declared flip_chip there. Per the final task #8 policy,
+    // every component (interposer + U1) loads at the constructor
+    // default (Transparent). Users opt in to Detailed when they
+    // need to inspect the cu-pillar contact visually.
+    auto path = locateWirebondDemoChiplet();
+    if (!path) {
+        GTEST_SKIP() << "wire-bond demo .chiplet not located (set "
+                        "WIREBOND_DEMO_CHIPLET to enable this test)";
+    }
+
+    ChipletFormat format;
+    auto assembly = format.load(*path);
+    ASSERT_NE(assembly, nullptr);
+
+    Component* u1 = assembly->component("U1");
+    ASSERT_NE(u1, nullptr) << "U1 not found in " << *path;
+    EXPECT_EQ(u1->orientation(), Orientation::FaceDown);
+    EXPECT_EQ(u1->render_mode(), RenderMode::Transparent)
+        << "wire-bond demo U1 (flip_chip) must load at the Transparent "
+           "default — the user promotes to Detailed via the Hierarchy "
+           "panel when needed";
+
+    Component* interposer = assembly->component("interposer");
+    ASSERT_NE(interposer, nullptr) << "interposer not found in " << *path;
+    EXPECT_EQ(interposer->render_mode(), RenderMode::Transparent)
+        << "interposer must load at the Transparent default";
 }

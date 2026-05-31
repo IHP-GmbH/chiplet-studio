@@ -6,6 +6,7 @@
 #include "LayerStackup.h"
 #include <algorithm>
 #include <filesystem>
+#include <set>
 
 namespace chiplet {
 
@@ -49,6 +50,11 @@ const Assembly::string_type& Assembly::assembly_gds() const
     return m_assembly_gds;
 }
 
+const Assembly::string_type& Assembly::io_technology() const
+{
+    return m_io_technology;
+}
+
 // Setters - metadata
 
 void Assembly::set_name(const string_type& name)
@@ -84,6 +90,11 @@ void Assembly::set_units(const string_type& units)
 void Assembly::set_assembly_gds(const string_type& path)
 {
     m_assembly_gds = path;
+}
+
+void Assembly::set_io_technology(const string_type& tech)
+{
+    m_io_technology = tech;
 }
 
 // Components
@@ -250,45 +261,71 @@ const Assembly::connection_stack_map_type& Assembly::connection_stacks() const
 double Assembly::calculate_component_z(const ComponentID& id) const
 {
     Component* comp = component(id);
-    if (!comp || comp->connection().empty()) {
+    if (!comp) {
         return 0.0;
     }
 
-    const ConnectionStack* stack = connection_stack(comp->connection());
-    if (!stack) {
-        return 0.0;
+    // Resolve the connection stack. Missing or unknown stacks fall
+    // back to a zero-height mounting (the die sits directly on the
+    // interposer body) per coord_frame_contract.md §3.4 / §5.5.
+    // Earlier behavior was to return 0.0 for these cases; that put
+    // dies at world z=0 instead of on top of the interposer body,
+    // which the contract calls out as a bug because the formula must
+    // hold in all cases.
+    const ConnectionStack* stack = nullptr;
+    if (!comp->connection().empty()) {
+        stack = connection_stack(comp->connection());
     }
 
-    // Find the interposer component and get its stackup top
-    double interposer_top = 0.0;
-    for (const auto& c : m_components) {
-        if (c->type() == ComponentType::Interposer) {
-            // Use interposer thickness as the mounting surface height
-            interposer_top = c->dimensions().thickness;
-            // If we have a technology with a stackup, use that instead
+    // Mounting surface = z_bottom of the chosen connection stack's first
+    // layer (the layer that physically attaches to the interposer pad,
+    // e.g. CuPillar for cu-pillar stacks). Looking it up in the
+    // interposer stackup gives the exact passivation-opening / pad-top
+    // height. Adding stack->total_height() then lands the die on the
+    // tip of the connection.
+    //
+    // Naive max_z(stackup) is wrong: it picks up Passiv (the
+    // passivation around the opening, taller than TopMetal2) and adds
+    // 1.9 um on top of the real mounting surface.
+    double mounting_surface = 0.0;
+    bool mounting_surface_found = false;
+    if (stack && !stack->layers.empty()) {
+        const std::string& firstLayerName = stack->layers.front().name;
+        for (const auto& c : m_components) {
+            if (c->type() != ComponentType::Interposer) continue;
             const std::string& techId = c->technology();
-            if (!techId.empty()) {
-                std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
-                if (!stackupYaml.empty()) {
-                    LayerStackup stackup;
-                    if (stackup.loadFromBlenderGDS(stackupYaml)) {
-                        double max_z = 0.0;
-                        for (const auto& layer : stackup.sortedLayers()) {
-                            if (layer.z_top() > max_z) {
-                                max_z = layer.z_top();
-                            }
-                        }
-                        if (max_z > 0.0) {
-                            interposer_top = max_z;
-                        }
-                    }
+            if (techId.empty()) break;
+            std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
+            if (stackupYaml.empty()) break;
+            LayerStackup stackup;
+            if (!stackup.loadFromBlenderGDS(stackupYaml)) break;
+            for (const auto& layer : stackup.sortedLayers()) {
+                if (!firstLayerName.empty() && layer.name == firstLayerName) {
+                    mounting_surface = layer.z_bottom;
+                    mounting_surface_found = true;
+                    break;
                 }
             }
             break;
         }
     }
 
-    return interposer_top + stack->total_height();
+    // Fallback for stackups that don't visualize the connection layers
+    // AND for the missing-connection / null-stack cases above: use the
+    // interposer thickness so the die lands on top of the physical
+    // interposer body. (Contract §3.4 collapses all three fallback
+    // paths into the same formula.)
+    if (!mounting_surface_found) {
+        for (const auto& c : m_components) {
+            if (c->type() == ComponentType::Interposer) {
+                mounting_surface = c->dimensions().thickness;
+                break;
+            }
+        }
+    }
+
+    const double connection_height = stack ? stack->total_height() : 0.0;
+    return mounting_surface + connection_height;
 }
 
 // Validation
