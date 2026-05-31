@@ -193,6 +193,28 @@ void MainWindow::setupPanels()
     connect(m_assemblyView, &AssemblyView::selectionChanged,
             m_hierarchyPanel, &HierarchyPanel::selectComponent);
 
+    // Toolbar shape-filter slider tracks the selected component. blockSignals
+    // around setValue prevents the resync from being mistaken for a user edit
+    // (which would write 0 into the new component's stored percent).
+    connect(m_assemblyView, &AssemblyView::selectionChanged,
+            this, [this](const QString& componentId) {
+                if (!m_shapeFilterSlider || !m_shapeFilterLabel) return;
+                if (componentId.isEmpty()) {
+                    m_shapeFilterSlider->blockSignals(true);
+                    m_shapeFilterSlider->setValue(0);
+                    m_shapeFilterSlider->blockSignals(false);
+                    m_shapeFilterSlider->setEnabled(false);
+                    m_shapeFilterLabel->setText("--");
+                    return;
+                }
+                double percent = m_assemblyView->shapeFilterPercent(componentId);
+                m_shapeFilterSlider->blockSignals(true);
+                m_shapeFilterSlider->setValue(static_cast<int>(percent * 10.0 + 0.5));
+                m_shapeFilterSlider->blockSignals(false);
+                m_shapeFilterSlider->setEnabled(true);
+                m_shapeFilterLabel->setText(QString("%1%").arg(percent, 0, 'f', 1));
+            });
+
     // Hierarchy -> Properties panel
     connect(m_hierarchyPanel, &HierarchyPanel::componentSelected,
             this, [this](const QString& componentId) {
@@ -962,10 +984,12 @@ void MainWindow::setupViewModeToolbar()
     m_shapeFilterSlider->setRange(0, 1000);
     m_shapeFilterSlider->setValue(0);
     m_shapeFilterSlider->setMinimumWidth(120);
-    m_shapeFilterSlider->setToolTip("Shape area filter: hide small polygons (0% = show all)");
+    m_shapeFilterSlider->setEnabled(false);  // no component selected yet
+    m_shapeFilterSlider->setToolTip(
+        "Shape area filter for the selected component: hide small polygons (0% = show all)");
     renderToolbar->addWidget(m_shapeFilterSlider);
 
-    m_shapeFilterLabel = new QLabel("0%", this);
+    m_shapeFilterLabel = new QLabel("--", this);
     m_shapeFilterLabel->setMinimumWidth(40);
     m_shapeFilterLabel->setAlignment(Qt::AlignCenter);
     renderToolbar->addWidget(m_shapeFilterLabel);
@@ -974,9 +998,10 @@ void MainWindow::setupViewModeToolbar()
             this, [this](int value) {
         double percent = value / 10.0;
         m_shapeFilterLabel->setText(QString("%1%").arg(percent, 0, 'f', 1));
-        if (m_assemblyView) {
-            m_assemblyView->setShapeFilterPercent(percent);
-        }
+        if (!m_assemblyView) return;
+        const QString compId = m_assemblyView->selectedComponent();
+        if (compId.isEmpty()) return;  // slider should already be disabled
+        m_assemblyView->setShapeFilterPercent(compId, percent);
     });
 }
 
