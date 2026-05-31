@@ -207,6 +207,15 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
         // Load layer properties if provided
         if (!lypPath.isEmpty()) {
             view->load_layer_props(lypPath.toStdString());
+        } else {
+            // Black-box / no-LYP chiplet (commercial / closed PDK node): KLayout
+            // auto-creates a visible node for every detected GDS layer, so the
+            // metal pads render with default colors. Guarantee the pad-name text
+            // shows -- KLayout draws GDS TEXT records natively -- with a
+            // high-contrast color and no lazy drop on small pads.
+            view->text_visible(true);
+            view->text_lazy_rendering(false);
+            view->text_color(tl::Color(255, 255, 255));
         }
 
         // Zoom to fit
