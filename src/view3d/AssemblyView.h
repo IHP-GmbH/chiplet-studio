@@ -78,6 +78,13 @@ public:
     void setComponentVisibility(const QString& componentId, bool visible);
     bool isComponentVisible(const QString& componentId) const;
 
+    // Per-layer visibility within a component (drives LayerMode/Detailed rendering).
+    // No-op if the component has no built geometry or no layer with the given
+    // layer/datatype. Flips the cached LayerMesh.visible flag and repaints; no
+    // geometry rebuild.
+    void setLayerVisible(const QString& componentId, int layer, int datatype, bool visible);
+    bool isLayerVisible(const QString& componentId, int layer, int datatype) const;
+
     // Camera control
     void fitToAssembly();
     void fitToComponent(const QString& componentId);
@@ -148,6 +155,11 @@ private:
     // Component visibility (true = visible, absent = visible by default)
     std::map<QString, bool> m_componentVisibility;
 
+    // Per-component, per-layer user show/hide intent. Survives geometry rebuilds
+    // (shape filter) and is the read-back source for the Properties panel
+    // checkboxes. Absent entry = visible by default.
+    std::map<QString, std::map<LayerKey, bool>> m_layerVisibilityOverride;
+
     // Layer properties cache (technology_id -> LayerPropertiesFile)
     std::map<std::string, LayerPropertiesFile> m_layerProps;
 
@@ -215,6 +227,7 @@ private:
 
     // Helper to build layer geometry for a component
     void buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp);
+    void applyLayerVisibilityOverrides(const QString& componentId);
     void applyShapeFilter();
     void rebuildFilteredGeometry(const QString& compId);
 

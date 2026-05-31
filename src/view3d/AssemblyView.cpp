@@ -379,6 +379,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_layerProps.clear();
     m_polygonCache.clear();
     m_areaStats.clear();
+    m_layerVisibilityOverride.clear();
     m_shapeFilterPercent = 0.0;
     m_debugPrinted = false;
 
@@ -489,6 +490,76 @@ bool AssemblyView::isComponentVisible(const QString& componentId) const
         return it->second;
     }
     return true;  // Default to visible
+}
+
+void AssemblyView::setLayerVisible(const QString& componentId, int layer, int datatype, bool visible)
+{
+    if (componentId.isEmpty()) {
+        return;
+    }
+
+    // Record the intent first so it survives geometry rebuilds (e.g. shape filter)
+    // and can be read back by the Properties panel, even if no geometry exists yet.
+    m_layerVisibilityOverride[componentId][LayerKey(layer, datatype)] = visible;
+
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return;  // No built geometry yet; override applies when it is built
+    }
+
+    bool changed = false;
+    for (LayerMesh& mesh : it->second.layers) {
+        if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+            if (mesh.visible != visible) {
+                mesh.visible = visible;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        update();
+    }
+}
+
+bool AssemblyView::isLayerVisible(const QString& componentId, int layer, int datatype) const
+{
+    // User intent wins (set even when the component has no built geometry).
+    auto co = m_layerVisibilityOverride.find(componentId);
+    if (co != m_layerVisibilityOverride.end()) {
+        auto lo = co->second.find(LayerKey(layer, datatype));
+        if (lo != co->second.end()) {
+            return lo->second;
+        }
+    }
+
+    auto it = m_layerGeometry.find(componentId);
+    if (it != m_layerGeometry.end()) {
+        for (const LayerMesh& mesh : it->second.layers) {
+            if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+                return mesh.visible;
+            }
+        }
+    }
+    return true;  // No override, no geometry: visible by default
+}
+
+void AssemblyView::applyLayerVisibilityOverrides(const QString& componentId)
+{
+    auto co = m_layerVisibilityOverride.find(componentId);
+    if (co == m_layerVisibilityOverride.end()) {
+        return;
+    }
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return;
+    }
+    for (LayerMesh& mesh : it->second.layers) {
+        auto lo = co->second.find(mesh.key);
+        if (lo != co->second.end()) {
+            mesh.visible = lo->second;
+        }
+    }
 }
 
 void AssemblyView::fitToAssembly()
@@ -1512,6 +1583,7 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     }
 
     m_layerGeometry[compId] = std::move(geometry);
+    applyLayerVisibilityOverrides(compId);
 
     qDebug() << "Built layer geometry for" << compId << ":"
              << m_layerGeometry[compId].layerCount() << "layers,"
@@ -1626,6 +1698,7 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
     }
 
     m_layerGeometry[compId] = std::move(geometry);
+    applyLayerVisibilityOverrides(compId);
 #else
     Q_UNUSED(compId);
 #endif
