@@ -380,7 +380,8 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_polygonCache.clear();
     m_areaStats.clear();
     m_layerVisibilityOverride.clear();
-    m_shapeFilterPercent = 0.0;
+    m_shapeFilterByComponent.clear();
+    m_pendingFilterComponent.clear();
     m_debugPrinted = false;
 
     if (!assembly) {
@@ -1536,10 +1537,12 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     m_polygonCache[compId] = polygons;
     m_areaStats[compId] = ShapeFilter::computeStatistics(polygons);
 
-    // Apply active shape filter
-    if (m_shapeFilterPercent > 0.0 && m_areaStats[compId].total_polygons > 0) {
+    // Apply active per-component shape filter (if the user previously set one
+    // for this component, e.g. .chiplet reload preserves the slider value).
+    double compFilter = shapeFilterPercent(compId);
+    if (compFilter > 0.0 && m_areaStats[compId].total_polygons > 0) {
         double threshold = ShapeFilter::thresholdFromPercentage(
-            m_shapeFilterPercent, m_areaStats[compId]);
+            compFilter, m_areaStats[compId]);
         polygons = ShapeFilter::filter(polygons, threshold);
     }
 
@@ -1594,27 +1597,45 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
 #endif
 }
 
-void AssemblyView::setShapeFilterPercent(double percent)
+void AssemblyView::setShapeFilterPercent(const QString& componentId, double percent)
 {
+    if (componentId.isEmpty()) return;
     percent = std::clamp(percent, 0.0, 100.0);
-    if (std::abs(percent - m_shapeFilterPercent) < 0.01) return;
-    m_shapeFilterPercent = percent;
+    double& stored = m_shapeFilterByComponent[componentId];  // inserts 0.0 default
+    if (std::abs(percent - stored) < 0.01) return;
+    stored = percent;
+
+    // Debounce rapid slider drags. The pending compId is overwritten on every
+    // call; if the user drags another component's slider mid-debounce, the
+    // previous edit is already stored — only the rebuild for it is skipped, which
+    // the next selection-driven rebuild (or selecting it again and nudging) will
+    // catch. In practice the slider only edits the currently selected component.
+    m_pendingFilterComponent = componentId;
     if (m_filterDebounceTimer) {
         m_filterDebounceTimer->start(150);
     }
-    emit shapeFilterChanged(percent);
+    emit shapeFilterChanged(componentId, percent);
+}
+
+double AssemblyView::shapeFilterPercent(const QString& componentId) const
+{
+    auto it = m_shapeFilterByComponent.find(componentId);
+    return it == m_shapeFilterByComponent.end() ? 0.0 : it->second;
 }
 
 void AssemblyView::applyShapeFilter()
 {
-    if (!m_initialized || m_polygonCache.empty()) return;
+    if (!m_initialized) return;
+    if (m_pendingFilterComponent.isEmpty()) return;
+    const QString compId = m_pendingFilterComponent;
+    m_pendingFilterComponent.clear();
+
+    if (!m_polygonCache.count(compId) || !m_layerGeometry.count(compId)) {
+        return;
+    }
 
     makeCurrent();
-    for (const auto& [compId, cachedPolygons] : m_polygonCache) {
-        if (m_layerGeometry.count(compId)) {
-            rebuildFilteredGeometry(compId);
-        }
-    }
+    rebuildFilteredGeometry(compId);
     doneCurrent();
 
     updateSceneBounds();
@@ -1630,11 +1651,12 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
     auto statsIt = m_areaStats.find(compId);
     if (statsIt == m_areaStats.end()) return;
 
-    // Filter polygons
+    // Filter polygons using this component's own percent
     auto polygons = cacheIt->second;
-    if (m_shapeFilterPercent > 0.0 && statsIt->second.total_polygons > 0) {
+    double compFilter = shapeFilterPercent(compId);
+    if (compFilter > 0.0 && statsIt->second.total_polygons > 0) {
         double threshold = ShapeFilter::thresholdFromPercentage(
-            m_shapeFilterPercent, statsIt->second);
+            compFilter, statsIt->second);
         polygons = ShapeFilter::filter(polygons, threshold);
     }
 

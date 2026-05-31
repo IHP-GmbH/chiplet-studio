@@ -104,9 +104,11 @@ public:
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
 
-    // Shape filter control (area-based polygon filtering for Detailed mode)
-    void setShapeFilterPercent(double percent);
-    double shapeFilterPercent() const { return m_shapeFilterPercent; }
+    // Shape filter control (area-based polygon filtering for Detailed mode).
+    // Per-component: each die / interposer keeps its own threshold so users can
+    // declutter a noisy die without flattening the neighbours.
+    void setShapeFilterPercent(const QString& componentId, double percent);
+    double shapeFilterPercent(const QString& componentId) const;
 
     // Base plane visibility
     bool basePlaneVisible() const { return m_basePlaneVisible; }
@@ -118,7 +120,7 @@ signals:
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
-    void shapeFilterChanged(double percent);
+    void shapeFilterChanged(const QString& componentId, double percent);
 
     // Command system signals (emitted when user requests actions)
     void moveComponentRequested(const QString& componentId, double dx, double dy, double dz);
@@ -219,10 +221,15 @@ private:
     // Layer stackup cache (technology_id -> stackup)
     std::map<std::string, LayerStackup> m_stackups;
 
-    // Shape filter: polygon cache and area statistics per component
+    // Shape filter: polygon cache and area statistics per component.
+    // m_shapeFilterByComponent stores the user's chosen percent per component
+    // (absent = 0% / no filter). m_pendingFilterComponent is the next component
+    // whose geometry the debounce timer should rebuild — set by every slider tick,
+    // consumed by applyShapeFilter so only the touched component is rebuilt.
     std::map<QString, std::map<LayerKey, LayerPolygons>> m_polygonCache;
     std::map<QString, AreaStatistics> m_areaStats;
-    double m_shapeFilterPercent = 0.0;
+    std::map<QString, double> m_shapeFilterByComponent;
+    QString m_pendingFilterComponent;
     QTimer* m_filterDebounceTimer = nullptr;
 
     // Helper to build layer geometry for a component
