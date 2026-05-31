@@ -279,6 +279,38 @@ void KLayout2DView::zoomFit()
 #endif
 }
 
+int KLayout2DView::maxHierLevels() const
+{
+#ifdef HAVE_KLAYOUT
+    if (m_viewWidget && m_viewWidget->view()) {
+        return m_viewWidget->view()->get_max_hier_levels();
+    }
+#endif
+    return -1;
+}
+
+void KLayout2DView::setMaxHierLevels(int levels)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return;
+    }
+    if (levels < 0) {
+        levels = 0;
+    }
+    lay::LayoutView* view = m_viewWidget->view();
+    try {
+        view->set_hier_levels(std::make_pair(view->get_min_hier_levels(), levels));
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::setMaxHierLevels failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::setMaxHierLevels failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(levels);
+#endif
+}
+
 QWidget* KLayout2DView::layerControlFrame()
 {
 #ifdef HAVE_KLAYOUT

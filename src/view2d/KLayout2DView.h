@@ -137,6 +137,21 @@ public:
      */
     bool isViewAvailable() const { return m_viewAvailable; }
 
+    // -- Hierarchy depth control --
+
+    /**
+     * @brief Get the maximum hierarchy level currently displayed (-1 if no view)
+     */
+    int maxHierLevels() const;
+
+    /**
+     * @brief Set the maximum hierarchy level displayed (clamped to >= 0)
+     *
+     * Mirrors KLayout's "Increment/Decrement Hierarchy" actions. Safe no-op when
+     * no layout is loaded or the view is unavailable.
+     */
+    void setMaxHierLevels(int levels);
+
 signals:
     /**
      * @brief Emitted when mouse position changes in layout coordinates
