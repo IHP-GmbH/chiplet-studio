@@ -38,6 +38,3 @@ qrc_*.cpp
 # OS
 .DS_Store
 Thumbs.db
-
-# Session tracking (root-level only; docs/CHANGELOG.md stays tracked)
-/CHANGELOG.md
