@@ -644,7 +644,7 @@ Kept and documented (not removed):
 Post-removal sanity check:
 ```bash
 git grep -nE 'useGdsOriginAsAnchor|PCB bbox center|stale convention'
-# Expected: zero hits in non-doc files (this doc and CHANGELOGs are OK).
+# Expected: zero hits in non-doc files (this doc is OK).
 # Note: 're-anchor' deliberately not included — that is the
 # legitimate term for the §8 'kept' finalizer logic in hyp_to_gds.py.
 ```
@@ -761,9 +761,6 @@ audited each one against Option (a) and updated the disposition.
 - [ ] Full chiplet-studio test suite green
 - [ ] Demo visually correct in chiplet-studio + KLayout
 - [ ] One commit per gate, not bundled
-- [ ] Update `chiplet-studio/CHANGELOG.md` and
-      `kicad/CHANGELOG.md` to mark the systemic alignment issue
-      as resolved
 - [ ] Resume the paused TODOs (Layers panel, auto-Detailed for
       flip-chip, Python bindings)
 
@@ -832,10 +829,8 @@ Summary of writer × reader matrix at the time of contract drafting:
 
 - `chiplet-studio/docs/CHIPLET_FORMAT_SPEC.md` — general schema
   (companion document; this doc adds frame and anchor semantics).
-- `chiplet-studio/CHANGELOG.md` "2026-05-07 — Systemic alignment
-  problem" — full incident history that drove this contract.
-- `kicad/CHANGELOG.md` "Pending: systemic alignment work" —
-  KiCad-side band-aid context.
+- The 2026-05-07 systemic alignment incident — full history that
+  drove this contract.
 - Commits referenced:
   - chiplet-studio `bbc9c60`, `d166da9`, `e903b16`, `e8063cb`
   - hyp_to_gds.py `5512eb0`, `6537e38`

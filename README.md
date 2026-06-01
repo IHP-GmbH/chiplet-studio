@@ -105,7 +105,6 @@ chiplet-studio/
 
 - `docs/PLAN.md` - Implementation roadmap
 - `docs/FEATURES.md` - Feature tracking
-- `docs/CHANGELOG.md` - Development history
 - `docs/CODE_STYLE.md` - Coding standards
 - `docs/ARCHITECTURE.md` - Technical decisions
 

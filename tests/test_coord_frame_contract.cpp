@@ -222,8 +222,8 @@ TEST_F(CoordFrameContractSynth, WorldPositionMatchesContract)
 //
 // The expected values are the post-Gate-3 canonical .chiplet produced
 // by KiCad export + hyp_to_gds.py --update-chiplet-file. Numbers are
-// taken from the regenerated demo (see chiplet-studio/CHANGELOG.md
-// "Gate 3 of coord-frame contract execution closed").
+// taken from the regenerated demo (Gate 3 of coord-frame contract
+// execution).
 // ------------------------------------------------------------------
 
 class CoordFrameContractWirebondDemo : public ::testing::Test {
