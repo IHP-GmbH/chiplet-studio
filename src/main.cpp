@@ -17,6 +17,7 @@ namespace py = pybind11;
 
 #include <QApplication>
 #include <QStandardPaths>
+#include <QSurfaceFormat>
 #include <QTimer>
 #include <QFile>
 #include <QDir>
@@ -55,6 +56,20 @@ int main(int argc, char *argv[])
         initPythonEarly();
     }
 #endif
+
+    // Request an OpenGL 3.3 Core context by default. The 3D view's shaders are
+    // "#version 330 core"; without this, hosts whose default GL context is < 3.3
+    // (old drivers, indirect GLX, or software GL not configured for 3.3) silently
+    // fail shader compilation and render a blank 3D view. Requesting 3.3 makes Qt
+    // negotiate a proper context instead of falling back to a 2.1 compatibility one.
+    {
+        QSurfaceFormat fmt;
+        fmt.setVersion(3, 3);
+        fmt.setProfile(QSurfaceFormat::CoreProfile);
+        fmt.setDepthBufferSize(24);
+        fmt.setStencilBufferSize(8);
+        QSurfaceFormat::setDefaultFormat(fmt);
+    }
 
     QApplication app(argc, argv);
     app.setApplicationName("Chiplet Studio");
