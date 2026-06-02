@@ -44,59 +44,6 @@ void main() {
 }
 )";
 
-// Instanced vertex shader
-static const char* componentVertexShaderInstanced = R"(
-#version 330 core
-layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 normal;
-
-// Per-instance attributes
-layout(location = 2) in vec4 instanceModelCol0;
-layout(location = 3) in vec4 instanceModelCol1;
-layout(location = 4) in vec4 instanceModelCol2;
-layout(location = 5) in vec4 instanceModelCol3;
-layout(location = 6) in vec4 instanceColor;
-layout(location = 7) in float instanceSelected;
-
-uniform mat4 viewProjection;
-uniform mat4 view;
-
-out vec3 fragNormal;
-out vec3 fragPosition;
-out vec3 worldPosition;
-out vec4 vertexColor;
-out float vertexSelected;
-out float flogz;
-
-void main() {
-    // Reconstruct instance model matrix
-    mat4 instanceModel = mat4(
-        instanceModelCol0,
-        instanceModelCol1,
-        instanceModelCol2,
-        instanceModelCol3
-    );
-
-    // Transform to world space
-    vec4 worldPos = instanceModel * vec4(position, 1.0);
-    worldPosition = worldPos.xyz;
-
-    // Transform normal (assuming uniform scale)
-    mat3 normalMat = mat3(instanceModel);
-    fragNormal = normalMat * normal;
-
-    // View space position
-    fragPosition = vec3(view * worldPos);
-
-    // Pass instance data to fragment shader
-    vertexColor = instanceColor;
-    vertexSelected = instanceSelected;
-
-    gl_Position = viewProjection * worldPos;
-    flogz = 1.0 + gl_Position.w;
-}
-)";
-
 // Non-instanced fragment shader (legacy)
 static const char* componentFragmentShader = R"(
 #version 330 core
@@ -156,64 +103,6 @@ void main() {
 }
 )";
 
-// Instanced fragment shader (uses per-instance color/selected from vertex shader)
-static const char* componentFragmentShaderInstanced = R"(
-#version 330 core
-in vec3 fragNormal;
-in vec3 fragPosition;
-in vec3 worldPosition;
-in vec4 vertexColor;
-in float vertexSelected;
-in float flogz;
-
-uniform vec3 lightDirection;
-uniform float Fcoef_half;
-
-// Clip plane: vec4(normal.xyz, distance)
-uniform vec4 clipPlane;
-uniform bool clipEnabled;
-
-// Dither pattern support
-uniform sampler2D patternTexture;
-uniform bool usePattern;
-uniform float patternScale;  // Typically 16.0 for 16x16 patterns
-
-out vec4 FragColor;
-
-void main() {
-    // Clip plane test
-    if (clipEnabled) {
-        float dist = dot(worldPosition, clipPlane.xyz) + clipPlane.w;
-        if (dist < 0.0) {
-            discard;
-        }
-    }
-
-    // Pattern test - discard fragments where pattern alpha is 0
-    if (usePattern) {
-        vec2 patternCoord = gl_FragCoord.xy / patternScale;
-        float patternAlpha = texture(patternTexture, patternCoord).a;
-        if (patternAlpha < 0.5) {
-            discard;
-        }
-    }
-
-    vec3 norm = normalize(fragNormal);
-    float ambient = 0.3;
-    float diffuse = max(dot(norm, -lightDirection), 0.0) * 0.6;
-    float lighting = ambient + diffuse;
-
-    vec3 color = vertexColor.rgb * lighting;
-
-    if (vertexSelected > 0.5) {
-        color = mix(color, vec3(1.0, 0.8, 0.0), 0.3);
-    }
-
-    FragColor = vec4(color, vertexColor.a);
-    gl_FragDepth = log2(max(1e-6, flogz)) * Fcoef_half;
-}
-)";
-
 static const char* gridVertexShader = R"(
 #version 330 core
 layout(location = 0) in vec3 position;
@@ -266,7 +155,6 @@ AssemblyView::~AssemblyView()
 {
     makeCurrent();
     m_meshes.clear();
-    m_instanceGroups.clear();
     m_layerGeometry.clear();
     m_polygonCache.clear();
     m_areaStats.clear();
@@ -275,101 +163,6 @@ AssemblyView::~AssemblyView()
     doneCurrent();
 }
 
-// Get default dimensions for component type (in micrometers)
-static Dimensions3D getDefaultDimensionsForSignature(ComponentType type)
-{
-    Dimensions3D dims;
-    switch (type) {
-        case ComponentType::Die:
-        case ComponentType::DieArray:
-            dims.width = 2000.0;     // 2mm
-            dims.height = 2000.0;    // 2mm
-            dims.thickness = 200.0;  // 200um
-            break;
-        case ComponentType::Interposer:
-            dims.width = 8000.0;     // 8mm
-            dims.height = 8000.0;    // 8mm
-            dims.thickness = 100.0;  // 100um
-            break;
-        case ComponentType::Substrate:
-            dims.width = 10000.0;    // 10mm
-            dims.height = 10000.0;   // 10mm
-            dims.thickness = 500.0;  // 500um
-            break;
-    }
-    return dims;
-}
-
-// Generate a unique signature for components with identical geometry
-QString AssemblyView::getMeshSignature(const Component* comp)
-{
-    if (!comp) {
-        return QString();
-    }
-
-    // Convert component type to string for signature
-    QString typeStr;
-    switch (comp->type()) {
-        case ComponentType::Die:        typeStr = "Die"; break;
-        case ComponentType::DieArray:   typeStr = "DieArray"; break;
-        case ComponentType::Interposer: typeStr = "Interposer"; break;
-        case ComponentType::Substrate:  typeStr = "Substrate"; break;
-    }
-
-    // Use actual dimensions or defaults if not specified
-    auto dims = comp->dimensions();
-    if (dims.width <= 0 || dims.height <= 0 || dims.thickness <= 0) {
-        dims = getDefaultDimensionsForSignature(comp->type());
-    }
-
-    // Components with same type and dimensions share geometry
-    return QString("%1_%2x%3x%4")
-        .arg(typeStr)
-        .arg(dims.width, 0, 'f', 1)
-        .arg(dims.height, 0, 'f', 1)
-        .arg(dims.thickness, 0, 'f', 1);
-}
-
-// Update the GPU buffer with per-instance data
-void MeshInstanceGroup::updateInstanceBuffer()
-{
-    if (componentIds.empty()) {
-        return;
-    }
-
-    std::vector<InstanceData> instances;
-    instances.reserve(componentIds.size());
-
-    for (size_t i = 0; i < componentIds.size(); ++i) {
-        InstanceData data;
-
-        // Copy transform matrix (column-major)
-        const QMatrix4x4& mat = transforms[i];
-        for (int j = 0; j < 16; ++j) {
-            data.modelMatrix[j] = mat.constData()[j];
-        }
-
-        // Copy color
-        const QColor& c = colors[i];
-        data.color[0] = static_cast<float>(c.redF());
-        data.color[1] = static_cast<float>(c.greenF());
-        data.color[2] = static_cast<float>(c.blueF());
-        data.color[3] = static_cast<float>(c.alphaF());
-
-        // Selection state
-        data.selected = selected[i] ? 1.0f : 0.0f;
-
-        // Clear padding
-        data.padding[0] = 0.0f;
-        data.padding[1] = 0.0f;
-        data.padding[2] = 0.0f;
-
-        instances.push_back(data);
-    }
-
-    mesh.setInstanceData(instances);
-    mesh.uploadInstanceData();
-}
 
 void AssemblyView::setAssembly(Assembly* assembly)
 {
@@ -388,7 +181,6 @@ void AssemblyView::setAssembly(Assembly* assembly)
         if (m_initialized) {
             makeCurrent();
             m_meshes.clear();
-            m_instanceGroups.clear();
             doneCurrent();
         }
         update();
@@ -420,25 +212,6 @@ void AssemblyView::selectComponent(const QString& componentId)
         QString oldSelection = m_selectedComponent;
         m_selectedComponent = componentId;
 
-        if (m_useInstancing && !m_instanceGroups.empty()) {
-            // Update selection state in instance groups
-            for (auto& [sig, group] : m_instanceGroups) {
-                bool needsUpdate = false;
-                for (size_t i = 0; i < group.componentIds.size(); ++i) {
-                    bool wasSelected = group.selected[i];
-                    bool shouldBeSelected = (group.componentIds[i] == componentId);
-                    if (wasSelected != shouldBeSelected) {
-                        group.selected[i] = shouldBeSelected;
-                        needsUpdate = true;
-                    }
-                }
-                if (needsUpdate) {
-                    makeCurrent();
-                    group.updateInstanceBuffer();
-                    doneCurrent();
-                }
-            }
-        } else {
             // Non-instanced: update mesh selection state
             if (!oldSelection.isEmpty() && m_meshes.count(oldSelection)) {
                 m_meshes[oldSelection].setSelected(false);
@@ -446,7 +219,6 @@ void AssemblyView::selectComponent(const QString& componentId)
             if (!componentId.isEmpty() && m_meshes.count(componentId)) {
                 m_meshes[componentId].setSelected(true);
             }
-        }
 
         // Update gizmo position
         if (!componentId.isEmpty() && m_assembly) {
@@ -609,17 +381,6 @@ void AssemblyView::fitToComponent(const QString& componentId)
         }
     }
 
-    // Search instanced groups (BoxMode)
-    for (const auto& [sig, group] : m_instanceGroups) {
-        for (size_t i = 0; i < group.componentIds.size(); ++i) {
-            if (group.componentIds[i] == componentId) {
-                m_scene.camera().fitToBox(group.boundingBoxes[i]);
-                update();
-                return;
-            }
-        }
-    }
-
     // Fallback: non-instanced meshes
     auto it = m_meshes.find(componentId);
     if (it != m_meshes.end()) {
@@ -698,11 +459,6 @@ void AssemblyView::initializeGL()
     // Load shaders
     if (!m_componentShader.loadFromSource(componentVertexShader, componentFragmentShader)) {
         qWarning() << "Failed to load component shader";
-    }
-
-    if (!m_componentShaderInstanced.loadFromSource(componentVertexShaderInstanced, componentFragmentShaderInstanced)) {
-        qWarning() << "Failed to load instanced component shader";
-        m_useInstancing = false;  // Fall back to non-instanced rendering
     }
 
     if (!m_gridShader.loadFromSource(gridVertexShader, gridFragmentShader)) {
@@ -832,7 +588,6 @@ void AssemblyView::loadLayerProperties()
 void AssemblyView::buildMeshes()
 {
     m_meshes.clear();
-    m_instanceGroups.clear();
     m_layerGeometry.clear();
     m_stackups.clear();
 
@@ -961,17 +716,6 @@ void AssemblyView::ensureBVH()
 
     int idx = 0;
 
-    if (m_useInstancing && !m_instanceGroups.empty()) {
-        // Instance groups: one entry per instance (not per group)
-        for (const auto& [sig, group] : m_instanceGroups) {
-            for (size_t i = 0; i < group.componentIds.size(); ++i) {
-                m_meshIndexToId.push_back(group.componentIds[i]);
-                boxes.push_back(group.boundingBoxes[i]);
-                indices.push_back(idx);
-                ++idx;
-            }
-        }
-    } else {
         // Non-instanced: one entry per mesh
         for (const auto& [id, mesh] : m_meshes) {
             m_meshIndexToId.push_back(id);
@@ -979,7 +723,6 @@ void AssemblyView::ensureBVH()
             indices.push_back(idx);
             ++idx;
         }
-    }
 
     // Build or rebuild the BVH
     if (!m_bvh) {
@@ -1361,21 +1104,6 @@ QString AssemblyView::pickComponent(int x, int y)
             // Just do the ray intersection with the stored bounding box
             const QString& id = m_meshIndexToId[idx];
 
-            if (m_useInstancing && !m_instanceGroups.empty()) {
-                // Find the instance's bounding box in the groups
-                for (const auto& [sig, group] : m_instanceGroups) {
-                    for (size_t i = 0; i < group.componentIds.size(); ++i) {
-                        if (group.componentIds[i] == id) {
-                            float tMin, tMax;
-                            if (group.boundingBoxes[i].rayIntersect(ray.origin, ray.direction, tMin, tMax)) {
-                                return tMin > 0 ? tMin : -1.0f;
-                            }
-                            return -1.0f;
-                        }
-                    }
-                }
-                return -1.0f;
-            } else {
                 // Non-instanced path
                 auto it = m_meshes.find(id);
                 if (it == m_meshes.end()) {
@@ -1386,7 +1114,6 @@ QString AssemblyView::pickComponent(int x, int y)
                     return tMin > 0 ? tMin : -1.0f;
                 }
                 return -1.0f;
-            }
         });
 
     if (closestIdx >= 0 && closestIdx < static_cast<int>(m_meshIndexToId.size())) {
@@ -1869,20 +1596,6 @@ void AssemblyView::updateSceneBounds()
         }
     }
 
-    // Also include instance groups (for Box mode with instancing)
-    if (m_useInstancing && !m_instanceGroups.empty()) {
-        for (const auto& [sig, group] : m_instanceGroups) {
-            for (const auto& bb : group.boundingBoxes) {
-                if (first) {
-                    sceneBounds = bb;
-                    first = false;
-                } else {
-                    sceneBounds.AddBounds(bb);
-                }
-            }
-        }
-    }
-
     // Also include non-instanced meshes (fallback meshes for components without GDS)
     for (const auto& [id, mesh] : m_meshes) {
         if (first) {
@@ -2311,40 +2024,6 @@ void AssemblyView::updateTransforms()
                 it->second.transform.scale(-1.0f, 1.0f, 1.0f);
             }
         }
-    }
-
-    // Update instanced transforms (BoxMode)
-    for (auto& [sig, group] : m_instanceGroups) {
-        for (size_t i = 0; i < group.componentIds.size(); ++i) {
-            std::string id = group.componentIds[i].toStdString();
-            const Component* comp = m_assembly->component(id);
-            if (!comp) continue;
-
-            const auto& pos = comp->position();
-            double zOff = (comp->type() == ComponentType::Interposer ||
-                           comp->type() == ComponentType::Substrate) ? 0.0 : m_globalZOffset;
-            QMatrix4x4 transform;
-            transform.setToIdentity();
-            transform.translate(
-                static_cast<float>(pos.x / 1000.0),
-                static_cast<float>((pos.z + zOff) / 1000.0),
-                static_cast<float>(-pos.y / 1000.0));
-            // No mirror in BoxMode -- boxes are symmetric, mirror only
-            // affects Detailed/LayerMode where internal geometry matters
-            group.transforms[i] = transform;
-
-            // Update bounding box
-            AA_BOUNDING_BOX localBB = group.mesh.boundingBox();
-            VECTOR3D offset(static_cast<float>(pos.x / 1000.0),
-                           static_cast<float>((pos.z + zOff) / 1000.0),
-                           static_cast<float>(-pos.y / 1000.0));
-            group.boundingBoxes[i].mins = localBB.mins + offset;
-            group.boundingBoxes[i].maxes = localBB.maxes + offset;
-        }
-
-        makeCurrent();
-        group.updateInstanceBuffer();
-        doneCurrent();
     }
 
     m_bvhDirty = true;
