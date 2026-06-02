@@ -3,6 +3,7 @@
  */
 
 #include "LayerMeshBuilder.h"
+#include "core/GenericLayers.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -301,8 +302,16 @@ Component3DGeometry LayerMeshBuilder::build(
                 color = QColor(style->fill_color.r, style->fill_color.g,
                                style->fill_color.b, style->fill_color.a);
             }
+        } else if (elev->name == GenericLayers::OUTLINE_ROLE) {
+            // Priority 2a: black-box die body (canonical outline role) -- blue.
+            // Hardcoded fallback for when the generic color scheme file is
+            // absent (configs/stackups/colors/generic/blackbox.yaml overrides).
+            color = QColor(26, 82, 217, 255);
+        } else if (elev->name == GenericLayers::PAD_ROLE) {
+            // Priority 2b: black-box pads (canonical pad role) -- yellow.
+            color = QColor(255, 214, 0, 255);
         } else {
-            // Priority 2: Generate a unique color based on layer number
+            // Priority 3: Generate a unique color based on layer number
             int hue = (key.layer * 47 + key.datatype * 31) % 360;
             color = QColor::fromHsv(hue, 200, 200, 200);
         }

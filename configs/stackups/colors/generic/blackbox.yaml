@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 aesc silicon
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Black-box generic
+description: Default colors for black-box / no-LYP chiplets (blue body, yellow pads)
+layers:
+  # Keys are the canonical roles assigned by the black-box stackup augmentation
+  # (AssemblyView::augmentStackupForBlackBox): "outline" = die body, "pad" =
+  # bond pads. Edit the colors to taste -- this file is the user-facing knob.
+  outline:
+    color: [0.10, 0.32, 0.85, 1.0]   # blue die body
+    metallic: 0.1
+    roughness: 0.6
+  pad:
+    color: [1.0, 0.84, 0.0, 1.0]     # yellow pads
+    metallic: 0.7
+    roughness: 0.35

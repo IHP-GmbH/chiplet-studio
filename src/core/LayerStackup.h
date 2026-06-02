@@ -129,6 +129,10 @@ std::string stackupPath(const std::string& techId);
 std::string colorSchemePath(const std::string& techId,
                             const std::string& scheme = "realistic");
 
+// Resolve the generic black-box color scheme path
+// (configs/stackups/colors/generic/<scheme>.yaml). Empty if no configs dir.
+std::string genericColorSchemePath(const std::string& scheme = "blackbox");
+
 // Set the configs root directory (default: CONFIGS_DIR compile definition)
 void setConfigsDir(const std::string& dir);
 

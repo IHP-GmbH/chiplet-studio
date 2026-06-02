@@ -309,6 +309,13 @@ std::string colorSchemePath(const std::string& techId, const std::string& scheme
     return colorsDir + pdkDir + "/" + scheme + ".yaml";
 }
 
+std::string genericColorSchemePath(const std::string& scheme)
+{
+    std::string base = getConfigsDir();
+    if (base.empty()) return "";
+    return base + "/stackups/colors/generic/" + scheme + ".yaml";
+}
+
 } // namespace BlenderGDSConfigs
 
 // Predefined stackups
