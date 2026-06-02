@@ -86,6 +86,52 @@ cmake .. -DKLAYOUT_BUILD_DIR=../extern/klayout/bin-release
 make -j$(nproc)
 ```
 
+## Running the application
+
+The executable opens the GUI. Pass a `.chiplet` file to load an assembly on
+startup:
+
+```bash
+./build/chiplet-studio                       # empty session
+./build/chiplet-studio path/to/assembly.chiplet
+```
+
+### Portable bundle (no Docker, no root)
+
+To run on machines without Docker or system dependencies, build a
+self-contained bundle with `scripts/build-portable.sh`:
+
+```bash
+./scripts/build-portable.sh             # tarball, bundled software-GL fallback
+./scripts/build-portable.sh --appimage  # also emit an AppImage
+./scripts/build-portable.sh --lean      # smaller, host OpenGL only (~65 MB)
+```
+
+This writes to `dist/`:
+
+- **`chiplet-studio-portable.tar.gz`** (recommended) — extract anywhere and run:
+  ```bash
+  tar xf chiplet-studio-portable.tar.gz
+  ./chiplet-studio-portable/AppRun [assembly.chiplet]
+  ```
+- **`Chiplet_Studio-x86_64.AppImage`** — single file:
+  ```bash
+  chmod +x Chiplet_Studio-x86_64.AppImage
+  ./Chiplet_Studio-x86_64.AppImage [assembly.chiplet]
+  # on systems without FUSE2:
+  ./Chiplet_Studio-x86_64.AppImage --appimage-extract-and-run [assembly.chiplet]
+  ```
+
+The bundle runs on any glibc 2.35+ Linux (Ubuntu 22.04 or newer). By default it
+uses the host GPU when it provides OpenGL 3.3, otherwise it transparently falls
+back to a bundled software renderer (llvmpipe). Force a mode with the
+`CHIPLET_GL` environment variable:
+
+```bash
+CHIPLET_GL=hardware ./AppRun   # always use the host GPU
+CHIPLET_GL=software ./AppRun   # always use the bundled software renderer
+```
+
 ## Project Structure
 
 ```
