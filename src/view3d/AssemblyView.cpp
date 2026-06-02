@@ -8,6 +8,7 @@
 #include "LayerMeshBuilder.h"
 #include "ShapeFilter.h"
 #include "view2d/KLayoutBridge.h"
+#include "core/GenericLayers.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QTimer>
@@ -1139,6 +1140,58 @@ void AssemblyView::setViewMode(ViewMode mode)
     }
 }
 
+namespace {
+
+// Black-box / no-LYP chiplet: the fallback stackup does not model the die's
+// own layers, so LayerMeshBuilder (which drops layers absent from the stackup)
+// would render it empty. Augment a LOCAL copy of the stackup so Detailed mode
+// shows a real box instead of a flat 1 um plane:
+//   - outline (206/0) -> full component thickness, "outline" role (die body)
+//   - pads    (205/0) -> a thin flat plane (decal) on the active face, "pad" role
+// so the body height matches Transparent mode and the pads sit flush on the
+// face (flipZ moves them to the bottom for flip-chip). Unknown commercial layers
+// (no canonical 205/206) become full-thickness
+// slabs. The role names drive the black-box colors (blue body / yellow pads;
+// configs/stackups/colors/generic/blackbox.yaml, with a hardcoded fallback in
+// LayerMeshBuilder).
+void augmentStackupForBlackBox(LayerStackup& stackup,
+                               const std::map<LayerKey, LayerPolygons>& polygons,
+                               const Component& comp)
+{
+    double dieT = comp.dimensions().thickness;
+    if (dieT <= 0.0) {
+        dieT = 200.0;  // matches the Transparent-mode default thickness (um)
+    }
+    const LayerKey outlineKey(GenericLayers::OUTLINE_LAYER,
+                              GenericLayers::OUTLINE_DATATYPE);
+    const LayerKey padKey(GenericLayers::PAD_LAYER, GenericLayers::PAD_DATATYPE);
+    const bool hasOutline = polygons.find(outlineKey) != polygons.end();
+    // Pads render as a thin flat plane flush on the die's active face -- a decal,
+    // not a raised cap (1 um on a ~200 um die reads as a plane). flipZ moves it to
+    // the bottom face for flip-chip dies.
+    const double padPlaneUm = 1.0;
+    double slabTop = 0.0;
+    for (const auto& entry : polygons) {
+        const LayerKey& key = entry.first;
+        if (stackup.find(key)) {
+            continue;  // already modeled (real stackup layer) -- leave untouched
+        }
+        if (key == outlineKey) {
+            stackup.addLayer(key.layer, key.datatype, 0.0, dieT,
+                             GenericLayers::OUTLINE_ROLE);
+        } else if (key == padKey) {
+            const double z = hasOutline ? dieT : 0.0;  // flat plane on the active face, else be the body
+            const double t = hasOutline ? padPlaneUm : dieT;
+            stackup.addLayer(key.layer, key.datatype, z, t, GenericLayers::PAD_ROLE);
+        } else {
+            stackup.addLayer(key.layer, key.datatype, slabTop, dieT, "blackbox");
+            slabTop += dieT;
+        }
+    }
+}
+
+}  // namespace
+
 void AssemblyView::buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp)
 {
 #ifdef HAVE_KLAYOUT
@@ -1240,6 +1293,15 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
                      << "with" << colorScheme.layers.size() << "layer colors";
         }
     }
+    // Black-box (no .lyp): fall back to the generic pad/outline color scheme
+    // (ships blue body + yellow pads; user-editable). LayerMeshBuilder also
+    // carries a hardcoded blue/yellow fallback if this file is missing.
+    if (!hasColorScheme && !lyp) {
+        std::string gp = BlenderGDSConfigs::genericColorSchemePath();
+        if (!gp.empty() && colorScheme.loadFromYAML(gp)) {
+            hasColorScheme = true;
+        }
+    }
 
     // Extract polygons from GDS
     GDSLayerExtractor extractor;
@@ -1275,22 +1337,11 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
 
     // Black-box / no-LYP chiplet (commercial / closed PDK node): the fallback
     // stackup does not model this die's layers, so LayerMeshBuilder would skip
-    // them (it intentionally drops layers absent from the stackup) and the
-    // component would render empty in 3D. Augment a LOCAL copy of the stackup
-    // (the cached one is untouched) with every present GDS layer it does not
-    // already model, as thin slabs, so the pads and any other geometry stay
-    // visible. Gated on the no-LYP case so known PDKs are never perturbed.
+    // them and the component would render empty in 3D. Augment a LOCAL copy of
+    // the stackup (the cached one is untouched) so the die body + pads render
+    // with sensible height and role-based colors. See augmentStackupForBlackBox.
     if (!lyp) {
-        constexpr double kBlackBoxSlabUm = 1.0;
-        double zTop = stackup.totalHeight();
-        for (const auto& entry : polygons) {
-            const LayerKey& key = entry.first;
-            if (!stackup.find(key)) {
-                stackup.addLayer(key.layer, key.datatype, zTop,
-                                 kBlackBoxSlabUm, "blackbox");
-                zTop += kBlackBoxSlabUm;
-            }
-        }
+        augmentStackupForBlackBox(stackup, polygons, comp);
     }
 
     // Build 3D geometry from polygons
@@ -1429,12 +1480,25 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
         }
     }
 
+    // Black-box (no .lyp): the cached stackup doesn't model this die's layers;
+    // augment the local copy so it still renders on shape-filter rebuilds,
+    // consistent with the initial buildLayerGeometry().
+    if (!lyp) {
+        augmentStackupForBlackBox(stackup, polygons, *comp);
+    }
+
     // Get color scheme
     LayerColorScheme colorScheme;
     bool hasColorScheme = false;
     if (!techId.empty()) {
         std::string csPath = BlenderGDSConfigs::colorSchemePath(techId, "realistic");
         if (!csPath.empty() && colorScheme.loadFromYAML(csPath)) {
+            hasColorScheme = true;
+        }
+    }
+    if (!hasColorScheme && !lyp) {
+        std::string gp = BlenderGDSConfigs::genericColorSchemePath();
+        if (!gp.empty() && colorScheme.loadFromYAML(gp)) {
             hasColorScheme = true;
         }
     }
