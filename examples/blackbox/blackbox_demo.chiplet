@@ -1,0 +1,41 @@
+# Black-box chiplet demo (no .lyp)
+#
+# Visual-verification fixture for the black-box render path: a chiplet from a
+# commercial / closed PDK node whose GDS carries only metal pads + pad names,
+# with NO layer-properties (.lyp) file. The technology below intentionally omits
+# `layer_properties`, so the studio falls back to default-layer rendering:
+#   - 2D: KLayout auto-colors every GDS layer and draws the pad-name text.
+#   - 3D: the stackup is augmented locally so the foreign pad layer extrudes.
+#
+# The GDS is synthesized by gds_to_kicad/blackbox_chiplet.py from
+# acme_phy.spec.json (pads on 205/0, names on 205/25, outline on 206/0).
+# Regenerate with:
+#   cd ../../../gds_to_kicad && \
+#     venv/bin/python blackbox_chiplet.py \
+#       ../chiplet-studio/examples/blackbox/acme_phy.spec.json \
+#       -o ../chiplet-studio/examples/blackbox/acme_phy.gds
+
+format_version: "1.0"
+
+assembly:
+  name: "Black-Box Chiplet Demo"
+  description: "Chiplet with no .lyp -- rendered with default layers (pads + names)"
+  author: "Chiplet Studio"
+  created: "2026-06-02"
+  units: "um"
+
+technologies:
+  # No `layer_properties` key -> layer_properties_path() is empty -> black-box.
+  closed_pdk:
+    description: "Commercial / closed PDK node (no .lyp provided)"
+    dbu: 0.001
+
+components:
+  - id: acme_phy
+    type: die
+    technology: closed_pdk
+    orientation: flip_chip
+    layout: "acme_phy.gds"
+    top_cell: "ACME_PHY"
+    dimensions: { width: 2000, height: 1500, thickness: 200 }
+    position: { x: 0, y: 0, z: 0 }

@@ -1,0 +1,14 @@
+{
+  "chiplet_name": "ACME_PHY",
+  "die": { "width_um": 2000, "height_um": 1500 },
+  "pads": [
+    { "name": "VDD",   "x_um": -700, "y_um":  600, "w_um": 80, "h_um": 80 },
+    { "name": "CLK",   "x_um": -234, "y_um":  600, "w_um": 80, "h_um": 80 },
+    { "name": "SDA",   "x_um":  234, "y_um":  600, "w_um": 80, "h_um": 80 },
+    { "name": "TX",    "x_um":  700, "y_um":  600, "w_um": 80, "h_um": 80 },
+    { "name": "VSS",   "x_um": -700, "y_um": -600, "w_um": 80, "h_um": 80 },
+    { "name": "RST_N", "x_um": -234, "y_um": -600, "w_um": 80, "h_um": 80 },
+    { "name": "SCL",   "x_um":  234, "y_um": -600, "w_um": 80, "h_um": 80 },
+    { "name": "RX",    "x_um":  700, "y_um": -600, "w_um": 80, "h_um": 80 }
+  ]
+}

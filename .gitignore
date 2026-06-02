@@ -41,6 +41,9 @@ qrc_*.cpp
 .chiplet-cache/
 *.chiplet.cache
 
+# Crash-recovery autosave (generated at runtime)
+*.autosave.chiplet
+
 # OS
 .DS_Store
 Thumbs.db
