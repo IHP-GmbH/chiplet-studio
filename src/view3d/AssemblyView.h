@@ -41,22 +41,6 @@ enum class ViewMode {
 };
 
 /**
- * MeshInstanceGroup holds a shared mesh and per-instance data for instanced rendering.
- * Components with identical geometry (same type + dimensions) share a mesh.
- */
-struct MeshInstanceGroup {
-    ComponentMesh mesh;                        // Shared geometry
-    std::vector<QMatrix4x4> transforms;        // Per-instance transforms
-    std::vector<QColor> colors;                // Per-instance colors
-    std::vector<bool> selected;                // Per-instance selection state
-    std::vector<QString> componentIds;         // For picking/selection
-    std::vector<AA_BOUNDING_BOX> boundingBoxes; // Per-instance world bounds
-
-    // Update instance data on GPU
-    void updateInstanceBuffer();
-};
-
-/**
  * AssemblyView is the main 3D view widget for chiplet assemblies.
  */
 class AssemblyView : public QOpenGLWidget, protected QOpenGLExtraFunctions {
@@ -147,9 +131,6 @@ private:
     void updateSceneBounds();
     void updateBasePlane();
 
-    // Generate mesh signature for grouping identical components
-    static QString getMeshSignature(const Component* comp);
-
     // Data
     Assembly* m_assembly = nullptr;
     QString m_selectedComponent;
@@ -170,19 +151,12 @@ private:
 
     // Rendering
     ShaderProgram m_componentShader;
-    ShaderProgram m_componentShaderInstanced;  // Instanced version
     ShaderProgram m_gridShader;
-
-    // Instance groups for instanced rendering (signature -> group)
-    std::map<QString, MeshInstanceGroup> m_instanceGroups;
 
     // Legacy per-component mesh map (for fallback/transition)
     std::map<QString, ComponentMesh> m_meshes;
     ComponentMesh m_gridMesh;
     bool m_basePlaneVisible = true;
-
-    // Instancing enabled flag
-    bool m_useInstancing = true;
 
     // Mouse state
     QPoint m_lastMousePos;
