@@ -39,9 +39,19 @@ fi
 
 mkdir -p "$PROJECT_DIR/dist"
 
+# Capture commit SHAs on the host (git is available here, not necessarily in the
+# container) for the corresponding-source notice shipped with the binary, as
+# required by GPL-3.0-or-later.
+GIT_COMMIT=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+KLAYOUT_COMMIT=$(git -C "$PROJECT_DIR/extern/klayout" rev-parse HEAD 2>/dev/null || echo unknown)
+GDS3D_COMMIT=$(git -C "$PROJECT_DIR/extern/GDS3D" rev-parse HEAD 2>/dev/null || echo unknown)
+
 docker run --rm --user root \
     -e WITH_SOFTWARE_GL="$WITH_SOFTWARE_GL" \
     -e MAKE_APPIMAGE="$MAKE_APPIMAGE" \
+    -e GIT_COMMIT="$GIT_COMMIT" \
+    -e KLAYOUT_COMMIT="$KLAYOUT_COMMIT" \
+    -e GDS3D_COMMIT="$GDS3D_COMMIT" \
     -v "$PROJECT_DIR:/workspace" \
     chiplet-studio-build bash -euo pipefail -c '
 WS=/workspace
@@ -131,6 +141,36 @@ cp -a "$WS/build/python/chiplet_studio."*.so "$APPDIR/usr/lib/python-modules/" 2
 echo ">>> Bundling runtime data (configs + pdks)..."
 cp -a "$WS/configs" "$APPDIR/usr/share/chiplet-studio/configs"
 cp -a "$WS/pdks"    "$APPDIR/usr/share/chiplet-studio/pdks"
+
+echo ">>> Bundling license texts + corresponding-source notice (GPL compliance)..."
+cp "$WS/LICENSE" "$APPDIR/LICENSE"
+cp "$WS/THIRD-PARTY-LICENSES.md" "$APPDIR/THIRD-PARTY-LICENSES.md"
+cat > "$APPDIR/SOURCE.txt" <<EOF
+Chiplet Studio - corresponding source and licenses
+===================================================
+
+Chiplet Studio is free software licensed under GPL-3.0-or-later.
+See LICENSE for the full license text and THIRD-PARTY-LICENSES.md for the
+licenses of all bundled and linked third-party components.
+
+Corresponding source (per GPL-3.0-or-later, section 6):
+
+  Chiplet Studio        https://github.com/IHP-GmbH/chiplet-studio
+  (GPL-3.0-or-later)    commit ${GIT_COMMIT}
+
+  KLayout               https://github.com/KLayout/klayout
+  (GPL-3.0-or-later)    commit ${KLAYOUT_COMMIT}
+
+  GDS3D / libgdsto3d    https://github.com/trilomix/GDS3D
+  (LGPL-2.1-or-later)   commit ${GDS3D_COMMIT}
+
+Qt, CPython, Mesa, LLVM, glvnd, FreeType, HarfBuzz, Fontconfig and the other
+runtime libraries are bundled unmodified from their upstream releases (Ubuntu
+22.04 packages); their sources are available from those upstream projects and
+distributions. See THIRD-PARTY-LICENSES.md for details.
+
+Copyright (C) 2026 IHP GmbH.
+EOF
 
 echo ">>> Bundling a base font (DejaVu) for hosts without system fonts..."
 apt-get install -y -qq fonts-dejavu-core >/dev/null 2>&1 || true
@@ -269,6 +309,9 @@ cat > /tmp/pkg/chiplet-studio-portable/README.txt <<EOF
 Chiplet Studio - portable build
 Run:   ./AppRun  [optional-file.chiplet]
 No Docker, root or system install required.
+
+License: GPL-3.0-or-later. See LICENSE, THIRD-PARTY-LICENSES.md and SOURCE.txt
+(the latter lists the corresponding source for this binary).
 
 OpenGL: by default the launcher uses your GPU if it provides OpenGL 3.3,
 otherwise it transparently falls back to a bundled software renderer.
