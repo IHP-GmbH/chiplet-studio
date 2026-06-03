@@ -1,0 +1,12 @@
+# Hermetic interconnect fragment for the InterconnectMergeZ test (mirrors the
+# real interconnect_pdk ihp_cupillar fragment values).
+CuPillar:
+  index: 500
+  type: 35
+  z: 13.83
+  height: 32.00
+SnAgCap:
+  index: 501
+  type: 35
+  z: 45.83
+  height: 16.00

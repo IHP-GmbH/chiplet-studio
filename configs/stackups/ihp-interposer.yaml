@@ -5,9 +5,9 @@
 # Based on SG13G2 process spec Rev 1.2 (BEOL thicknesses) and
 # SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 2 (cu-pillar dimensions).
 #
-# Layers 500+ are 3D visualization/simulation auxiliary layers.
-# They represent post-passivation physical volumes and are NOT
-# fabrication layers. See interposer PDK layers_def.drc for details.
+# 3D interconnect bodies (cu-pillar/solder-bump, layers 500+) are owned by the
+# interconnect PDK and merged in at render time per the assembly's
+# interconnect.adapter. See interconnect_pdk/config/stackup_fragments/.
 
 # --- Si bulk substrate (visualized at 50 um -- aesthetic, NOT physical) ---
 # True wafer is 750 um per SG13G2 spec. We render a much thinner slab so
@@ -91,30 +91,3 @@ Recog_pillar:
   type: 35
   z: 10.83
   height: 3.00
-
-# --- Cu-Pillar connection stack (Table 6.1 Option 2, 40um opening) ---
-# Physical stack above passivation opening:
-#   Cu pillar body: 32 um height, 49 um diameter
-#   SnAg cap:       16 um height, 49 um diameter
-
-CuPillar:
-  index: 500
-  type: 35
-  z: 13.83
-  height: 32.00
-
-SnAgCap:
-  index: 501
-  type: 35
-  z: 45.83
-  height: 16.00
-
-# --- Solder bump (Section 6.9.1, 80um ball on 60um opening) ---
-# SAC305 solder ball, approximately spherical but extruded as cylinder
-# Height approximated as ball diameter (80um) for visualization
-
-SolderBall:
-  index: 502
-  type: 36
-  z: 13.83
-  height: 80.00

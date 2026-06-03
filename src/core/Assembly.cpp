@@ -58,6 +58,11 @@ const Assembly::string_type& Assembly::io_technology() const
     return m_io_technology;
 }
 
+const Assembly::string_type& Assembly::interconnect_adapter() const
+{
+    return m_interconnect_adapter;
+}
+
 // Setters - metadata
 
 void Assembly::set_name(const string_type& name)
@@ -98,6 +103,11 @@ void Assembly::set_assembly_gds(const string_type& path)
 void Assembly::set_io_technology(const string_type& tech)
 {
     m_io_technology = tech;
+}
+
+void Assembly::set_interconnect_adapter(const string_type& adapter)
+{
+    m_interconnect_adapter = adapter;
 }
 
 // Components
@@ -302,6 +312,22 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             if (stackupYaml.empty()) break;
             LayerStackup stackup;
             if (!stackup.loadFromBlenderGDS(stackupYaml)) break;
+            // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap or a
+            // vendor's microbump), which the interconnect PDK owns rather than
+            // the interposer stackup. Additive: it brings in bodies the
+            // interposer stackup does not define, so the first-layer lookup
+            // below resolves for whatever method the design selected.
+            if (!m_interconnect_adapter.empty()) {
+                const std::string frag =
+                    BlenderGDSConfigs::interconnectStackupFragmentPath(m_interconnect_adapter);
+                LayerStackup ic;
+                if (!frag.empty() && ic.loadFromBlenderGDS(frag)) {
+                    for (const auto& l : ic.sortedLayers()) {
+                        stackup.addLayer(l.layer, l.datatype, l.z_bottom,
+                                         l.thickness, l.name);
+                    }
+                }
+            }
             for (const auto& layer : stackup.sortedLayers()) {
                 if (!firstLayerName.empty() && layer.name == firstLayerName) {
                     mounting_surface = layer.z_bottom;

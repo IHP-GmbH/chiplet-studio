@@ -1,0 +1,39 @@
+format_version: "1.0"
+
+# Hermetic fixture for InterconnectMergeZ. die_a attaches via a cu-pillar stack
+# whose first layer (CuPillar) is NOT in the (body-less) interposer stackup; it
+# is supplied by the interconnect PDK fragment selected by interconnect.adapter.
+# Interposer thickness is a distinct 200 so the no-merge fallback (200+48=248)
+# differs clearly from the fragment result (CuPillar z_bottom 13.83 + 48 = 61.83).
+interconnect:
+  adapter: "ihp_cupillar"
+
+assembly:
+  name: "merge-z hermetic"
+  units: "um"
+
+technologies:
+  ihp-interposer:
+    description: "body-less interposer stackup"
+    dbu: 0.001
+
+connection_stacks:
+  cupillar:
+    description: "IHP cu-pillar"
+    layers:
+      - {name: CuPillar, material: Cu, height: 32.0, diameter: 49.0}
+      - {name: SnAgCap, material: SnAg, height: 16.0, diameter: 49.0}
+
+components:
+  - id: interposer
+    type: interposer
+    technology: ihp-interposer
+    dimensions: {width: 1000, height: 1000, thickness: 200.0}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: die_a
+    type: die
+    technology: ihp-interposer
+    connection: cupillar
+    dimensions: {width: 150, height: 100, thickness: 50}
+    position: {x: 0, y: 0, z: 0}

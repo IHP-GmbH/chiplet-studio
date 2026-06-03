@@ -4,7 +4,9 @@
 
 #include <gtest/gtest.h>
 #include <filesystem>
+#include <cstdlib>
 #include "formats/ChipletFormat.h"
+#include "core/LayerStackup.h"
 
 namespace chiplet {
 namespace {
@@ -209,6 +211,31 @@ TEST(ChipletFormat, LoadConnectionStacks)
     auto sbump = assembly->connection_stack("sbump_sac305");
     ASSERT_NE(sbump, nullptr);
     EXPECT_DOUBLE_EQ(sbump->total_height(), 80.0);
+}
+
+// Test parsing the optional interconnect.adapter root block
+TEST(ChipletFormat, LoadInterconnectAdapter)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_interconnect_adapter.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_EQ(assembly->interconnect_adapter(), "vendorx_microbump");
+
+    // The vendor connection stack is parsed with its vendor-specific bodies.
+    auto stack = assembly->connection_stack("vendorx_microbump");
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->layers[0].name, "VendorXBumpCu");
+    EXPECT_DOUBLE_EQ(stack->total_height(), 24.0);  // 18 + 6
+}
+
+// A .chiplet with no interconnect block leaves the adapter empty (interposer-only)
+TEST(ChipletFormat, NoInterconnectAdapterIsEmpty)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_connection_stacks.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_TRUE(assembly->interconnect_adapter().empty());
 }
 
 // Test auto-z calculation from interposer thickness + connection stack
@@ -644,6 +671,41 @@ TEST(Assembly, CalculateZReturnsZeroWhenNoInterposerAndNoConnection)
     assembly.add_component(std::move(die));
 
     EXPECT_DOUBLE_EQ(assembly.calculate_component_z("orphan_die"), 0.0);
+}
+
+// ---------------------------------------------------------------------
+// Task 9 regression guard: the interposer stackup no longer defines the
+// cu-pillar bodies (CuPillar/SnAgCap/SolderBall). calculate_component_z must
+// therefore source the cu-pillar mounting surface from the interconnect PDK
+// fragment that the assembly's interconnect.adapter selects. Hermetic: points
+// the configs dir at a body-less interposer stackup and INTERCONNECT_PDK_ROOT
+// at a fake PDK that supplies CuPillar, so the test depends on neither the real
+// configs nor the sibling interconnect_pdk repo.
+// ---------------------------------------------------------------------
+TEST(InterconnectMergeZ, DieZSourcedFromFragmentAfterBodyRemoval)
+{
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs");
+    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk").c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/merge_z.chiplet");
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_EQ(assembly->interconnect_adapter(), "ihp_cupillar");
+
+    // CuPillar z_bottom (13.83, from the merged fragment) + stack height
+    // (32 + 16 = 48) = 61.83. If the fragment did not merge, CuPillar would be
+    // absent from the body-less interposer stackup and the result would differ.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.01);
+
+    // Negative control: without the adapter there is no merge, CuPillar is not
+    // found, and the die falls back to interposer thickness (200) + stack (48).
+    assembly->set_interconnect_adapter("");
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 248.0, 0.01);
+
+    // Restore global state so later tests see the default configs resolution.
+    unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
 }
 
 } // namespace
