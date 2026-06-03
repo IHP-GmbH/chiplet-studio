@@ -169,4 +169,17 @@ chiplet-studio/
 
 ## License
 
-Private - All rights reserved
+Chiplet Studio is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+Copyright (C) 2026 IHP GmbH.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See the [`LICENSE`](LICENSE) file for the full GPL-3.0 text.
+
+Chiplet Studio links **KLayout** (GPL-3.0-or-later), so the combined work is
+licensed GPL-3.0-or-later. See [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md)
+for the licenses of all bundled and linked third-party components.
