@@ -167,6 +167,12 @@ chiplet-studio/
 - [x] Python scripting with pybind11
 - [x] Final integration verification
 
+## Contributing
+
+Contributions are welcome under GPL-3.0-or-later. We use a Developer Certificate
+of Origin (DCO): sign your commits with `git commit -s`. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for details.
+
 ## License
 
 Chiplet Studio is free software: you can redistribute it and/or modify it under
