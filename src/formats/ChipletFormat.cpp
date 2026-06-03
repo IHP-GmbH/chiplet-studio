@@ -174,6 +174,14 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         parse_components(root["components"], *assembly);
     }
 
+    // Interconnect adapter (optional): selects the bumping method whose 3D
+    // bodies are merged into the stackup during auto_calculate_z. Mirrors the
+    // interposer adapter; absent = interposer-only (no interconnect bodies).
+    if (root["interconnect"] && root["interconnect"]["adapter"]) {
+        assembly->set_interconnect_adapter(
+            root["interconnect"]["adapter"].as<std::string>());
+    }
+
     // Auto-calculate z for components with connection stacks and z == 0.0
     auto_calculate_z(*assembly);
 

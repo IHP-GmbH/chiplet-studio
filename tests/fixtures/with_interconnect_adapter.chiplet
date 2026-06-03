@@ -1,0 +1,35 @@
+format_version: "1.0"
+
+assembly:
+  name: "Test Assembly with Interconnect Adapter"
+  description: "Tests interconnect.adapter root-block parsing"
+  units: "um"
+
+interconnect:
+  adapter: "vendorx_microbump"
+
+technologies:
+  test_tech:
+    description: "Test technology"
+    layer_properties: "./tech/test.lyp"
+    dbu: 0.001
+
+connection_stacks:
+  vendorx_microbump:
+    description: "VendorX fine-pitch microbump (demo, non-IHP)"
+    layers:
+      - {name: VendorXBumpCu, material: Cu, height: 18.0, diameter: 40.0}
+      - {name: VendorXBumpCap, material: SnAg, height: 6.0, diameter: 40.0}
+
+components:
+  - id: interposer
+    type: interposer
+    technology: test_tech
+    dimensions: {width: 8000, height: 8000, thickness: 13.83}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: die_a
+    type: die
+    technology: test_tech
+    connection: vendorx_microbump
+    position: {x: 1000, y: 1000, z: 0}

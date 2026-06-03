@@ -8,6 +8,7 @@
 #include "LayerStackup.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
@@ -280,6 +281,23 @@ std::string stackupPath(const std::string& techId)
     }
 
     return "";
+}
+
+std::string interconnectStackupFragmentPath(const std::string& adapter)
+{
+    if (adapter.empty()) return "";
+
+    // Env override first (consistent with the Python tools' INTERCONNECT_PDK_ROOT).
+    const char* env = std::getenv("INTERCONNECT_PDK_ROOT");
+    if (env && env[0] != '\0') {
+        return std::string(env) + "/config/stackup_fragments/" + adapter + ".stackup.yaml";
+    }
+
+    // Fallback: the interconnect PDK as a sibling of the chiplet-studio project
+    // root (<project>/chiplet-studio/configs -> <project>/interconnect_pdk).
+    std::string base = getConfigsDir();
+    if (base.empty()) return "";
+    return base + "/../../interconnect_pdk/config/stackup_fragments/" + adapter + ".stackup.yaml";
 }
 
 std::string colorSchemePath(const std::string& techId, const std::string& scheme)
