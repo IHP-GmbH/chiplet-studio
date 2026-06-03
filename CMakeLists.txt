@@ -313,8 +313,46 @@ if(HAVE_PYTHON)
     message(STATUS "Python module will be built at: ${CMAKE_BINARY_DIR}/python/chiplet_studio*.so")
 endif()
 
-# GDS3D library for advanced 3D rendering
-add_subdirectory(extern/GDS3D/libgdsto3d)
+# GDS3D library for advanced 3D rendering.
+# Defined inline rather than via add_subdirectory(extern/GDS3D/libgdsto3d) so the
+# extern/GDS3D submodule stays pristine upstream: upstream trilomix/GDS3D ships no
+# libgdsto3d/CMakeLists.txt, so keeping this build glue in-repo lets a fresh
+# `git clone --recurse-submodules` build without a manual patch step.
+set(GDS3D_DIR ${CMAKE_SOURCE_DIR}/extern/GDS3D)
+add_library(chiplet_gds3d STATIC
+    # Core parsing and geometry sources
+    ${GDS3D_DIR}/libgdsto3d/gdsparse.cpp
+    ${GDS3D_DIR}/libgdsto3d/gdspolygon.cpp
+    ${GDS3D_DIR}/libgdsto3d/process_cfg.cpp
+    ${GDS3D_DIR}/libgdsto3d/gdsobject.cpp
+    ${GDS3D_DIR}/libgdsto3d/gdsobjectlist.cpp
+    ${GDS3D_DIR}/libgdsto3d/gdselements.cpp
+    ${GDS3D_DIR}/libgdsto3d/gds_globals.cpp
+    ${GDS3D_DIR}/libgdsto3d/gdspath.cpp
+    ${GDS3D_DIR}/libgdsto3d/gdstext.cpp
+    ${GDS3D_DIR}/libgdsto3d/assembly_cfg.cpp
+    # Clipper library for polygon operations
+    ${GDS3D_DIR}/libgdsto3d/clipper/clipper.cpp
+    # Math library (parent math/ directory)
+    ${GDS3D_DIR}/math/AA_BOUNDING_BOX.cpp
+    ${GDS3D_DIR}/math/PLANE.cpp
+    ${GDS3D_DIR}/math/MATRIX4X4.cpp
+    ${GDS3D_DIR}/math/FRUSTUM.cpp
+    ${GDS3D_DIR}/math/VECTOR3D.cpp
+    ${GDS3D_DIR}/math/VECTOR4D.cpp
+)
+# PIC is required so the static lib can be linked into the Python module.
+set_target_properties(chiplet_gds3d PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 17
+)
+# Suppress legacy third-party warnings.
+target_compile_options(chiplet_gds3d PRIVATE -w)
+target_include_directories(chiplet_gds3d PUBLIC
+    ${GDS3D_DIR}/libgdsto3d
+    ${GDS3D_DIR}/math
+    ${GDS3D_DIR}/libgdsto3d/clipper
+)
 
 # Tests
 enable_testing()
