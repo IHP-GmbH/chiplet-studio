@@ -1,0 +1,14 @@
+# Hermetic minimal interposer stackup for the InterconnectMergeZ test.
+# Deliberately body-less (no CuPillar/SnAgCap/SolderBall) to mirror the
+# post-Task-9 interposer: the cu-pillar bodies must come from the interconnect
+# PDK fragment, not from here.
+TopMetal2:
+  index: 134
+  type: 0
+  z: 10.83
+  height: 3.00
+Passiv:
+  index: 9
+  type: 0
+  z: 13.83
+  height: 1.90
