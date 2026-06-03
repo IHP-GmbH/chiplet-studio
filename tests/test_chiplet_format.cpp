@@ -211,6 +211,31 @@ TEST(ChipletFormat, LoadConnectionStacks)
     EXPECT_DOUBLE_EQ(sbump->total_height(), 80.0);
 }
 
+// Test parsing the optional interconnect.adapter root block
+TEST(ChipletFormat, LoadInterconnectAdapter)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_interconnect_adapter.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_EQ(assembly->interconnect_adapter(), "vendorx_microbump");
+
+    // The vendor connection stack is parsed with its vendor-specific bodies.
+    auto stack = assembly->connection_stack("vendorx_microbump");
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->layers[0].name, "VendorXBumpCu");
+    EXPECT_DOUBLE_EQ(stack->total_height(), 24.0);  // 18 + 6
+}
+
+// A .chiplet with no interconnect block leaves the adapter empty (interposer-only)
+TEST(ChipletFormat, NoInterconnectAdapterIsEmpty)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_connection_stacks.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_TRUE(assembly->interconnect_adapter().empty());
+}
+
 // Test auto-z calculation from interposer thickness + connection stack
 TEST(ChipletFormat, AutoZCalculation)
 {
