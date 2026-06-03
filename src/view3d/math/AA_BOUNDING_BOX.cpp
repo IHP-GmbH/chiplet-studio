@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //////////////////////////////////////////////////////////////////////////////////////////
 //	AA_BOUNDING_BOX.cpp
 //	Functions for axis aligned bounding box. Derives from BOUNDING_VOLUME

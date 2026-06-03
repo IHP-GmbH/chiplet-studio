@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * Chiplet Studio - 3D Chiplet Assembly Design Tool
  *

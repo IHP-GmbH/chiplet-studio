@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * ChipletFormat.cpp - Implementation of .chiplet YAML parser/writer
  */

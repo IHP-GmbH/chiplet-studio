@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * Camera.h - Orbit camera for 3D assembly visualization
  */

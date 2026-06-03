@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * LayerProperties.cpp - Layer properties and .lyp file parser implementation
  */
