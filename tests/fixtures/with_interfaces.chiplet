@@ -10,19 +10,19 @@ technologies:
   ihp_sg13g2:
     description: "IHP SG13G2 130nm BiCMOS"
     dbu: 0.001
-  interposer_tech:
+  intm4tm2:
     description: "Silicon interposer technology"
     dbu: 0.001
 
 components:
   - id: substrate
     type: substrate
-    technology: interposer_tech
+    technology: intm4tm2
     dimensions: {width: 15000, height: 15000, thickness: 500}
 
   - id: interposer
     type: interposer
-    technology: interposer_tech
+    technology: intm4tm2
     position: {x: 1000, y: 1000, z: 0}
     dimensions: {width: 10000, height: 10000, thickness: 100}
 

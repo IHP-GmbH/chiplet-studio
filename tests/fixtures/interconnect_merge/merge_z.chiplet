@@ -5,6 +5,8 @@ format_version: "1.0"
 # is supplied by the interconnect PDK fragment selected by interconnect.adapter.
 # Interposer thickness is a distinct 200 so the no-merge fallback (200+48=248)
 # differs clearly from the fragment result (CuPillar z_bottom 13.83 + 48 = 61.83).
+# The technology id is the plain product id "intm4tm2" (the only spelling
+# that resolves; there are no legacy aliases).
 interconnect:
   adapter: "ihp_cupillar"
 
@@ -13,7 +15,7 @@ assembly:
   units: "um"
 
 technologies:
-  ihp-interposer:
+  intm4tm2:
     description: "body-less interposer stackup"
     dbu: 0.001
 
@@ -27,13 +29,13 @@ connection_stacks:
 components:
   - id: interposer
     type: interposer
-    technology: ihp-interposer
+    technology: intm4tm2
     dimensions: {width: 1000, height: 1000, thickness: 200.0}
     position: {x: 0, y: 0, z: 0}
 
   - id: die_a
     type: die
-    technology: ihp-interposer
+    technology: intm4tm2
     connection: cupillar
     dimensions: {width: 150, height: 100, thickness: 50}
     position: {x: 0, y: 0, z: 0}
