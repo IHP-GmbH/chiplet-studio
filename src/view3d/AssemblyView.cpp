@@ -1283,6 +1283,27 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
             qDebug() << "Using default interposer stackup for" << QString::fromStdString(techId);
         }
 
+        // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap, or a vendor
+        // microbump) into the render stackup, mirroring
+        // Assembly::calculate_component_z. The interconnect PDK -- not the
+        // interposer stackup -- owns these bodies (500/501/502, vendor 510/511),
+        // so the layer-render path must merge the selected method's fragment to
+        // know their z/height. Additive + idempotent (addLayer overwrites by
+        // key); components whose GDS lacks these layers render nothing extra.
+        if (m_assembly && !m_assembly->interconnect_adapter().empty()) {
+            const std::string frag = BlenderGDSConfigs::interconnectStackupFragmentPath(
+                m_assembly->interconnect_adapter());
+            LayerStackup ic;
+            if (!frag.empty() && ic.loadFromBlenderGDS(frag)) {
+                for (const auto& l : ic.sortedLayers()) {
+                    stackup.addLayer(l.layer, l.datatype, l.z_bottom, l.thickness, l.name);
+                }
+                qDebug() << "Merged interconnect fragment" << QString::fromStdString(frag)
+                         << "(" << ic.layerCount() << "body layers) for adapter"
+                         << QString::fromStdString(m_assembly->interconnect_adapter());
+            }
+        }
+
         m_stackups[techId] = stackup;
     }
 
