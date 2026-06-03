@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //////////////////////////////////////////////////////////////////////////////////////////
 //	MATRIX4X4.h
 //	Class declaration for a 4x4 matrix

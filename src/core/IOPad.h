@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * IOPad.h - External I/O pad on a component (e.g. wire-bond pad on the interposer)
  *

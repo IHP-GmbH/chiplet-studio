@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //////////////////////////////////////////////////////////////////////////////////////////
 //	PLANE.h
 //	Class declaration for a plane in 3d space

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //////////////////////////////////////////////////////////////////////////////////////////
 //	FRUSTUM.h
 //	class declaration for frustum for frustum culling, derives from BOUNDING_VOLUME

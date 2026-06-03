@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /*
  * KLayout2DView.h - Wrapper widget for KLayout's 2D layout view
  *
