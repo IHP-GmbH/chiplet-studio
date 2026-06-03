@@ -149,23 +149,21 @@ chiplet-studio/
 
 ## Documentation
 
-- `docs/PLAN.md` - Implementation roadmap
-- `docs/FEATURES.md` - Feature tracking
+- `docs/ARCHITECTURE.md` - Architecture and technical decisions
+- `docs/CHIPLET_FORMAT_SPEC.md` - The `.chiplet` file format
+- `docs/coord_frame_contract.md` - Coordinate frame contract for the pipeline
+- `docs/FLOW_ORCHESTRATOR.md` - Flow orchestration
 - `docs/CODE_STYLE.md` - Coding standards
-- `docs/ARCHITECTURE.md` - Technical decisions
 
-## Status
+## Capabilities
 
-**Phase 7 Complete:** Full refactoring finished
-
-- [x] KLayout widget embedding
-- [x] Hierarchy panel with selection sync
-- [x] Properties panel with units
-- [x] ID-based component safety
-- [x] Command pattern (undo/redo)
-- [x] GDS3D tessellation integration
-- [x] Python scripting with pybind11
-- [x] Final integration verification
+- KLayout widget embedding
+- Hierarchy panel with selection sync
+- Properties panel with units
+- ID-based component safety
+- Command pattern (undo/redo)
+- GDS3D tessellation integration
+- Python scripting with pybind11
 
 ## Contributing
 
