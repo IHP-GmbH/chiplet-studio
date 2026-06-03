@@ -270,9 +270,10 @@ std::string stackupPath(const std::string& techId)
     if (lower.find("gf180") != std::string::npos) {
         return stackupDir + "gf180mcu.yaml";
     }
-    if (lower.find("interposer") != std::string::npos ||
-        lower.find("rdl") != std::string::npos) {
-        return stackupDir + "ihp-interposer.yaml";
+    // IHP 130-nm IntM4TM2 aluminum BEOL interposer. The plain product id
+    // is the only spelling; there are no legacy aliases.
+    if (lower.find("intm4tm2") != std::string::npos) {
+        return stackupDir + "intm4tm2.yaml";
     }
 
     // Also try direct match: if techId itself contains a known PDK name
@@ -388,9 +389,10 @@ LayerStackup createInterposer()
 {
     LayerStackup stackup;
 
-    // IHP SG13G2 interposer stackup - top metal layers used for RDL routing
-    // Layer numbers match the IHP PDK GDS layers actually present in interposer designs
-    // Heights from SG13G2 process (um), same as createSG13G2() for these layers
+    // IHP 130-nm IntM4TM2 aluminum BEOL interposer stackup - top metal layers
+    // used for RDL routing. Layer numbers match the GDS layers actually present
+    // in interposer designs; heights from the SG13G2 process (um), same as
+    // createSG13G2() for these layers
     stackup.addLayer(50, 0, 3.2, 0.5, "Metal4");
     stackup.addLayer(66, 0, 3.7, 0.5, "Via4");
     stackup.addLayer(67, 0, 4.2, 0.8, "Metal5");
