@@ -128,6 +128,12 @@ namespace BlenderGDSConfigs {
 // Resolve stackup YAML path for a technology ID
 std::string stackupPath(const std::string& techId);
 
+// Resolve the interconnect PDK 3D stackup fragment for an interconnect adapter
+// (e.g. "vendorx_microbump" -> interconnect_pdk/config/stackup_fragments/
+// vendorx_microbump.stackup.yaml). Via $INTERCONNECT_PDK_ROOT or a sibling of
+// the configs dir's project root. Empty if no configs dir or empty adapter.
+std::string interconnectStackupFragmentPath(const std::string& adapter);
+
 // Resolve color scheme YAML path
 std::string colorSchemePath(const std::string& techId,
                             const std::string& scheme = "realistic");
