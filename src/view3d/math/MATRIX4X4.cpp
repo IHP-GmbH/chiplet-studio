@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //////////////////////////////////////////////////////////////////////////////////////////
 //	MATRIX4X4.cpp
 //	function definitions for 4x4 matrix class

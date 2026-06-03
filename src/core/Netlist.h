@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * Netlist.h - Net, NetClass, and Netlist data structures for assembly connectivity
  */

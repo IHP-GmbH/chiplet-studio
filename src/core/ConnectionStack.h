@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * ConnectionStack.h - Connection stack definition for chiplet-to-interposer bonding
  *
