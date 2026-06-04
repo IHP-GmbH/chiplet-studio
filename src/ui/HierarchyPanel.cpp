@@ -11,6 +11,7 @@
 #include <QVBoxLayout>
 #include <QMenu>
 #include <QAction>
+#include <QFont>
 #include <QPainter>
 #include <QHeaderView>
 
@@ -105,6 +106,25 @@ void HierarchyPanel::refresh()
         item->setCheckState(0, Qt::Checked);
     }
 
+    // Informative row for the assembly-level interconnect adapter (the
+    // bumping method). Not a component: its 3D bodies merge into the
+    // interposer's layer render, so it carries no geometry, checkbox or
+    // selection of its own -- but the active method belongs in the overview.
+    if (!m_assembly->interconnect_adapter().empty()) {
+        QTreeWidgetItem* ic = new QTreeWidgetItem(root);
+        ic->setText(0, "interconnect");
+        ic->setText(1, "Interconnect");
+        ic->setText(2, QString::fromStdString(m_assembly->interconnect_adapter()));
+        ic->setText(3, "");
+        ic->setFlags(ic->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsUserCheckable));
+        QFont f = ic->font(0);
+        f.setItalic(true);
+        for (int col = 0; col < 4; ++col) {
+            ic->setFont(col, f);
+        }
+        // No Qt::UserRole id: the click/menu handlers skip rows without one.
+    }
+
     m_tree->expandAll();
 
     // Resize columns to fit content
@@ -128,8 +148,13 @@ void HierarchyPanel::onItemClicked(QTreeWidgetItem* item, int /*column*/)
         return;
     }
 
+    QString componentId = item->data(0, Qt::UserRole).toString();
+    if (componentId.isEmpty()) {
+        return;  // informative row (interconnect adapter), not a component
+    }
+
     m_blockSignals = true;
-    emit componentSelected(item->data(0, Qt::UserRole).toString());
+    emit componentSelected(componentId);
     m_blockSignals = false;
 }
 
@@ -140,6 +165,9 @@ void HierarchyPanel::onItemDoubleClicked(QTreeWidgetItem* item, int /*column*/)
     }
 
     QString componentId = item->data(0, Qt::UserRole).toString();
+    if (componentId.isEmpty()) {
+        return;  // informative row (interconnect adapter), not a component
+    }
     emit componentDoubleClicked(componentId);  // For 2D drill-down
     emit zoomToComponentRequested(componentId);  // For 3D zoom
 }
@@ -147,7 +175,8 @@ void HierarchyPanel::onItemDoubleClicked(QTreeWidgetItem* item, int /*column*/)
 void HierarchyPanel::onCustomContextMenu(const QPoint& pos)
 {
     QTreeWidgetItem* item = m_tree->itemAt(pos);
-    if (item && item->parent() && m_assembly) {
+    if (item && item->parent() && m_assembly &&
+        !item->data(0, Qt::UserRole).toString().isEmpty()) {
         QString componentId = item->data(0, Qt::UserRole).toString();
         Component* comp = m_assembly->component(componentId.toStdString());
 
@@ -200,6 +229,9 @@ void HierarchyPanel::onItemChanged(QTreeWidgetItem* item, int column)
     }
 
     QString componentId = item->data(0, Qt::UserRole).toString();
+    if (componentId.isEmpty()) {
+        return;  // informative row (interconnect adapter), not a component
+    }
     bool visible = (item->checkState(0) == Qt::Checked);
     emit componentVisibilityChanged(componentId, visible);
 }
