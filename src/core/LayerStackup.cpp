@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <yaml-cpp/yaml.h>
+#include <QtGlobal>
 
 namespace chiplet {
 
@@ -154,7 +155,18 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
             std::string name = it->first.as<std::string>();
             YAML::Node node = it->second;
 
-            if (!node.IsMap()) continue;
+            if (!node.IsMap()) {
+                // Scalar metadata keys, not layers (see the accessors'
+                // documentation in LayerStackup.h). Unknown scalars are
+                // ignored, as before.
+                if (name == "z_reference") {
+                    m_zReference = node.as<std::string>("");
+                } else if (name == "attachment_surface_z") {
+                    m_attachmentSurfaceZ = node.as<double>(0.0);
+                    m_hasAttachmentSurfaceZ = true;
+                }
+                continue;
+            }
 
             int index = node["index"].as<int>(0);
             int type = node["type"].as<int>(0);
@@ -169,6 +181,62 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
     } catch (const std::exception&) {
         return false;
     }
+}
+
+LayerStackup LayerStackup::loadInterconnectFragment(const std::string& adapter,
+                                                    std::string* resolvedPath)
+{
+    if (resolvedPath) resolvedPath->clear();
+    LayerStackup frag;
+    if (adapter.empty()) return frag;
+
+    const std::string path =
+        BlenderGDSConfigs::interconnectStackupFragmentPath(adapter);
+    if (path.empty()) return frag;
+    if (resolvedPath) *resolvedPath = path;
+
+    if (!frag.loadFromBlenderGDS(path)) {
+        frag.clear();
+    }
+    return frag;
+}
+
+size_t LayerStackup::mergeInterconnectFragment(const std::string& adapter)
+{
+    std::string path;
+    LayerStackup frag = loadInterconnectFragment(adapter, &path);
+    if (frag.empty()) return 0;
+
+    double offset = 0.0;
+    if (frag.zReference() == "attachment_surface") {
+        if (m_hasAttachmentSurfaceZ) {
+            offset = m_attachmentSurfaceZ;
+        } else {
+            offset = totalHeight();
+            qWarning("Interconnect fragment %s is relative to the attachment "
+                     "surface, but the base stackup does not declare "
+                     "attachment_surface_z; using totalHeight()=%.2f um as a "
+                     "best-effort surface (die seating may be approximate)",
+                     path.c_str(), offset);
+        }
+    } else if (!frag.zReference().empty()) {
+        qWarning("Interconnect fragment %s declares unknown z_reference "
+                 "'%s'; treating its z values as absolute",
+                 path.c_str(), frag.zReference().c_str());
+    } else {
+        qWarning("Interconnect fragment %s carries absolute z values "
+                 "(deprecated: couples the method to one interposer's BEOL "
+                 "height). Add 'z_reference: attachment_surface' and rebase "
+                 "z to 0 so the method seats on any interposer",
+                 path.c_str());
+    }
+
+    size_t merged = 0;
+    for (const auto& l : frag.sortedLayers()) {
+        addLayer(l.layer, l.datatype, l.z_bottom + offset, l.thickness, l.name);
+        ++merged;
+    }
+    return merged;
 }
 
 // LayerColorScheme implementation

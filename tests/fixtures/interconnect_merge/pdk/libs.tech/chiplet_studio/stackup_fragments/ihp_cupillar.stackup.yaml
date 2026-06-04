@@ -2,13 +2,15 @@
 # are FIXTURE-LOCAL (Option-2-era heights kept so the 61.83 assertion stays
 # stable); the test pins the merge MECHANISM, not the live PDK's numbers --
 # the real interconnect_pdk fragment carries canonical Option 1 (28+16).
+# Relative format: z from the base stackup's declared attachment surface.
+z_reference: attachment_surface
 CuPillar:
   index: 500
   type: 35
-  z: 13.83
+  z: 0.00
   height: 32.00
 SnAgCap:
   index: 501
   type: 35
-  z: 45.83
+  z: 32.00
   height: 16.00

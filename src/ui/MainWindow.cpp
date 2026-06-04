@@ -241,11 +241,11 @@ void MainWindow::setupPanels()
                 if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
                     return;
                 }
-                const std::string frag =
-                    BlenderGDSConfigs::interconnectStackupFragmentPath(
-                        m_assembly->interconnect_adapter());
-                LayerStackup ic;
-                if (frag.empty() || !ic.loadFromBlenderGDS(frag)) {
+                // Raw fragment load: only the layer/datatype keys matter
+                // here, the z reference frame is irrelevant for show/hide.
+                LayerStackup ic = LayerStackup::loadInterconnectFragment(
+                    m_assembly->interconnect_adapter());
+                if (ic.empty()) {
                     return;
                 }
                 for (const auto& comp : m_assembly->components()) {

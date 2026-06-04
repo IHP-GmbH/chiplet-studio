@@ -1304,16 +1304,13 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
                 }
             }
         }
-        if (interposerTech && !m_assembly->interconnect_adapter().empty()) {
-            const std::string frag = BlenderGDSConfigs::interconnectStackupFragmentPath(
+        if (interposerTech) {
+            // Shared helper = same fragment resolution and z-reference offset
+            // as Assembly::calculate_component_z; the two cannot diverge.
+            const size_t merged = stackup.mergeInterconnectFragment(
                 m_assembly->interconnect_adapter());
-            LayerStackup ic;
-            if (!frag.empty() && ic.loadFromBlenderGDS(frag)) {
-                for (const auto& l : ic.sortedLayers()) {
-                    stackup.addLayer(l.layer, l.datatype, l.z_bottom, l.thickness, l.name);
-                }
-                qDebug() << "Merged interconnect fragment" << QString::fromStdString(frag)
-                         << "(" << ic.layerCount() << "body layers) for adapter"
+            if (merged > 0) {
+                qDebug() << "Merged" << merged << "interconnect body layers for adapter"
                          << QString::fromStdString(m_assembly->interconnect_adapter())
                          << "into interposer tech" << QString::fromStdString(techId);
             }

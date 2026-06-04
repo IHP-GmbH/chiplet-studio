@@ -752,9 +752,10 @@ TEST(InterconnectMergeZ, DieZSourcedFromFragmentAfterBodyRemoval)
     ASSERT_NE(assembly, nullptr);
     EXPECT_EQ(assembly->interconnect_adapter(), "ihp_cupillar");
 
-    // CuPillar z_bottom (13.83, from the merged fragment) + stack height
-    // (32 + 16 = 48) = 61.83. If the fragment did not merge, CuPillar would be
-    // absent from the body-less interposer stackup and the result would differ.
+    // CuPillar z_bottom (relative fragment 0.0 + declared
+    // attachment_surface_z 13.83) + stack height (32 + 16 = 48) = 61.83.
+    // If the fragment did not merge, CuPillar would be absent from the
+    // body-less interposer stackup and the result would differ.
     EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.01);
 
     // Negative control: without the adapter there is no merge, CuPillar is not
@@ -763,6 +764,73 @@ TEST(InterconnectMergeZ, DieZSourcedFromFragmentAfterBodyRemoval)
     EXPECT_NEAR(assembly->calculate_component_z("die_a"), 248.0, 0.01);
 
     // Restore global state so later tests see the default configs resolution.
+    unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
+}
+
+// ---------------------------------------------------------------------
+// F1 decoupling regression (interconnect_render_contract.md, L1): the
+// fragment is method-pure (z relative to the attachment surface), so the
+// SAME fragment must seat dies per whatever surface the interposer stackup
+// declares. Same .chiplet, same PDK fragment, different interposer
+// declaration -> different (correct) die z. Before F1 the fragment baked
+// 13.83 and this was impossible without a fragment per interposer.
+// ---------------------------------------------------------------------
+TEST(InterconnectMergeZ, RelativeFragmentSeatsOnDeclaredSurface)
+{
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs_alt");
+    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk").c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/merge_z.chiplet");
+    ASSERT_NE(assembly, nullptr);
+
+    // configs_alt declares attachment_surface_z 10.0: die z = 10 + 48 = 58.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 58.0, 0.01);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
+}
+
+// Markerless fragments keep the legacy absolute interpretation (deprecation
+// path): z is taken as-is, the base stackup's declared surface is ignored.
+TEST(InterconnectMergeZ, LegacyAbsoluteFragmentKeepsAbsoluteZ)
+{
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs");
+    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk_legacy").c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/merge_z.chiplet");
+    ASSERT_NE(assembly, nullptr);
+
+    // Legacy fragment bakes CuPillar z=13.83 absolute: 13.83 + 48 = 61.83,
+    // even though the base also declares attachment_surface_z (13.83 here;
+    // absolute values win for markerless fragments by definition).
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.01);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
+}
+
+// A relative fragment on a base stackup that does NOT declare its surface
+// falls back to totalHeight() (loud, best-effort) instead of seating at 0.
+TEST(InterconnectMergeZ, RelativeFragmentWithoutDeclaredSurfaceFallsBack)
+{
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs_nosurface");
+    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk").c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/merge_z.chiplet");
+    ASSERT_NE(assembly, nullptr);
+
+    // totalHeight() of the body-less base = Passiv top 15.73; 15.73 + 48 =
+    // 63.73. Approximate (the pad top is 13.83) but far better than z=48,
+    // and the warning names the missing key.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 63.73, 0.01);
+
     unsetenv("INTERCONNECT_PDK_ROOT");
     BlenderGDSConfigs::setConfigsDir("");
 }

@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 #include "core/LayerStackup.h"
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 
 using namespace chiplet;
@@ -12,6 +14,13 @@ using namespace chiplet;
 static bool fileExists(const std::string& path) {
     std::ifstream f(path);
     return f.good();
+}
+
+// Write a YAML file, creating parent directories
+static void writeYaml(const std::filesystem::path& path, const std::string& content) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path);
+    out << content;
 }
 
 // BlenderGDS stackup loading tests
@@ -135,4 +144,156 @@ TEST(BlenderGDSConfigs, UnknownTechReturnsEmpty) {
 
     path = BlenderGDSConfigs::colorSchemePath("unknown_tech_xyz");
     EXPECT_TRUE(path.empty());
+}
+
+// ---------------------------------------------------------------------
+// Scalar metadata keys (z_reference / attachment_surface_z) and the shared
+// interconnect-fragment merge helper (interconnect_render_contract.md, L1).
+// Hermetic: temp-file YAMLs plus a fake INTERCONNECT_PDK_ROOT tree; no
+// dependency on the real configs or sibling checkouts.
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Lays out a fake interconnect PDK with relative ("unit_rel") and legacy
+// absolute ("unit_abs") fragments, returning the tree root.
+std::filesystem::path makeFragmentTree() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "chiplet_lsu_frag_merge";
+    fs::remove_all(root);
+    const fs::path frags =
+        root / "libs.tech" / "chiplet_studio" / "stackup_fragments";
+    writeYaml(frags / "unit_rel.stackup.yaml",
+              "z_reference: attachment_surface\n"
+              "Body:\n  index: 500\n  type: 35\n  z: 0.0\n  height: 10.0\n");
+    writeYaml(frags / "unit_abs.stackup.yaml",
+              "Body:\n  index: 500\n  type: 35\n  z: 7.5\n  height: 10.0\n");
+    return root;
+}
+
+} // namespace
+
+TEST(BlenderGDSStackupMetadata, ParsesScalarKeysAndClearResetsThem) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "chiplet_lsu_meta";
+    fs::remove_all(dir);
+
+    writeYaml(dir / "with_meta.yaml",
+              "z_reference: attachment_surface\n"
+              "attachment_surface_z: 13.83\n"
+              "Pad:\n  index: 134\n  type: 0\n  z: 10.83\n  height: 3.0\n");
+    writeYaml(dir / "plain.yaml",
+              "Pad:\n  index: 134\n  type: 0\n  z: 10.83\n  height: 3.0\n");
+
+    LayerStackup s;
+    ASSERT_TRUE(s.loadFromBlenderGDS((dir / "with_meta.yaml").string()));
+    EXPECT_EQ(s.zReference(), "attachment_surface");
+    ASSERT_TRUE(s.hasAttachmentSurfaceZ());
+    EXPECT_NEAR(s.attachmentSurfaceZ(), 13.83, 1e-9);
+    // The scalar keys must not leak into the layer map.
+    EXPECT_EQ(s.layerCount(), 1u);
+
+    // Loading a file without the keys (load clears first) resets them.
+    ASSERT_TRUE(s.loadFromBlenderGDS((dir / "plain.yaml").string()));
+    EXPECT_TRUE(s.zReference().empty());
+    EXPECT_FALSE(s.hasAttachmentSurfaceZ());
+}
+
+TEST(InterconnectFragmentMerge, RelativeFragmentOffsetByDeclaredSurface) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    // Declared surface (4.0) deliberately differs from totalHeight() (5.0):
+    // the declaration must win for relative fragments.
+    LayerStackup base;
+    {
+        namespace fs = std::filesystem;
+        const fs::path baseYaml =
+            fs::temp_directory_path() / "chiplet_lsu_frag_merge" / "base.yaml";
+        writeYaml(baseYaml,
+                  "attachment_surface_z: 4.0\n"
+                  "Pad:\n  index: 134\n  type: 0\n  z: 2.0\n  height: 3.0\n");
+        ASSERT_TRUE(base.loadFromBlenderGDS(baseYaml.string()));
+    }
+
+    EXPECT_EQ(base.mergeInterconnectFragment("unit_rel"), 1u);
+    const LayerElevation* body = base.find(500, 35);
+    ASSERT_NE(body, nullptr);
+    EXPECT_NEAR(body->z_bottom, 4.0, 1e-9);
+    EXPECT_NEAR(body->thickness, 10.0, 1e-9);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+TEST(InterconnectFragmentMerge, RelativeFragmentFallsBackToTotalHeight) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    // No attachment_surface_z declared: best-effort totalHeight() = 5.0
+    // (warned about), instead of seating the body at z = 0.
+    LayerStackup base;
+    base.addLayer(134, 0, 2.0, 3.0, "Pad");
+
+    EXPECT_EQ(base.mergeInterconnectFragment("unit_rel"), 1u);
+    const LayerElevation* body = base.find(500, 35);
+    ASSERT_NE(body, nullptr);
+    EXPECT_NEAR(body->z_bottom, 5.0, 1e-9);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+TEST(InterconnectFragmentMerge, LegacyAbsoluteFragmentIgnoresDeclaredSurface) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    // Even with a declared surface, a markerless fragment keeps its
+    // absolute z (deprecation path).
+    LayerStackup base;
+    {
+        namespace fs = std::filesystem;
+        const fs::path baseYaml =
+            fs::temp_directory_path() / "chiplet_lsu_frag_merge" / "base_abs.yaml";
+        writeYaml(baseYaml,
+                  "attachment_surface_z: 4.0\n"
+                  "Pad:\n  index: 134\n  type: 0\n  z: 2.0\n  height: 3.0\n");
+        ASSERT_TRUE(base.loadFromBlenderGDS(baseYaml.string()));
+    }
+
+    EXPECT_EQ(base.mergeInterconnectFragment("unit_abs"), 1u);
+    const LayerElevation* body = base.find(500, 35);
+    ASSERT_NE(body, nullptr);
+    EXPECT_NEAR(body->z_bottom, 7.5, 1e-9);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+TEST(InterconnectFragmentMerge, UnresolvableAdapterMergesNothing) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    LayerStackup base;
+    base.addLayer(134, 0, 2.0, 3.0, "Pad");
+
+    EXPECT_EQ(base.mergeInterconnectFragment("no_such_adapter_xyz"), 0u);
+    EXPECT_EQ(base.mergeInterconnectFragment(""), 0u);
+    EXPECT_EQ(base.layerCount(), 1u);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+TEST(InterconnectFragmentMerge, RawLoaderKeepsDeclaredZAndReportsPath) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    std::string path;
+    LayerStackup frag = LayerStackup::loadInterconnectFragment("unit_rel", &path);
+    ASSERT_FALSE(frag.empty());
+    EXPECT_NE(path.find("unit_rel.stackup.yaml"), std::string::npos);
+    EXPECT_EQ(frag.zReference(), "attachment_surface");
+    const LayerElevation* body = frag.find(500, 35);
+    ASSERT_NE(body, nullptr);
+    // No offset applied by the raw loader.
+    EXPECT_NEAR(body->z_bottom, 0.0, 1e-9);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
 }

@@ -13,8 +13,8 @@ Three parties contribute, each through its own artifact:
 
 | Party | Artifact | Declares |
 |---|---|---|
-| interposer PDK | technology stackup YAML | the substrate layers and (target state) the **attachment surface z** |
-| interconnect PDK | `libs.tech/chiplet_studio/stackup_fragments/<adapter>.stackup.yaml` | the method's 3D **body layers** (GDS layer/datatype, heights) |
+| interposer PDK | technology stackup YAML | the substrate layers and the **attachment surface z** (`attachment_surface_z`) |
+| interconnect PDK | `libs.tech/chiplet_studio/stackup_fragments/<adapter>.stackup.yaml` | the method's 3D **body layers** (GDS layer/datatype, heights), z relative to the attachment surface (`z_reference: attachment_surface`) |
 | `.chiplet` | `interconnect:` block | the active **adapter** + the method's PDK-backed technology identity |
 
 At load time the studio registers the interconnect method as a Technology
@@ -23,8 +23,9 @@ with its own layer properties and provenance.
 
 At render and z-calculation time the method's stackup fragment is merged
 into the **interposer technology's** stackup — and only that one. The
-merge is additive and idempotent (`addLayer` overwrites by layer key).
-Two consumers perform it and must stay in lockstep:
+merge is additive and idempotent (`addLayer` overwrites by layer key) and
+is implemented once — `LayerStackup::mergeInterconnectFragment` — which
+both consumers call, so their views of the body layers cannot diverge:
 
 - `AssemblyView::buildLayerGeometry` — gives the body layers z/height in
   the interposer component's mesh.
@@ -54,23 +55,21 @@ other technology corrupts flip-chip rendering: a FaceDown die's stackup
 `totalHeight()` is its z-inversion reference, and inflating it shifts
 every die layer upward by the body-stack height.
 
-## Known couplings and their target state
+## Known couplings and their state
 
-**L1 — Fragment z is absolute today (couples method data to one
-interposer).** Fragments currently encode the body base at the IntM4TM2
-attachment surface (z = 13.83 um). That mixes method-owned data (body
-heights) with interposer-owned data (surface height), and it is
-load-bearing in both consumers. Consequence: a second interposer PDK with
-a different BEOL height would require one fragment per
-(method x interposer) pair, or dies would seat at the wrong z.
-
-*Target:* fragments declare `z_reference: attachment_surface` and use
-z values relative to 0; the interposer stackup YAML declares
-`attachment_surface_z` (for IntM4TM2: 13.83, the Passiv top); consumers
-offset at merge time. Fragments without the marker keep the legacy
-absolute interpretation (with a deprecation warning). Note that the
-attachment surface is a declared value, not `max_z` of the stackup —
-passivation geometry can exceed the real mounting surface.
+**L1 — Fragment z is relative to the attachment surface (resolved).**
+Fragments declare `z_reference: attachment_surface` and use z values
+relative to 0, so they carry method-owned data only (body heights); the
+interposer stackup YAML declares `attachment_surface_z` (for IntM4TM2:
+13.83, the exposed pad top — TopMetal2 top at the passivation opening).
+The shared merge helper applies the offset, so the same fragment seats
+dies correctly on any interposer that declares its surface. Degraded
+paths are loud, never silent: a fragment without the marker keeps the
+legacy absolute interpretation (deprecation warning), and a base stackup
+without the declaration gets a best-effort `totalHeight()` offset
+(warning names the missing key). Note that the attachment surface is a
+declared value, not `max_z` of the stackup — passivation geometry rises
+above the real mounting surface.
 
 **L2 — The adapter is an assembly-level singleton.** Each die carries its
 own `connection:` (so per-die seating is already correct for mixed

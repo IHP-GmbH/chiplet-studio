@@ -9,6 +9,13 @@
 # interconnect PDK and merged in at render time per the assembly's
 # interconnect.adapter. See interconnect_pdk/libs.tech/chiplet_studio/stackup_fragments/.
 
+# The surface this interposer offers to interconnect bodies: the exposed pad
+# top (TopMetal2 top, through the passivation opening). Fragments declaring
+# z_reference: attachment_surface are offset by this value at merge time.
+# NOT max_z: the passivation around the opening (Passiv top, 15.73) rises
+# above the real mounting surface.
+attachment_surface_z: 13.83
+
 # --- Si bulk substrate (visualized at 50 um -- aesthetic, NOT physical) ---
 # True wafer is 750 um per SG13G2 spec. We render a much thinner slab so
 # RDL routing, cu-pillars, and chiplets sitting on top remain visible at
