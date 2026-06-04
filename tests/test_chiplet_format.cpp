@@ -6,8 +6,10 @@
 #include <filesystem>
 #include <cstdlib>
 #include <fstream>
+#include <yaml-cpp/yaml.h>
 #include "formats/ChipletFormat.h"
 #include "core/LayerStackup.h"
+#include "core/Technology.h"
 
 namespace chiplet {
 namespace {
@@ -237,6 +239,62 @@ TEST(ChipletFormat, NoInterconnectAdapterIsEmpty)
     auto assembly = format.load(fixturePath("with_connection_stacks.chiplet"));
     ASSERT_NE(assembly, nullptr);
     EXPECT_TRUE(assembly->interconnect_adapter().empty());
+}
+
+// The interconnect.technology subblock registers the method as a PDK-backed
+// technology, same identity scheme as the die/interposer PDKs.
+TEST(ChipletFormat, LoadInterconnectTechnology)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_interconnect_adapter.chiplet"));
+
+    ASSERT_NE(assembly, nullptr);
+    Technology* tech = assembly->technology("vendorx_microbump");
+    ASSERT_NE(tech, nullptr);
+    EXPECT_EQ(tech->description(),
+              "Chiplet attachment (VendorX Microsystems (DEMO / non-IHP))");
+    // Relative lyp reference resolved against the fixture dir
+    EXPECT_NE(tech->layer_properties_path().find("interconnect_test.lyp"),
+              std::string::npos);
+    // Regular technologies unaffected
+    EXPECT_NE(assembly->technology("test_tech"), nullptr);
+}
+
+// Round-trip: the interconnect technology is written under interconnect:
+// (its canonical home), never duplicated into the technologies: map, and
+// the whole block survives a save/load cycle (the writer used to drop it).
+TEST(ChipletFormat, RoundTripInterconnectTechnology)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_interconnect_adapter.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+
+    std::string tempPath = "test_interconnect_tech_output.chiplet";
+    EXPECT_NO_THROW(format.save(*assembly, tempPath));
+
+    // Canonical placement in the written YAML
+    YAML::Node doc = YAML::LoadFile(tempPath);
+    ASSERT_TRUE(doc["interconnect"]);
+    EXPECT_EQ(doc["interconnect"]["adapter"].as<std::string>(),
+              "vendorx_microbump");
+    ASSERT_TRUE(doc["interconnect"]["technology"]);
+    EXPECT_TRUE(doc["interconnect"]["technology"]["layer_properties"]);
+    ASSERT_TRUE(doc["technologies"]);
+    EXPECT_TRUE(doc["technologies"]["test_tech"]);
+    EXPECT_FALSE(doc["technologies"]["vendorx_microbump"]);
+
+    // Model state survives the reload
+    ChipletFormat format2;
+    auto assembly2 = format2.load(tempPath);
+    ASSERT_NE(assembly2, nullptr);
+    EXPECT_EQ(assembly2->interconnect_adapter(), "vendorx_microbump");
+    Technology* tech = assembly2->technology("vendorx_microbump");
+    ASSERT_NE(tech, nullptr);
+    EXPECT_EQ(tech->description(),
+              "Chiplet attachment (VendorX Microsystems (DEMO / non-IHP))");
+    EXPECT_NE(assembly2->technology("test_tech"), nullptr);
+
+    std::filesystem::remove(tempPath);
 }
 
 // Test auto-z calculation from interposer thickness + connection stack

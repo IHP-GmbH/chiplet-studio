@@ -65,6 +65,13 @@ public slots:
     void setAssembly(Assembly* assembly);
 
     /**
+     * Show the assembly-level interconnect method (not a component): its
+     * adapter, the interconnect PDK technology identity (description, .lyp)
+     * and the resolved 3D stackup fragment with the body layers.
+     */
+    void showInterconnect();
+
+    /**
      * Clear selection and reset all fields
      */
     void clearSelection();

@@ -178,8 +178,18 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
     // bodies are merged into the stackup during auto_calculate_z. Mirrors the
     // interposer adapter; absent = interposer-only (no interconnect bodies).
     if (root["interconnect"] && root["interconnect"]["adapter"]) {
-        assembly->set_interconnect_adapter(
-            root["interconnect"]["adapter"].as<std::string>());
+        std::string adapter = root["interconnect"]["adapter"].as<std::string>();
+        assembly->set_interconnect_adapter(adapter);
+
+        // Optional PDK-backed identity of the method (interconnect PDK lyp +
+        // provenance). Registered like any other technology so viewers list
+        // the interconnect alongside the die/interposer PDKs instead of
+        // folding it into the interposer. A same-id entry already declared
+        // under technologies: wins over this derived subblock.
+        if (root["interconnect"]["technology"] && !assembly->technology(adapter)) {
+            assembly->add_technology(
+                parse_technology_entry(adapter, root["interconnect"]["technology"]));
+        }
     }
 
     // Auto-calculate z for components with connection stacks and z == 0.0
@@ -252,40 +262,44 @@ void ChipletFormat::parse_technologies(const YAML::Node& node, Assembly& assembl
 
     for (const auto& item : node) {
         std::string techId = item.first.as<std::string>();
-        const YAML::Node& techNode = item.second;
-
-        auto tech = std::make_unique<Technology>(techId);
-
-        if (techNode["description"]) {
-            tech->set_description(techNode["description"].as<std::string>());
-        }
-
-        if (techNode["layer_properties"]) {
-            std::string lpPath = techNode["layer_properties"].as<std::string>();
-            std::string resolvedLypPath = resolve_path(lpPath);
-            tech->set_layer_properties_path(resolvedLypPath);
-
-            // Auto-load techfile based on layer_properties path
-            // If layer_properties is "pdks/ihp-sg13g2/sg13g2.lyp"
-            // Try loading "pdks/ihp-sg13g2/techfile/sg13g2.txt"
-            std::filesystem::path lypPath(resolvedLypPath);
-            std::string stem = lypPath.stem().string();  // "sg13g2"
-            std::filesystem::path parent = lypPath.parent_path();  // "pdks/ihp-sg13g2"
-            std::filesystem::path techfile = parent / "techfile" / (stem + ".txt");
-
-            if (std::filesystem::exists(techfile)) {
-                tech->load_process_def(techfile.string());
-            }
-        }
-
-        if (techNode["dbu"]) {
-            tech->set_dbu(techNode["dbu"].as<double>());
-        }
-
-        // stackup is skipped for now (future extension)
-
-        assembly.add_technology(std::move(tech));
+        assembly.add_technology(parse_technology_entry(techId, item.second));
     }
+}
+
+std::unique_ptr<Technology> ChipletFormat::parse_technology_entry(
+    const string_type& techId, const YAML::Node& techNode)
+{
+    auto tech = std::make_unique<Technology>(techId);
+
+    if (techNode["description"]) {
+        tech->set_description(techNode["description"].as<std::string>());
+    }
+
+    if (techNode["layer_properties"]) {
+        std::string lpPath = techNode["layer_properties"].as<std::string>();
+        std::string resolvedLypPath = resolve_path(lpPath);
+        tech->set_layer_properties_path(resolvedLypPath);
+
+        // Auto-load techfile based on layer_properties path
+        // If layer_properties is "pdks/ihp-sg13g2/sg13g2.lyp"
+        // Try loading "pdks/ihp-sg13g2/techfile/sg13g2.txt"
+        std::filesystem::path lypPath(resolvedLypPath);
+        std::string stem = lypPath.stem().string();  // "sg13g2"
+        std::filesystem::path parent = lypPath.parent_path();  // "pdks/ihp-sg13g2"
+        std::filesystem::path techfile = parent / "techfile" / (stem + ".txt");
+
+        if (std::filesystem::exists(techfile)) {
+            tech->load_process_def(techfile.string());
+        }
+    }
+
+    if (techNode["dbu"]) {
+        tech->set_dbu(techNode["dbu"].as<double>());
+    }
+
+    // stackup is skipped for now (future extension)
+
+    return tech;
 }
 
 void ChipletFormat::parse_components(const YAML::Node& node, Assembly& assembly)
@@ -687,6 +701,22 @@ void ChipletFormat::auto_calculate_z(Assembly& assembly)
     }
 }
 
+// Shared field emission for a technology entry (used by the technologies:
+// map and the interconnect: technology subblock).
+static void emit_technology_fields(YAML::Emitter& out, const Technology& tech)
+{
+    if (!tech.description().empty()) {
+        out << YAML::Key << "description" << YAML::Value << tech.description();
+    }
+
+    if (!tech.layer_properties_path().empty()) {
+        out << YAML::Key << "layer_properties" << YAML::Value
+            << tech.layer_properties_path();
+    }
+
+    out << YAML::Key << "dbu" << YAML::Value << tech.dbu();
+}
+
 void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 {
     YAML::Emitter out;
@@ -719,23 +749,41 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     }
     out << YAML::EndMap;
 
-    // Technologies
-    if (!assembly.technologies().empty()) {
+    // Technologies. The interconnect adapter's technology (if registered) is
+    // emitted under the interconnect: block below -- its canonical home --
+    // not in this map.
+    const std::string& icAdapter = assembly.interconnect_adapter();
+    bool haveComponentTech = false;
+    for (const auto& tech : assembly.technologies()) {
+        if (icAdapter.empty() || tech->id() != icAdapter) {
+            haveComponentTech = true;
+            break;
+        }
+    }
+    if (haveComponentTech) {
         out << YAML::Key << "technologies" << YAML::Value << YAML::BeginMap;
 
         for (const auto& tech : assembly.technologies()) {
+            if (!icAdapter.empty() && tech->id() == icAdapter) {
+                continue;
+            }
             out << YAML::Key << tech->id() << YAML::Value << YAML::BeginMap;
+            emit_technology_fields(out, *tech);
+            out << YAML::EndMap;
+        }
 
-            if (!tech->description().empty()) {
-                out << YAML::Key << "description" << YAML::Value << tech->description();
-            }
+        out << YAML::EndMap;
+    }
 
-            if (!tech->layer_properties_path().empty()) {
-                out << YAML::Key << "layer_properties" << YAML::Value << tech->layer_properties_path();
-            }
+    // Interconnect (assembly-level bumping method + its PDK-backed identity)
+    if (!icAdapter.empty()) {
+        out << YAML::Key << "interconnect" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "adapter" << YAML::Value << icAdapter;
 
-            out << YAML::Key << "dbu" << YAML::Value << tech->dbu();
-
+        Technology* ictech = assembly.technology(icAdapter);
+        if (ictech) {
+            out << YAML::Key << "technology" << YAML::Value << YAML::BeginMap;
+            emit_technology_fields(out, *ictech);
             out << YAML::EndMap;
         }
 

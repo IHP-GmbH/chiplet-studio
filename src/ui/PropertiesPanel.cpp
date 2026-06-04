@@ -8,6 +8,8 @@
 #include "PropertiesPanel.h"
 #include "UnitConverter.h"
 #include "core/Assembly.h"
+#include "core/Technology.h"
+#include "core/LayerStackup.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -218,6 +220,59 @@ void PropertiesPanel::setAssembly(Assembly* assembly)
 void PropertiesPanel::setLayerVisibilityResolver(std::function<bool(const QString&, int, int)> resolver)
 {
     m_layerVisibilityResolver = std::move(resolver);
+}
+
+void PropertiesPanel::showInterconnect()
+{
+    clearSelection();
+
+    if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
+        return;
+    }
+    const std::string& adapter = m_assembly->interconnect_adapter();
+
+    // Component group doubles as the identity card: the interconnect is
+    // assembly-level (no position/dimensions/layout of its own -- its 3D
+    // bodies merge into the interposer's layer render).
+    m_idLabel->setText("interconnect");
+    m_typeLabel->setText("Interconnect");
+    m_techLabel->setText(QString::fromStdString(adapter));
+
+    // Provenance rows in the metadata tree: the interconnect PDK identity
+    // (registered Technology) and the resolved 3D stackup fragment.
+    auto addRow = [this](const QString& key, const QString& value) {
+        QTreeWidgetItem* item = new QTreeWidgetItem();
+        item->setText(0, key);
+        item->setText(1, value);
+        item->setToolTip(1, value);
+        m_metadataTree->addTopLevelItem(item);
+    };
+
+    Technology* tech = m_assembly->technology(adapter);
+    if (tech && !tech->description().empty()) {
+        addRow("description", QString::fromStdString(tech->description()));
+    }
+    if (tech && !tech->layer_properties_path().empty()) {
+        addRow("layer_properties",
+               QString::fromStdString(tech->layer_properties_path()));
+    }
+
+    const std::string frag =
+        BlenderGDSConfigs::interconnectStackupFragmentPath(adapter);
+    if (!frag.empty()) {
+        addRow("stackup_fragment", QString::fromStdString(frag));
+        LayerStackup ic;
+        if (ic.loadFromBlenderGDS(frag)) {
+            for (const auto& l : ic.sortedLayers()) {
+                addRow(QString::fromStdString("body: " + l.name),
+                       QString("%1/%2  z %3 um  h %4 um")
+                           .arg(l.layer).arg(l.datatype)
+                           .arg(l.z_bottom, 0, 'f', 2)
+                           .arg(l.thickness, 0, 'f', 2));
+            }
+        }
+    }
+    m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
 }
 
 void PropertiesPanel::clearSelection()
