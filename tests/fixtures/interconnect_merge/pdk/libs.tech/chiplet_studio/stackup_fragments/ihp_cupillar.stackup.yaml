@@ -1,5 +1,7 @@
-# Hermetic interconnect fragment for the InterconnectMergeZ test (mirrors the
-# real interconnect_pdk ihp_cupillar fragment values).
+# Hermetic interconnect fragment for the InterconnectMergeZ test. The values
+# are FIXTURE-LOCAL (Option-2-era heights kept so the 61.83 assertion stays
+# stable); the test pins the merge MECHANISM, not the live PDK's numbers --
+# the real interconnect_pdk fragment carries canonical Option 1 (28+16).
 CuPillar:
   index: 500
   type: 35
