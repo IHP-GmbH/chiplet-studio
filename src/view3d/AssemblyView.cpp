@@ -1259,10 +1259,8 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
                 qDebug() << "Using predefined SG13G2 stackup for" << QString::fromStdString(techId)
                          << "with" << stackup.layerCount() << "layers";
             }
-            else if (techId.find("interposer") != std::string::npos ||
-                     techId.find("Interposer") != std::string::npos ||
-                     techId.find("rdl") != std::string::npos ||
-                     techId.find("RDL") != std::string::npos) {
+            else if (techId.find("intm4tm2") != std::string::npos ||
+                     techId.find("IntM4TM2") != std::string::npos) {
                 stackup = Stackups::createInterposer();
                 usedStackup = true;
                 qDebug() << "Using predefined interposer stackup for" << QString::fromStdString(techId)

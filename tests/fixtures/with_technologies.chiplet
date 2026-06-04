@@ -12,7 +12,7 @@ technologies:
     layer_properties: "./tech/test.lyp"
     dbu: 0.001
 
-  interposer_tech:
+  intm4tm2:
     description: "Interposer technology"
     layer_properties: "./tech/interposer.lyp"
     dbu: 0.001

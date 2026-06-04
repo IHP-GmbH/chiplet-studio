@@ -7,7 +7,7 @@ assembly:
   io_technology: "wire_bond"
 
 technologies:
-  interposer_tech:
+  intm4tm2:
     description: "Interposer (TopMetal2 routing)"
     layer_properties: "./tech/test.lyp"
     dbu: 0.001
@@ -15,7 +15,7 @@ technologies:
 components:
   - id: interposer
     type: interposer
-    technology: interposer_tech
+    technology: intm4tm2
     dimensions: {width: 4000, height: 3000, thickness: 13.83}
     position: {x: 0, y: 0, z: 0}
     io_pads:
@@ -40,7 +40,7 @@ components:
 
   - id: U1
     type: die
-    technology: interposer_tech
+    technology: intm4tm2
     dimensions: {width: 1000, height: 1000, thickness: 100}
     position: {x: 0, y: 0, z: 14}
 
