@@ -85,11 +85,13 @@ pitch/spacing rules to its dies' pads (see the ADK adapter contract,
 "Per-method refinement"). Options of one family share GDS body layers,
 so a mixed-option union renders the taller body per shared layer,
 loudly — the per-layer render model can show one height per key; a truly
-per-die body render belongs to L3's mesh-group work. Remaining gap: the
-GDS generator draws the 3D body polygons of ONE method per export (the
-dialog's choice), so mixed-method assemblies render all bodies on that
-method's layers until per-die body generation has a data source in the
-board.
+per-die body render belongs to L3's mesh-group work. The board is the
+data source for the selection: each die footprint's `CONNECTION` field
+(exposed per die in the export dialog) names its method, and the GDS
+generator draws each die's body polygons with its own method's layers
+and diameter — mixed-method assemblies carry every method's bodies in
+one export. In the hierarchy, each die shows its method as a child row
+whose properties view gives the per-method fragment provenance.
 
 **L3 — Bodies inherit the interposer's render identity.** Being part of
 the interposer mesh, the bodies share its render mode and selection, and

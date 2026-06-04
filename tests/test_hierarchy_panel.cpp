@@ -10,6 +10,7 @@
 #include "core/Assembly.h"
 #include "core/Component.h"
 #include <QApplication>
+#include <QTreeWidget>
 
 namespace chiplet {
 namespace {
@@ -171,6 +172,89 @@ TEST_F(HierarchyPanelTest, IconsAreGenerated)
 
     // Panel should create icons without crashing
     // Full icon verification would require visual inspection
+}
+
+// =============================================================================
+// Per-die interconnect method child rows
+// =============================================================================
+
+QTreeWidgetItem* findComponentRow(QTreeWidget* tree, const QString& id)
+{
+    QTreeWidgetItem* root = tree->topLevelItem(0);
+    if (!root) {
+        return nullptr;
+    }
+    for (int i = 0; i < root->childCount(); ++i) {
+        if (root->child(i)->text(0) == id) {
+            return root->child(i);
+        }
+    }
+    return nullptr;
+}
+
+TEST_F(HierarchyPanelTest, DieConnectionGetsInterconnectChildRow)
+{
+    HierarchyPanel panel;
+    auto assembly = createTestAssembly();
+    assembly->component("die_a")->set_connection("cupillar_opt1");
+    panel.setAssembly(assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+    QTreeWidgetItem* dieA = findComponentRow(tree, "die_a");
+    QTreeWidgetItem* dieB = findComponentRow(tree, "die_b");
+    ASSERT_NE(dieA, nullptr);
+    ASSERT_NE(dieB, nullptr);
+
+    // die_a carries the method child; die_b (no connection) does not.
+    ASSERT_EQ(dieA->childCount(), 1);
+    QTreeWidgetItem* conn = dieA->child(0);
+    EXPECT_EQ(conn->text(0), QString("interconnect"));
+    EXPECT_EQ(conn->text(1), QString("Interconnect"));
+    EXPECT_EQ(conn->text(2), QString("cupillar_opt1"));
+    EXPECT_EQ(conn->data(0, Qt::UserRole + 1).toString(),
+              QString("interconnect-method"));
+    EXPECT_EQ(conn->data(0, Qt::UserRole + 2).toString(), QString("die_a"));
+    // Not a component row (component handlers skip it) and no visibility
+    // checkbox of its own (the assembly-level interconnect row owns that).
+    EXPECT_TRUE(conn->data(0, Qt::UserRole).toString().isEmpty());
+    EXPECT_EQ(dieB->childCount(), 0);
+}
+
+TEST_F(HierarchyPanelTest, PerDieChildRowsForMixedMethods)
+{
+    HierarchyPanel panel;
+    auto assembly = createTestAssembly();
+    assembly->component("die_a")->set_connection("cupillar_opt1");
+    assembly->component("die_b")->set_connection("vendorx_microbump");
+    panel.setAssembly(assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+    QTreeWidgetItem* dieA = findComponentRow(tree, "die_a");
+    QTreeWidgetItem* dieB = findComponentRow(tree, "die_b");
+    ASSERT_NE(dieA, nullptr);
+    ASSERT_NE(dieB, nullptr);
+    ASSERT_EQ(dieA->childCount(), 1);
+    ASSERT_EQ(dieB->childCount(), 1);
+    EXPECT_EQ(dieA->child(0)->text(2), QString("cupillar_opt1"));
+    EXPECT_EQ(dieB->child(0)->text(2), QString("vendorx_microbump"));
+}
+
+TEST_F(HierarchyPanelTest, InterposerNeverGetsMethodChildRow)
+{
+    HierarchyPanel panel;
+    auto assembly = createTestAssembly();
+    // Even a stray connection string on the interposer must not produce a
+    // method child (mirrors Assembly::interconnect_method_ids()).
+    assembly->component("interposer")->set_connection("cupillar_opt1");
+    panel.setAssembly(assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+    QTreeWidgetItem* interposer = findComponentRow(tree, "interposer");
+    ASSERT_NE(interposer, nullptr);
+    EXPECT_EQ(interposer->childCount(), 0);
 }
 
 } // namespace
