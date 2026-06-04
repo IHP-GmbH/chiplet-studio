@@ -14,8 +14,8 @@ Three parties contribute, each through its own artifact:
 | Party | Artifact | Declares |
 |---|---|---|
 | interposer PDK | technology stackup YAML | the substrate layers and the **attachment surface z** (`attachment_surface_z`) |
-| interconnect PDK | `libs.tech/chiplet_studio/stackup_fragments/<adapter>.stackup.yaml` | the method's 3D **body layers** (GDS layer/datatype, heights), z relative to the attachment surface (`z_reference: attachment_surface`) |
-| `.chiplet` | `interconnect:` block | the active **adapter** + the method's PDK-backed technology identity |
+| interconnect PDK | `libs.tech/chiplet_studio/stackup_fragments/<method>.stackup.yaml` | the method's 3D **body layers** (GDS layer/datatype, heights), z relative to the attachment surface (`z_reference: attachment_surface`) |
+| `.chiplet` | per-die `connection:` + `interconnect:` block | each die's **method** (= fragment key); the block carries the legacy/fallback **adapter** + the PDK-backed technology identity |
 
 At load time the studio registers the interconnect method as a Technology
 (keyed by the adapter id) so it appears alongside the die/interposer PDKs
@@ -46,9 +46,13 @@ The studio renders them as layers of the interposer mesh whose elevations
 come from the merged fragment. Any future generation flow must keep this
 invariant or the bodies will not render.
 
-**C2 — Fragment is keyed by adapter.** One fragment per interconnect
-adapter; the assembly's `interconnect.adapter` selects it. Methods
-sharing an adapter (e.g. cu-pillar options) share the fragment.
+**C2 — Fragment is keyed by method.** One fragment per interconnect
+method (`cupillar_opt2.stackup.yaml`, …); a die's `connection:` id
+selects it, so each option carries its own body heights. Adapter-keyed
+fragments remain in the PDK as deprecated family-default fallbacks.
+`LayerStackup::resolveInterconnectKeys` is the single policy point:
+method ids that resolve win; the adapter is used only when none does,
+and never overwrites resolved per-method values.
 
 **C3 — Merge is scoped to the interposer technology.** Merging into any
 other technology corrupts flip-chip rendering: a FaceDown die's stackup
@@ -71,18 +75,21 @@ without the declaration gets a best-effort `totalHeight()` offset
 declared value, not `max_z` of the stackup — passivation geometry rises
 above the real mounting surface.
 
-**L2 — The adapter is an assembly-level singleton.** Each die carries its
-own `connection:` (so per-die seating is already correct for mixed
-stacks), but one `interconnect.adapter` selects one fragment and one
-interconnect DRC deck for the whole assembly. An assembly mixing methods
-from different interconnect vendors renders and checks only one of them
-correctly.
-
-*Target:* per-interface interconnect. Render-side, merging the union of
-the fragments of all methods present is sound (body layer keys are
-disjoint by construction — the manifest schema enforces unique
-layer/datatype); format- and DRC-side this needs a schema extension and
-per-method rule scoping.
+**L2 — Method selection is per die (resolved).** One interconnect PDK
+per assembly; what varies per die is the method within it. The per-die
+`connection:` id selects the fragment: die seating merges only the die's
+own method fragment (exact per die), the render path merges the union of
+the methods present (body layer keys are disjoint across vendors by
+manifest construction), and the assembly DRC scopes each method's
+pitch/spacing rules to its dies' pads (see the ADK adapter contract,
+"Per-method refinement"). Options of one family share GDS body layers,
+so a mixed-option union renders the taller body per shared layer,
+loudly — the per-layer render model can show one height per key; a truly
+per-die body render belongs to L3's mesh-group work. Remaining gap: the
+GDS generator draws the 3D body polygons of ONE method per export (the
+dialog's choice), so mixed-method assemblies render all bodies on that
+method's layers until per-die body generation has a data source in the
+board.
 
 **L3 — Bodies inherit the interposer's render identity.** Being part of
 the interposer mesh, the bodies share its render mode and selection, and
