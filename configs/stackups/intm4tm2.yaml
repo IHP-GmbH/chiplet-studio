@@ -7,7 +7,7 @@
 #
 # 3D interconnect bodies (cu-pillar/solder-bump, layers 500+) are owned by the
 # interconnect PDK and merged in at render time per the assembly's
-# interconnect.adapter. See interconnect_pdk/config/stackup_fragments/.
+# interconnect.adapter. See interconnect_pdk/libs.tech/chiplet_studio/stackup_fragments/.
 
 # --- Si bulk substrate (visualized at 50 um -- aesthetic, NOT physical) ---
 # True wafer is 750 um per SG13G2 spec. We render a much thinner slab so
