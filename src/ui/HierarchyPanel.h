@@ -63,6 +63,13 @@ signals:
     void interconnectSelected();
 
     /**
+     * Emitted when the interconnect row's visibility checkbox is toggled.
+     * Show/hide applies to the method's 3D body layers, which render
+     * merged into the interposer component.
+     */
+    void interconnectVisibilityChanged(bool visible);
+
+    /**
      * Emitted when user double-clicks a component (for drill-down to 2D view)
      */
     void componentDoubleClicked(const QString& componentId);

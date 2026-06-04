@@ -108,23 +108,24 @@ void HierarchyPanel::refresh()
 
     // Row for the assembly-level interconnect adapter (the bumping method).
     // Not a component: its 3D bodies merge into the interposer's layer
-    // render, so it carries no geometry or visibility checkbox -- but the
-    // method is a PDK-backed technology of the assembly, so it is selectable
-    // and shows its provenance in the properties panel.
+    // render. It is selectable (provenance in the properties panel) and its
+    // checkbox shows/hides the method's body layers on the interposer.
     if (!m_assembly->interconnect_adapter().empty()) {
         QTreeWidgetItem* ic = new QTreeWidgetItem(root);
         ic->setText(0, "interconnect");
         ic->setText(1, "Interconnect");
         ic->setText(2, QString::fromStdString(m_assembly->interconnect_adapter()));
         ic->setText(3, "");
-        ic->setFlags(ic->flags() & ~Qt::ItemIsUserCheckable);
+        ic->setFlags(ic->flags() | Qt::ItemIsUserCheckable);
+        ic->setCheckState(0, Qt::Checked);
         QFont f = ic->font(0);
         f.setItalic(true);
         for (int col = 0; col < 4; ++col) {
             ic->setFont(col, f);
         }
         // No Qt::UserRole component id: the component handlers skip rows
-        // without one. The marker below routes clicks to interconnectSelected.
+        // without one. The marker below routes clicks/toggles to the
+        // interconnect signals.
         ic->setData(0, Qt::UserRole + 1, QString("interconnect"));
     }
 
@@ -237,11 +238,16 @@ void HierarchyPanel::onItemChanged(QTreeWidgetItem* item, int column)
         return;
     }
 
+    bool visible = (item->checkState(0) == Qt::Checked);
+
     QString componentId = item->data(0, Qt::UserRole).toString();
     if (componentId.isEmpty()) {
-        return;  // informative row (interconnect adapter), not a component
+        // Interconnect adapter row: toggle the method's body layers.
+        if (item->data(0, Qt::UserRole + 1).toString() == "interconnect") {
+            emit interconnectVisibilityChanged(visible);
+        }
+        return;
     }
-    bool visible = (item->checkState(0) == Qt::Checked);
     emit componentVisibilityChanged(componentId, visible);
 }
 
