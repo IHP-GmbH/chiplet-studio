@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# IHP SG13G2 Interposer stackup with cu-pillar connection stack
+# IHP 130-nm IntM4TM2 aluminum BEOL interposer stackup
 #
 # Based on SG13G2 process spec Rev 1.2 (BEOL thicknesses) and
-# SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 2 (cu-pillar dimensions).
+# SG13G2 Layout Rules Rev 2.1.
 #
 # 3D interconnect bodies (cu-pillar/solder-bump, layers 500+) are owned by the
 # interconnect PDK and merged in at render time per the assembly's

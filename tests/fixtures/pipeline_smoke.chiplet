@@ -3,9 +3,9 @@ assembly:
   name: pipeline_smoke
   units: um
 technologies:
-  interposer_tech:
+  intm4tm2:
     description: Imported from KiCad
-    layer_properties: ./interposer_ihp.lyp
+    layer_properties: ./intm4tm2.lyp
     dbu: 0.001
   sg13g2:
     description: Imported from KiCad
@@ -59,7 +59,7 @@ connection_stacks:
 components:
 - id: interposer
   type: interposer
-  technology: interposer_tech
+  technology: intm4tm2
   layout: ./interposer.gds
   top_cell: TOP
   dimensions:

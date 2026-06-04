@@ -46,7 +46,7 @@ TEST(ChipletFormat, LoadWithTechnologies)
 
     // Check technologies
     EXPECT_NE(assembly->technology("test_tech"), nullptr);
-    EXPECT_NE(assembly->technology("interposer_tech"), nullptr);
+    EXPECT_NE(assembly->technology("intm4tm2"), nullptr);
 
     auto tech = assembly->technology("test_tech");
     EXPECT_EQ(tech->description(), "Test technology");
@@ -705,6 +705,23 @@ TEST(InterconnectMergeZ, DieZSourcedFromFragmentAfterBodyRemoval)
 
     // Restore global state so later tests see the default configs resolution.
     unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
+}
+
+TEST(InterconnectMergeZ, StackupPathResolvesPlainProductIdOnly)
+{
+    // The IHP interposer stackup is keyed on the plain product id
+    // (intm4tm2). Pre-rename spellings must NOT resolve to it.
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs");
+
+    const std::string expected = base + "/configs/stackups/intm4tm2.yaml";
+    EXPECT_EQ(BlenderGDSConfigs::stackupPath("intm4tm2"), expected);
+    EXPECT_EQ(BlenderGDSConfigs::stackupPath("IntM4TM2"), expected);
+    EXPECT_NE(BlenderGDSConfigs::stackupPath("ihp-interposer"), expected);
+    EXPECT_NE(BlenderGDSConfigs::stackupPath("interposer_tech"), expected);
+    EXPECT_NE(BlenderGDSConfigs::stackupPath("rdl"), expected);
+
     BlenderGDSConfigs::setConfigsDir("");
 }
 
