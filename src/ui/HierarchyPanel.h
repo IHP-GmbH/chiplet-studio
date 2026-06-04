@@ -63,6 +63,13 @@ signals:
     void interconnectSelected();
 
     /**
+     * Emitted when a die's interconnect method child row is selected
+     * (the die's per-die `connection:` id -- not a component)
+     */
+    void interconnectMethodSelected(const QString& componentId,
+                                    const QString& methodId);
+
+    /**
      * Emitted when the interconnect row's visibility checkbox is toggled.
      * Show/hide applies to the method's 3D body layers, which render
      * merged into the interposer component.

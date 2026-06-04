@@ -183,6 +183,7 @@ void PropertiesPanel::createGroupBoxes()
     QVBoxLayout* metaLayout = new QVBoxLayout(m_metadataGroup);
     metaLayout->setContentsMargins(8, 8, 8, 8);
     m_metadataTree = new QTreeWidget();
+    m_metadataTree->setObjectName("metadataTree");
     m_metadataTree->setHeaderLabels({"Key", "Value"});
     m_metadataTree->setRootIsDecorated(false);
     m_metadataTree->setMaximumHeight(100);
@@ -225,7 +226,9 @@ void PropertiesPanel::setLayerVisibilityResolver(std::function<bool(const QStrin
 
 void PropertiesPanel::clearSelection()
 {
-    m_showingInterconnect = false;  // showInterconnect() re-sets it at the end
+    m_showingInterconnect = false;  // the show*() views re-set it at the end
+    m_interconnectDieId.clear();
+    m_interconnectMethodId.clear();
     m_selectedComponentId = INVALID_COMPONENT_ID;
 
     // Reset all labels
@@ -284,9 +287,16 @@ void PropertiesPanel::onGroupToggled(bool checked)
 void PropertiesPanel::updateDisplay()
 {
     // Interconnect view: not component-driven; rebuild it instead (unit
-    // changes and external refreshes land here).
+    // changes and external refreshes land here). Copies, not references:
+    // the show*() calls clear the members before re-setting them.
     if (m_showingInterconnect) {
-        showInterconnect();
+        const QString dieId = m_interconnectDieId;
+        const QString methodId = m_interconnectMethodId;
+        if (!dieId.isEmpty()) {
+            showInterconnectMethod(dieId, methodId);
+        } else {
+            showInterconnect();
+        }
         return;
     }
 
@@ -553,6 +563,69 @@ void PropertiesPanel::showInterconnect()
     }
     m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
 
+    populateInterconnectBodyLayers(keys, tech);
+
+    m_showingInterconnect = true;
+    m_interconnectDieId.clear();
+    m_interconnectMethodId.clear();
+}
+
+void PropertiesPanel::showInterconnectMethod(const QString& dieId,
+                                             const QString& methodId)
+{
+    clearSelection();
+
+    if (!m_assembly || methodId.isEmpty()) {
+        return;
+    }
+    const std::string method = methodId.toStdString();
+    const std::string& adapter = m_assembly->interconnect_adapter();
+
+    // Identity card for ONE die's method (its `connection:` id), reached
+    // from the die's interconnect child row in the hierarchy.
+    m_idLabel->setText(QString("%1 interconnect").arg(dieId));
+    m_typeLabel->setText("Interconnect method");
+    m_techLabel->setText(methodId);
+
+    auto addRow = [this](const QString& key, const QString& value) {
+        QTreeWidgetItem* item = new QTreeWidgetItem();
+        item->setText(0, key);
+        item->setText(1, value);
+        item->setToolTip(1, value);
+        m_metadataTree->addTopLevelItem(item);
+    };
+    addRow("die", dieId);
+    addRow("method", methodId);
+
+    Technology* tech = m_assembly->technology(adapter);
+    if (tech && !tech->description().empty()) {
+        addRow("description", QString::fromStdString(tech->description()));
+    }
+
+    // Same resolution policy as every other consumer: the method's own
+    // fragment when it exists, the legacy adapter otherwise.
+    const std::vector<std::string> keys =
+        LayerStackup::resolveInterconnectKeys({method}, adapter);
+    for (const auto& key : keys) {
+        std::string fragPath;
+        LayerStackup::loadInterconnectFragment(key, &fragPath);
+        if (!fragPath.empty()) {
+            addRow(QString("fragment[%1]").arg(QString::fromStdString(key)),
+                   QString::fromStdString(fragPath));
+        }
+    }
+    m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
+
+    populateInterconnectBodyLayers(keys, tech);
+
+    m_showingInterconnect = true;
+    m_interconnectDieId = dieId;
+    m_interconnectMethodId = methodId;
+}
+
+void PropertiesPanel::populateInterconnectBodyLayers(
+    const std::vector<std::string>& keys, Technology* tech)
+{
     // Body layers as a live layer tree, bound to the interposer component
     // (the merge target, where the bodies render). The existing checkbox
     // plumbing (onLayerItemChanged -> layerVisibilityChanged -> 3D view)
@@ -618,8 +691,6 @@ void PropertiesPanel::showInterconnect()
         m_layersForComponent = INVALID_COMPONENT_ID;
         m_blockLayerSync = false;
     }
-
-    m_showingInterconnect = true;
 }
 
 

@@ -104,6 +104,31 @@ void HierarchyPanel::refresh()
         // Add checkbox for visibility toggle
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(0, Qt::Checked);
+
+        // Child row: the die's interconnect method (its per-die
+        // `connection:` id). Selectable -- the properties panel shows the
+        // method's fragment provenance -- but not checkable: the bodies
+        // render merged into the interposer, so show/hide stays with the
+        // assembly-level interconnect row below.
+        if (comp->type() != ComponentType::Interposer
+                && !comp->connection().empty()) {
+            QTreeWidgetItem* conn = new QTreeWidgetItem(item);
+            conn->setText(0, "interconnect");
+            conn->setText(1, "Interconnect");
+            conn->setText(2, QString::fromStdString(comp->connection()));
+            conn->setText(3, "");
+            QFont cf = conn->font(0);
+            cf.setItalic(true);
+            for (int col = 0; col < 4; ++col) {
+                conn->setFont(col, cf);
+            }
+            // No Qt::UserRole component id (component handlers skip it);
+            // the marker routes clicks to interconnectMethodSelected.
+            conn->setData(0, Qt::UserRole + 1,
+                          QString("interconnect-method"));
+            conn->setData(0, Qt::UserRole + 2,
+                          QString::fromStdString(comp->id()));
+        }
     }
 
     // Row for the assembly-level interconnect (the bumping methods). Not a
@@ -164,10 +189,19 @@ void HierarchyPanel::onItemClicked(QTreeWidgetItem* item, int /*column*/)
 
     QString componentId = item->data(0, Qt::UserRole).toString();
     if (componentId.isEmpty()) {
-        // Interconnect adapter row: assembly-level method, not a component.
-        if (item->data(0, Qt::UserRole + 1).toString() == "interconnect") {
+        // Non-component rows route through their marker.
+        const QString marker = item->data(0, Qt::UserRole + 1).toString();
+        if (marker == "interconnect") {
+            // Assembly-level interconnect row.
             m_blockSignals = true;
             emit interconnectSelected();
+            m_blockSignals = false;
+        } else if (marker == "interconnect-method") {
+            // A die's per-die method child row.
+            m_blockSignals = true;
+            emit interconnectMethodSelected(
+                item->data(0, Qt::UserRole + 2).toString(),
+                item->text(2));
             m_blockSignals = false;
         }
         return;

@@ -651,5 +651,55 @@ TEST_F(PropertiesPanelTest, ShowOnlyMatchingFilterMatchesFilterVisibility)
     }
 }
 
+// =============================================================================
+// Per-die interconnect method view
+// =============================================================================
+
+TEST_F(PropertiesPanelTest, ShowInterconnectMethodIdentityRows)
+{
+    PropertiesPanel panel;
+    auto assembly = createTestAssembly();
+    assembly->component("die_a")->set_connection("method_x");
+    panel.setAssembly(assembly.get());
+
+    panel.showInterconnectMethod("die_a", "method_x");
+
+    // The die/method provenance rows land in the metadata tree even when
+    // no fragment resolves (no interconnect PDK in the unit environment).
+    QTreeWidget* meta = panel.findChild<QTreeWidget*>("metadataTree");
+    ASSERT_NE(meta, nullptr);
+    bool sawDie = false;
+    bool sawMethod = false;
+    for (int i = 0; i < meta->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* it = meta->topLevelItem(i);
+        if (it->text(0) == "die" && it->text(1) == "die_a") {
+            sawDie = true;
+        }
+        if (it->text(0) == "method" && it->text(1) == "method_x") {
+            sawMethod = true;
+        }
+    }
+    EXPECT_TRUE(sawDie);
+    EXPECT_TRUE(sawMethod);
+}
+
+TEST_F(PropertiesPanelTest, ShowInterconnectMethodGuards)
+{
+    PropertiesPanel panel;
+
+    // No assembly: must be a no-op.
+    panel.showInterconnectMethod("die_a", "method_x");
+
+    auto assembly = createTestAssembly();
+    panel.setAssembly(assembly.get());
+
+    // Empty method id: must be a no-op (clears only).
+    panel.showInterconnectMethod("die_a", "");
+
+    // Selecting a component afterwards must work unchanged.
+    panel.setComponent("die_a", assembly.get());
+    EXPECT_TRUE(true);
+}
+
 } // namespace
 } // namespace chiplet

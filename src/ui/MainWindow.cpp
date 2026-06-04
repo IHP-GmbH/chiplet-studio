@@ -234,6 +234,16 @@ void MainWindow::setupPanels()
                 m_assemblyView->selectComponent(QString());
             });
 
+    // Die's interconnect method child row -> Properties panel (per-die
+    // `connection:`); highlight the die it belongs to in the 3D view.
+    connect(m_hierarchyPanel, &HierarchyPanel::interconnectMethodSelected,
+            this, [this](const QString& componentId, const QString& methodId) {
+                m_propertiesPanel->setAssembly(m_assembly.get());
+                m_propertiesPanel->showInterconnectMethod(componentId,
+                                                          methodId);
+                m_assemblyView->selectComponent(componentId);
+            });
+
     // Hierarchy interconnect checkbox -> show/hide the method's 3D body
     // layers (they render merged into the interposer component's stackup)
     connect(m_hierarchyPanel, &HierarchyPanel::interconnectVisibilityChanged,

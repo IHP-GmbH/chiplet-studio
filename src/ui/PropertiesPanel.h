@@ -14,6 +14,8 @@
 #include <QWidget>
 #include <memory>
 #include <functional>
+#include <string>
+#include <vector>
 #include "core/Component.h"
 #include "core/ComponentID.h"
 #include "view2d/LayerProperties.h"
@@ -33,6 +35,7 @@ namespace chiplet {
 
 class Assembly;
 class KLayoutBridge;
+class Technology;
 
 /**
  * PropertiesPanel displays read-only properties of selected component.
@@ -70,6 +73,14 @@ public slots:
      * and the resolved 3D stackup fragment with the body layers.
      */
     void showInterconnect();
+
+    /**
+     * Show ONE die's interconnect method (the per-die `connection:` id):
+     * the method identity, its resolved fragment provenance and that
+     * fragment's body layers. Reached from the die's interconnect child
+     * row in the hierarchy.
+     */
+    void showInterconnectMethod(const QString& dieId, const QString& methodId);
 
     /**
      * Clear selection and reset all fields
@@ -142,12 +153,19 @@ private:
     // Type conversion
     QString typeToString(ComponentType type) const;
 
+    // Shared tail of the interconnect views: the resolved fragments' body
+    // layers as a live layer tree bound to the interposer (merge target).
+    void populateInterconnectBodyLayers(const std::vector<std::string>& keys,
+                                        Technology* tech);
+
     // Data
     ComponentID m_selectedComponentId;
     Assembly* m_assembly = nullptr;
     LayerPropertiesFile m_layerProps;
-    bool m_showingInterconnect = false;  // panel shows the assembly-level
-                                         // interconnect method, not a component
+    bool m_showingInterconnect = false;  // panel shows an interconnect view,
+                                         // not a component
+    QString m_interconnectDieId;         // non-empty = per-die method view
+    QString m_interconnectMethodId;
 
     // UI Elements
     QScrollArea* m_scrollArea = nullptr;
