@@ -492,17 +492,30 @@ void PropertiesPanel::showInterconnect()
 {
     clearSelection();
 
-    if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
+    if (!m_assembly) {
         return;
     }
     const std::string& adapter = m_assembly->interconnect_adapter();
+    const std::vector<std::string> methodIds =
+        m_assembly->interconnect_method_ids();
+    if (adapter.empty() && methodIds.empty()) {
+        return;
+    }
 
     // Component group doubles as the identity card: the interconnect is
     // assembly-level (no position/dimensions/layout of its own -- its 3D
-    // bodies merge into the interposer's layer render).
+    // bodies merge into the interposer's layer render). The technology row
+    // lists the methods the dies use; the legacy adapter shows when no
+    // method is declared.
+    QStringList methodList;
+    for (const auto& id : methodIds) {
+        methodList << QString::fromStdString(id);
+    }
     m_idLabel->setText("interconnect");
     m_typeLabel->setText("Interconnect");
-    m_techLabel->setText(QString::fromStdString(adapter));
+    m_techLabel->setText(methodList.isEmpty()
+                             ? QString::fromStdString(adapter)
+                             : methodList.join(", "));
 
     // Provenance rows in the metadata tree: the interconnect PDK identity
     // (registered Technology) and the resolved 3D stackup fragment.
@@ -522,11 +535,21 @@ void PropertiesPanel::showInterconnect()
         addRow("layer_properties",
                QString::fromStdString(tech->layer_properties_path()));
     }
+    if (!adapter.empty() && !methodList.isEmpty()) {
+        addRow("adapter", QString::fromStdString(adapter));
+    }
 
-    std::string fragPath;
-    LayerStackup ic = LayerStackup::loadInterconnectFragment(adapter, &fragPath);
-    if (!fragPath.empty()) {
-        addRow("stackup_fragment", QString::fromStdString(fragPath));
+    // One provenance row per resolved fragment (methods first, legacy
+    // adapter only when no method resolves -- the shared policy).
+    const std::vector<std::string> keys =
+        LayerStackup::resolveInterconnectKeys(methodIds, adapter);
+    for (const auto& key : keys) {
+        std::string fragPath;
+        LayerStackup::loadInterconnectFragment(key, &fragPath);
+        if (!fragPath.empty()) {
+            addRow(QString("fragment[%1]").arg(QString::fromStdString(key)),
+                   QString::fromStdString(fragPath));
+        }
     }
     m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
 
@@ -541,6 +564,7 @@ void PropertiesPanel::showInterconnect()
             break;
         }
     }
+    LayerStackup ic = LayerStackup::loadInterconnectFragments(keys);
     if (interposer && !ic.empty()) {
         m_selectedComponentId = interposer->id();
 

@@ -96,15 +96,31 @@ public:
     // Load from BlenderGDS-format YAML (top-level keys are layer names)
     bool loadFromBlenderGDS(const std::string& path);
 
-    // Load the interconnect PDK's 3D stackup fragment for an adapter id,
-    // WITHOUT applying any z offset (z values are as declared in the file;
-    // check zReference() for their frame). resolvedPath, when given,
-    // receives the fragment path as soon as it resolves (provenance even if
-    // the parse fails). Empty stackup when unresolvable.
-    static LayerStackup loadInterconnectFragment(const std::string& adapter,
+    // Load the interconnect PDK's 3D stackup fragment for a fragment key
+    // (a method id like "cupillar_opt2", or a legacy adapter id), WITHOUT
+    // applying any z offset (z values are as declared in the file; check
+    // zReference() for their frame). resolvedPath, when given, receives the
+    // fragment path as soon as it resolves (provenance even if the parse
+    // fails). Empty stackup when unresolvable.
+    static LayerStackup loadInterconnectFragment(const std::string& key,
                                                  std::string* resolvedPath = nullptr);
 
-    // Merge the interconnect fragment for `adapter` into this stackup --
+    // Resolution policy for the active fragment keys -- THE single place
+    // that decides which fragments an assembly uses
+    // (docs/interconnect_render_contract.md, L2):
+    // method ids that resolve to a fragment win; the legacy adapter id is
+    // used only when NO method id resolves (it carries the family-default
+    // heights, which must not overwrite resolved per-method values).
+    // Method ids that do not resolve are dropped with a warning.
+    static std::vector<std::string> resolveInterconnectKeys(
+        const std::vector<std::string>& methodIds, const std::string& adapter);
+
+    // Load the union of several fragments (raw, no z offset) for UI
+    // consumers (layer trees, visibility toggles). Conflicting duplicate
+    // keys take the taller body (see mergeInterconnectFragments).
+    static LayerStackup loadInterconnectFragments(const std::vector<std::string>& keys);
+
+    // Merge the interconnect fragment for one key into this stackup --
     // THE single entry point for every consumer of the body layers' z
     // (3D render and die-seating z calculation), so their views cannot
     // diverge. Offset rule (docs/interconnect_render_contract.md, L1):
@@ -112,9 +128,23 @@ public:
     // stackup's attachment_surface_z (missing -> warn + best-effort
     // totalHeight()); no marker -> legacy absolute z + deprecation warning.
     // Returns the number of body layers merged (0 = no/empty fragment).
-    size_t mergeInterconnectFragment(const std::string& adapter);
+    size_t mergeInterconnectFragment(const std::string& key);
+
+    // Merge the union of several fragments (one per method in use). Body
+    // layer keys are disjoint across vendors by manifest construction;
+    // options of one family share keys with different heights -- the
+    // per-layer render model can only show one height per key, so on a
+    // conflicting duplicate the TALLER body wins, loudly (die seating
+    // stays exact per die: calculate_component_z merges only the die's
+    // own method fragment). Returns the number of layers merged.
+    size_t mergeInterconnectFragments(const std::vector<std::string>& keys);
 
 private:
+    // The L1 offset rule for one loaded fragment against this base stackup
+    // (shared by the single- and multi-fragment merges).
+    double interconnectFragmentOffset(const LayerStackup& frag,
+                                      const std::string& path) const;
+
     std::map<LayerKey, LayerElevation> m_layers;
     std::string m_zReference;
     double m_attachmentSurfaceZ = 0.0;

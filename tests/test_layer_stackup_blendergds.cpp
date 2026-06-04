@@ -156,7 +156,8 @@ TEST(BlenderGDSConfigs, UnknownTechReturnsEmpty) {
 namespace {
 
 // Lays out a fake interconnect PDK with relative ("unit_rel") and legacy
-// absolute ("unit_abs") fragments, returning the tree root.
+// absolute ("unit_abs") fragments, plus same-key option variants for the
+// union-conflict tests, returning the tree root.
 std::filesystem::path makeFragmentTree() {
     namespace fs = std::filesystem;
     const fs::path root = fs::temp_directory_path() / "chiplet_lsu_frag_merge";
@@ -168,6 +169,19 @@ std::filesystem::path makeFragmentTree() {
               "Body:\n  index: 500\n  type: 35\n  z: 0.0\n  height: 10.0\n");
     writeYaml(frags / "unit_abs.stackup.yaml",
               "Body:\n  index: 500\n  type: 35\n  z: 7.5\n  height: 10.0\n");
+    // Same-family options: same layer key, different heights.
+    writeYaml(frags / "opt_small.stackup.yaml",
+              "z_reference: attachment_surface\n"
+              "Body:\n  index: 500\n  type: 35\n  z: 0.0\n  height: 10.0\n"
+              "Cap:\n  index: 501\n  type: 35\n  z: 10.0\n  height: 5.0\n");
+    writeYaml(frags / "opt_tall.stackup.yaml",
+              "z_reference: attachment_surface\n"
+              "Body:\n  index: 500\n  type: 35\n  z: 0.0\n  height: 30.0\n"
+              "Cap:\n  index: 501\n  type: 35\n  z: 30.0\n  height: 5.0\n");
+    // A different vendor: disjoint layer keys.
+    writeYaml(frags / "other_vendor.stackup.yaml",
+              "z_reference: attachment_surface\n"
+              "VBody:\n  index: 510\n  type: 35\n  z: 0.0\n  height: 8.0\n");
     return root;
 }
 
@@ -277,6 +291,97 @@ TEST(InterconnectFragmentMerge, UnresolvableAdapterMergesNothing) {
     EXPECT_EQ(base.mergeInterconnectFragment("no_such_adapter_xyz"), 0u);
     EXPECT_EQ(base.mergeInterconnectFragment(""), 0u);
     EXPECT_EQ(base.layerCount(), 1u);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+// The shared resolution policy: method ids that resolve win; the legacy
+// adapter only when none resolves; non-resolving ids drop silently
+// (connection stack ids are not required to be method ids).
+TEST(InterconnectFragmentMerge, ResolveKeysMethodsWinOverAdapter) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    auto keys = LayerStackup::resolveInterconnectKeys({"unit_rel"}, "unit_abs");
+    ASSERT_EQ(keys.size(), 1u);
+    EXPECT_EQ(keys[0], "unit_rel");
+
+    // No method resolves -> adapter fallback.
+    keys = LayerStackup::resolveInterconnectKeys({"no_such_method"}, "unit_abs");
+    ASSERT_EQ(keys.size(), 1u);
+    EXPECT_EQ(keys[0], "unit_abs");
+
+    // Nothing resolves at all.
+    keys = LayerStackup::resolveInterconnectKeys({"no_such_method"}, "");
+    EXPECT_TRUE(keys.empty());
+
+    // Dedup + partial resolution: the resolving subset survives, the
+    // adapter stays out (it must not overwrite per-method values).
+    keys = LayerStackup::resolveInterconnectKeys(
+        {"unit_rel", "unit_rel", "no_such_method", "other_vendor"}, "unit_abs");
+    ASSERT_EQ(keys.size(), 2u);
+    EXPECT_EQ(keys[0], "unit_rel");
+    EXPECT_EQ(keys[1], "other_vendor");
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+// Union of same-family options: shared layer keys take the taller body
+// (per-layer render can only show one height per key); disjoint vendor
+// keys merge side by side.
+TEST(InterconnectFragmentMerge, UnionConflictTallerBodyWins) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    LayerStackup base;
+    {
+        namespace fs = std::filesystem;
+        const fs::path baseYaml =
+            fs::temp_directory_path() / "chiplet_lsu_frag_merge" / "base_union.yaml";
+        writeYaml(baseYaml,
+                  "attachment_surface_z: 4.0\n"
+                  "Pad:\n  index: 134\n  type: 0\n  z: 2.0\n  height: 3.0\n");
+        ASSERT_TRUE(base.loadFromBlenderGDS(baseYaml.string()));
+    }
+
+    const size_t merged = base.mergeInterconnectFragments(
+        {"opt_small", "opt_tall", "other_vendor"});
+    EXPECT_EQ(merged, 3u);  // Body, Cap (deduped), VBody
+
+    const LayerElevation* body = base.find(500, 35);
+    ASSERT_NE(body, nullptr);
+    EXPECT_NEAR(body->z_bottom, 4.0, 1e-9);
+    EXPECT_NEAR(body->thickness, 30.0, 1e-9);  // taller option won
+
+    const LayerElevation* cap = base.find(501, 35);
+    ASSERT_NE(cap, nullptr);
+    EXPECT_NEAR(cap->z_bottom, 34.0, 1e-9);    // on top of the taller body
+
+    const LayerElevation* vbody = base.find(510, 35);
+    ASSERT_NE(vbody, nullptr);
+    EXPECT_NEAR(vbody->z_bottom, 4.0, 1e-9);
+    EXPECT_NEAR(vbody->thickness, 8.0, 1e-9);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+}
+
+// Raw union (UI path): no offsets, common z_reference preserved when the
+// sources agree.
+TEST(InterconnectFragmentMerge, RawUnionKeepsDeclaredFrame) {
+    const auto root = makeFragmentTree();
+    setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
+
+    LayerStackup u = LayerStackup::loadInterconnectFragments(
+        {"opt_small", "other_vendor"});
+    EXPECT_EQ(u.layerCount(), 3u);
+    EXPECT_EQ(u.zReference(), "attachment_surface");
+    const LayerElevation* body = u.find(500, 35);
+    ASSERT_NE(body, nullptr);
+    EXPECT_NEAR(body->z_bottom, 0.0, 1e-9);
+
+    // Mixed frames (relative + legacy absolute): no common frame.
+    u = LayerStackup::loadInterconnectFragments({"opt_small", "unit_abs"});
+    EXPECT_TRUE(u.zReference().empty());
 
     unsetenv("INTERCONNECT_PDK_ROOT");
 }

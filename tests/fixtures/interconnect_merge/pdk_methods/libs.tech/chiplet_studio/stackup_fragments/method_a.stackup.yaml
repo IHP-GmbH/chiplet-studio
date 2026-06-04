@@ -1,0 +1,7 @@
+# Hermetic per-method fragment for the mixed-methods test (method_a).
+z_reference: attachment_surface
+LayerA:
+  index: 600
+  type: 10
+  z: 0.00
+  height: 10.00

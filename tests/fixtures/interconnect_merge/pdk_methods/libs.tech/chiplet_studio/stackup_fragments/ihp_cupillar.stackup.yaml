@@ -1,0 +1,9 @@
+# Decoy adapter-keyed fragment: redefines LayerA at a WRONG elevation. The
+# resolution policy must use the dies' method fragments and ignore the
+# adapter when any method id resolves -- if this file ever merges, the
+# mixed-methods seating assertions fail loudly.
+LayerA:
+  index: 600
+  type: 10
+  z: 5.00
+  height: 99.00

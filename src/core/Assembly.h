@@ -87,6 +87,13 @@ public:
     const string_type& io_technology() const;
     const string_type& interconnect_adapter() const;
 
+    // Sorted unique connection ids of the dies (= interconnect method ids
+    // for manifest-era assemblies). The per-die `connection:` is the source
+    // of truth for which interconnect methods the assembly uses; the
+    // assembly-level adapter is the legacy/family fallback
+    // (LayerStackup::resolveInterconnectKeys applies the policy).
+    std::vector<string_type> interconnect_method_ids() const;
+
     // Setters - metadata
     void set_name(const string_type& name);
     void set_description(const string_type& desc);
