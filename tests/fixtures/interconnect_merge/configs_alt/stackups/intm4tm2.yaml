@@ -1,0 +1,16 @@
+# Hermetic interposer stackup with a DIFFERENT attachment surface (10.0
+# instead of IntM4TM2's 13.83). The F1 decoupling regression: the SAME
+# relative fragment must seat dies at 10.0 + stack height on this base --
+# i.e. the method's z travels with the interposer's declaration, not with
+# the fragment.
+attachment_surface_z: 10.0
+TopMetal2:
+  index: 134
+  type: 0
+  z: 7.00
+  height: 3.00
+Passiv:
+  index: 9
+  type: 0
+  z: 10.00
+  height: 1.90

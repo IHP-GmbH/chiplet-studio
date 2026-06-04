@@ -523,10 +523,10 @@ void PropertiesPanel::showInterconnect()
                QString::fromStdString(tech->layer_properties_path()));
     }
 
-    const std::string frag =
-        BlenderGDSConfigs::interconnectStackupFragmentPath(adapter);
-    if (!frag.empty()) {
-        addRow("stackup_fragment", QString::fromStdString(frag));
+    std::string fragPath;
+    LayerStackup ic = LayerStackup::loadInterconnectFragment(adapter, &fragPath);
+    if (!fragPath.empty()) {
+        addRow("stackup_fragment", QString::fromStdString(fragPath));
     }
     m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
 
@@ -541,8 +541,7 @@ void PropertiesPanel::showInterconnect()
             break;
         }
     }
-    LayerStackup ic;
-    if (interposer && !frag.empty() && ic.loadFromBlenderGDS(frag)) {
+    if (interposer && !ic.empty()) {
         m_selectedComponentId = interposer->id();
 
         m_blockLayerSync = true;
@@ -551,6 +550,11 @@ void PropertiesPanel::showInterconnect()
         if (tech && !tech->layer_properties_path().empty()) {
             m_layerProps.load(tech->layer_properties_path());
         }
+        // Method-pure fragments give z relative to the interposer's
+        // attachment surface; label the tooltip accordingly.
+        const QString zLabel = (ic.zReference() == "attachment_surface")
+            ? QStringLiteral("z (from attachment surface)")
+            : QStringLiteral("z");
         int count = 0;
         for (const auto& l : ic.sortedLayers()) {
             QTreeWidgetItem* item = new QTreeWidgetItem();
@@ -571,10 +575,11 @@ void PropertiesPanel::showInterconnect()
             item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
             item->setData(0, Qt::UserRole, l.layer);
             item->setData(0, Qt::UserRole + 1, l.datatype);
-            QString tooltip = QString("Body: %1\nL/D: %2/%3\nz: %4 um\n"
-                                      "height: %5 um\nRenders on: %6")
+            QString tooltip = QString("Body: %1\nL/D: %2/%3\n%4: %5 um\n"
+                                      "height: %6 um\nRenders on: %7")
                 .arg(QString::fromStdString(l.name))
                 .arg(l.layer).arg(l.datatype)
+                .arg(zLabel)
                 .arg(l.z_bottom, 0, 'f', 2)
                 .arg(l.thickness, 0, 'f', 2)
                 .arg(QString::fromStdString(interposer->id()));

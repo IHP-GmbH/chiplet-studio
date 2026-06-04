@@ -66,8 +66,25 @@ public:
     // Check if empty
     bool empty() const { return m_layers.empty(); }
 
-    // Clear all layers
-    void clear() { m_layers.clear(); }
+    // Clear all layers and metadata
+    void clear() {
+        m_layers.clear();
+        m_zReference.clear();
+        m_attachmentSurfaceZ = 0.0;
+        m_hasAttachmentSurfaceZ = false;
+    }
+
+    // BlenderGDS scalar metadata (top-level non-map keys):
+    //
+    // z_reference -- reference frame of this stackup's z values.
+    // "attachment_surface" (interconnect fragments) = relative to the
+    // surface the base interposer stackup declares; empty = absolute.
+    const std::string& zReference() const { return m_zReference; }
+    // attachment_surface_z -- the surface (um) an interposer stackup offers
+    // to interconnect bodies (the exposed pad top, NOT max_z: passivation
+    // around the opening rises above the real mounting surface).
+    bool hasAttachmentSurfaceZ() const { return m_hasAttachmentSurfaceZ; }
+    double attachmentSurfaceZ() const { return m_attachmentSurfaceZ; }
 
     // Generate default stackup from .lyp file (basic stacking)
     static LayerStackup fromLayerProperties(const LayerPropertiesFile& lyp,
@@ -79,8 +96,29 @@ public:
     // Load from BlenderGDS-format YAML (top-level keys are layer names)
     bool loadFromBlenderGDS(const std::string& path);
 
+    // Load the interconnect PDK's 3D stackup fragment for an adapter id,
+    // WITHOUT applying any z offset (z values are as declared in the file;
+    // check zReference() for their frame). resolvedPath, when given,
+    // receives the fragment path as soon as it resolves (provenance even if
+    // the parse fails). Empty stackup when unresolvable.
+    static LayerStackup loadInterconnectFragment(const std::string& adapter,
+                                                 std::string* resolvedPath = nullptr);
+
+    // Merge the interconnect fragment for `adapter` into this stackup --
+    // THE single entry point for every consumer of the body layers' z
+    // (3D render and die-seating z calculation), so their views cannot
+    // diverge. Offset rule (docs/interconnect_render_contract.md, L1):
+    // fragment z_reference == "attachment_surface" -> offset by this
+    // stackup's attachment_surface_z (missing -> warn + best-effort
+    // totalHeight()); no marker -> legacy absolute z + deprecation warning.
+    // Returns the number of body layers merged (0 = no/empty fragment).
+    size_t mergeInterconnectFragment(const std::string& adapter);
+
 private:
     std::map<LayerKey, LayerElevation> m_layers;
+    std::string m_zReference;
+    double m_attachmentSurfaceZ = 0.0;
+    bool m_hasAttachmentSurfaceZ = false;
 };
 
 /**

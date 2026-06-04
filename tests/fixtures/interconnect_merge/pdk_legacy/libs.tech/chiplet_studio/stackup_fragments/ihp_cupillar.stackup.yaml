@@ -1,0 +1,14 @@
+# LEGACY-format hermetic fragment: absolute z, no z_reference marker. Pins
+# the deprecation path -- consumers must keep interpreting markerless
+# fragments as absolute (z stays 13.83 regardless of the base stackup's
+# declared attachment surface), with a deprecation warning.
+CuPillar:
+  index: 500
+  type: 35
+  z: 13.83
+  height: 32.00
+SnAgCap:
+  index: 501
+  type: 35
+  z: 45.83
+  height: 16.00

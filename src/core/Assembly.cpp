@@ -316,18 +316,11 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             // vendor's microbump), which the interconnect PDK owns rather than
             // the interposer stackup. Additive: it brings in bodies the
             // interposer stackup does not define, so the first-layer lookup
-            // below resolves for whatever method the design selected.
-            if (!m_interconnect_adapter.empty()) {
-                const std::string frag =
-                    BlenderGDSConfigs::interconnectStackupFragmentPath(m_interconnect_adapter);
-                LayerStackup ic;
-                if (!frag.empty() && ic.loadFromBlenderGDS(frag)) {
-                    for (const auto& l : ic.sortedLayers()) {
-                        stackup.addLayer(l.layer, l.datatype, l.z_bottom,
-                                         l.thickness, l.name);
-                    }
-                }
-            }
+            // below resolves for whatever method the design selected. The
+            // shared helper applies the fragment's z-reference rule (relative
+            // to the stackup's declared attachment surface, or legacy
+            // absolute) identically to the render path.
+            stackup.mergeInterconnectFragment(m_interconnect_adapter);
             for (const auto& layer : stackup.sortedLayers()) {
                 if (!firstLayerName.empty() && layer.name == firstLayerName) {
                     mounting_surface = layer.z_bottom;

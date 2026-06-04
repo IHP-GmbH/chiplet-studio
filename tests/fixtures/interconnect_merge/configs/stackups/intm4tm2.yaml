@@ -1,7 +1,10 @@
 # Hermetic minimal interposer stackup for the InterconnectMergeZ test.
 # Deliberately body-less (no CuPillar/SnAgCap/SolderBall) to mirror the
 # post-Task-9 interposer: the cu-pillar bodies must come from the interconnect
-# PDK fragment, not from here.
+# PDK fragment, not from here. Declares its attachment surface (TopMetal2
+# top = exposed pad top) for relative fragments, mirroring the live
+# intm4tm2.yaml.
+attachment_surface_z: 13.83
 TopMetal2:
   index: 134
   type: 0

@@ -1,0 +1,13 @@
+# Hermetic body-less interposer stackup WITHOUT attachment_surface_z. Pins
+# the best-effort fallback: a relative fragment merged onto this base is
+# offset by totalHeight() (Passiv top = 15.73) with a warning.
+TopMetal2:
+  index: 134
+  type: 0
+  z: 10.83
+  height: 3.00
+Passiv:
+  index: 9
+  type: 0
+  z: 13.83
+  height: 1.90
