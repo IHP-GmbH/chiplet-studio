@@ -1287,8 +1287,24 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         // interposer stackup -- owns these bodies (500/501/502, vendor 510/511),
         // so the layer-render path must merge the selected method's fragment to
         // know their z/height. Additive + idempotent (addLayer overwrites by
-        // key); components whose GDS lacks these layers render nothing extra.
-        if (m_assembly && !m_assembly->interconnect_adapter().empty()) {
+        // key).
+        //
+        // ONLY for the interposer's technology: the bodies physically sit on
+        // the interposer. Merging them into a die's stackup inflates
+        // totalHeight(), which is the flip-chip beolTop -- every layer of a
+        // FaceDown die would render shifted up by the whole body-stack height
+        // (die floating above its pillars by ~44 um).
+        bool interposerTech = false;
+        if (m_assembly && !techId.empty()) {
+            for (const auto& c : m_assembly->components()) {
+                if (c->type() == ComponentType::Interposer &&
+                    c->technology() == techId) {
+                    interposerTech = true;
+                    break;
+                }
+            }
+        }
+        if (interposerTech && !m_assembly->interconnect_adapter().empty()) {
             const std::string frag = BlenderGDSConfigs::interconnectStackupFragmentPath(
                 m_assembly->interconnect_adapter());
             LayerStackup ic;
@@ -1298,7 +1314,8 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
                 }
                 qDebug() << "Merged interconnect fragment" << QString::fromStdString(frag)
                          << "(" << ic.layerCount() << "body layers) for adapter"
-                         << QString::fromStdString(m_assembly->interconnect_adapter());
+                         << QString::fromStdString(m_assembly->interconnect_adapter())
+                         << "into interposer tech" << QString::fromStdString(techId);
             }
         }
 
