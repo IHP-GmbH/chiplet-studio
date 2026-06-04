@@ -224,6 +224,15 @@ void MainWindow::setupPanels()
                 m_propertiesPanel->setComponent(componentId.toStdString(), m_assembly.get());
             });
 
+    // Hierarchy interconnect row -> Properties panel (assembly-level bumping
+    // method; clears the 3D component highlight, nothing to highlight for it)
+    connect(m_hierarchyPanel, &HierarchyPanel::interconnectSelected,
+            this, [this]() {
+                m_propertiesPanel->setAssembly(m_assembly.get());
+                m_propertiesPanel->showInterconnect();
+                m_assemblyView->selectComponent(QString());
+            });
+
     // Hierarchy zoom request -> 3D View
     connect(m_hierarchyPanel, &HierarchyPanel::zoomToComponentRequested,
             this, [this](const QString& componentId) {

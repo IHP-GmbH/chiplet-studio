@@ -7,6 +7,10 @@ assembly:
 
 interconnect:
   adapter: "vendorx_microbump"
+  technology:
+    description: "Chiplet attachment (VendorX Microsystems (DEMO / non-IHP))"
+    layer_properties: "./tech/interconnect_test.lyp"
+    dbu: 0.001
 
 technologies:
   test_tech:

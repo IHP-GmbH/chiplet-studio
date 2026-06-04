@@ -106,23 +106,26 @@ void HierarchyPanel::refresh()
         item->setCheckState(0, Qt::Checked);
     }
 
-    // Informative row for the assembly-level interconnect adapter (the
-    // bumping method). Not a component: its 3D bodies merge into the
-    // interposer's layer render, so it carries no geometry, checkbox or
-    // selection of its own -- but the active method belongs in the overview.
+    // Row for the assembly-level interconnect adapter (the bumping method).
+    // Not a component: its 3D bodies merge into the interposer's layer
+    // render, so it carries no geometry or visibility checkbox -- but the
+    // method is a PDK-backed technology of the assembly, so it is selectable
+    // and shows its provenance in the properties panel.
     if (!m_assembly->interconnect_adapter().empty()) {
         QTreeWidgetItem* ic = new QTreeWidgetItem(root);
         ic->setText(0, "interconnect");
         ic->setText(1, "Interconnect");
         ic->setText(2, QString::fromStdString(m_assembly->interconnect_adapter()));
         ic->setText(3, "");
-        ic->setFlags(ic->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsUserCheckable));
+        ic->setFlags(ic->flags() & ~Qt::ItemIsUserCheckable);
         QFont f = ic->font(0);
         f.setItalic(true);
         for (int col = 0; col < 4; ++col) {
             ic->setFont(col, f);
         }
-        // No Qt::UserRole id: the click/menu handlers skip rows without one.
+        // No Qt::UserRole component id: the component handlers skip rows
+        // without one. The marker below routes clicks to interconnectSelected.
+        ic->setData(0, Qt::UserRole + 1, QString("interconnect"));
     }
 
     m_tree->expandAll();
@@ -150,7 +153,13 @@ void HierarchyPanel::onItemClicked(QTreeWidgetItem* item, int /*column*/)
 
     QString componentId = item->data(0, Qt::UserRole).toString();
     if (componentId.isEmpty()) {
-        return;  // informative row (interconnect adapter), not a component
+        // Interconnect adapter row: assembly-level method, not a component.
+        if (item->data(0, Qt::UserRole + 1).toString() == "interconnect") {
+            m_blockSignals = true;
+            emit interconnectSelected();
+            m_blockSignals = false;
+        }
+        return;
     }
 
     m_blockSignals = true;

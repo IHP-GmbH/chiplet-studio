@@ -57,6 +57,12 @@ signals:
     void componentSelected(const QString& componentId);
 
     /**
+     * Emitted when the assembly-level interconnect row is selected
+     * (the bumping method -- not a component)
+     */
+    void interconnectSelected();
+
+    /**
      * Emitted when user double-clicks a component (for drill-down to 2D view)
      */
     void componentDoubleClicked(const QString& componentId);
