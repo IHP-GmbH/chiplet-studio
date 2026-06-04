@@ -1,0 +1,50 @@
+format_version: "1.0"
+
+# Hermetic fixture for per-die method fragments (F2). die_a and die_b use
+# DIFFERENT interconnect methods of the same interconnect PDK; each die must
+# seat on ITS method's body stack: mounting = the method fragment's first
+# layer z (attachment_surface_z 13.83 + relative 0) + that die's inline stack
+# height. The legacy adapter is declared AND resolvable (to a decoy fragment
+# with wrong elevations) to pin that methods win over the adapter fallback.
+interconnect:
+  adapter: "ihp_cupillar"
+
+assembly:
+  name: "mixed-methods hermetic"
+  units: "um"
+
+technologies:
+  intm4tm2:
+    description: "body-less interposer stackup"
+    dbu: 0.001
+
+connection_stacks:
+  method_a:
+    description: "method A (10 um body)"
+    layers:
+      - {name: LayerA, material: Cu, height: 10.0, diameter: 30.0}
+  method_b:
+    description: "method B (20 um body)"
+    layers:
+      - {name: LayerB, material: Cu, height: 20.0, diameter: 30.0}
+
+components:
+  - id: interposer
+    type: interposer
+    technology: intm4tm2
+    dimensions: {width: 1000, height: 1000, thickness: 200.0}
+    position: {x: 0, y: 0, z: 0}
+
+  - id: die_a
+    type: die
+    technology: intm4tm2
+    connection: method_a
+    dimensions: {width: 150, height: 100, thickness: 50}
+    position: {x: -200, y: 0, z: 0}
+
+  - id: die_b
+    type: die
+    technology: intm4tm2
+    connection: method_b
+    dimensions: {width: 150, height: 100, thickness: 50}
+    position: {x: 200, y: 0, z: 0}

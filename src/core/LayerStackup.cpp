@@ -183,15 +183,15 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
     }
 }
 
-LayerStackup LayerStackup::loadInterconnectFragment(const std::string& adapter,
+LayerStackup LayerStackup::loadInterconnectFragment(const std::string& key,
                                                     std::string* resolvedPath)
 {
     if (resolvedPath) resolvedPath->clear();
     LayerStackup frag;
-    if (adapter.empty()) return frag;
+    if (key.empty()) return frag;
 
     const std::string path =
-        BlenderGDSConfigs::interconnectStackupFragmentPath(adapter);
+        BlenderGDSConfigs::interconnectStackupFragmentPath(key);
     if (path.empty()) return frag;
     if (resolvedPath) *resolvedPath = path;
 
@@ -201,39 +201,146 @@ LayerStackup LayerStackup::loadInterconnectFragment(const std::string& adapter,
     return frag;
 }
 
-size_t LayerStackup::mergeInterconnectFragment(const std::string& adapter)
+std::vector<std::string> LayerStackup::resolveInterconnectKeys(
+    const std::vector<std::string>& methodIds, const std::string& adapter)
 {
-    std::string path;
-    LayerStackup frag = loadInterconnectFragment(adapter, &path);
-    if (frag.empty()) return 0;
+    std::vector<std::string> keys;
+    for (const auto& id : methodIds) {
+        if (id.empty()) continue;
+        if (std::find(keys.begin(), keys.end(), id) != keys.end()) continue;
+        if (!BlenderGDSConfigs::interconnectStackupFragmentPath(id).empty()) {
+            keys.push_back(id);
+        }
+        // Non-resolving ids are legitimate: connection stack ids are not
+        // required to be manifest method ids (legacy/custom stacks). The
+        // adapter fallback below covers those assemblies.
+    }
+    if (keys.empty() && !adapter.empty() &&
+        !BlenderGDSConfigs::interconnectStackupFragmentPath(adapter).empty()) {
+        keys.push_back(adapter);
+    }
+    return keys;
+}
 
-    double offset = 0.0;
+namespace {
+
+// Stage a fragment's (possibly offset) layers into the union map; on a
+// conflicting duplicate key the taller body wins, loudly.
+void stageFragmentLayers(
+    std::map<LayerKey, std::pair<LayerElevation, std::string>>& staging,
+    const LayerStackup& frag, double offset, const std::string& sourceKey)
+{
+    for (const auto& l : frag.sortedLayers()) {
+        LayerElevation elev = l;
+        elev.z_bottom += offset;
+        auto it = staging.find(elev.key());
+        if (it == staging.end()) {
+            staging[elev.key()] = {elev, sourceKey};
+            continue;
+        }
+        const LayerElevation& cur = it->second.first;
+        if (cur.z_bottom == elev.z_bottom && cur.thickness == elev.thickness) {
+            continue;
+        }
+        const bool replace = elev.z_top() > cur.z_top();
+        qWarning("Interconnect fragments '%s' and '%s' both define layer "
+                 "%d/%d with different elevations (same-family options share "
+                 "GDS layers); rendering the taller body, from '%s'. Die "
+                 "seating stays exact per die",
+                 it->second.second.c_str(), sourceKey.c_str(),
+                 elev.layer, elev.datatype,
+                 replace ? sourceKey.c_str() : it->second.second.c_str());
+        if (replace) {
+            it->second = {elev, sourceKey};
+        }
+    }
+}
+
+} // anonymous namespace
+
+LayerStackup LayerStackup::loadInterconnectFragments(
+    const std::vector<std::string>& keys)
+{
+    LayerStackup result;
+    std::map<LayerKey, std::pair<LayerElevation, std::string>> staging;
+    std::string commonRef;
+    bool first = true;
+    bool refAgrees = true;
+    for (const auto& k : keys) {
+        LayerStackup frag = loadInterconnectFragment(k);
+        if (frag.empty()) continue;
+        if (first) {
+            commonRef = frag.zReference();
+            first = false;
+        } else if (frag.zReference() != commonRef) {
+            refAgrees = false;
+        }
+        stageFragmentLayers(staging, frag, 0.0, k);
+    }
+    for (const auto& [key, entry] : staging) {
+        (void)key;
+        result.addLayer(entry.first.layer, entry.first.datatype,
+                        entry.first.z_bottom, entry.first.thickness,
+                        entry.first.name);
+    }
+    // The union's reference frame is meaningful only when all sources agree.
+    if (!first && refAgrees) {
+        result.m_zReference = commonRef;
+    }
+    return result;
+}
+
+double LayerStackup::interconnectFragmentOffset(const LayerStackup& frag,
+                                                const std::string& path) const
+{
     if (frag.zReference() == "attachment_surface") {
         if (m_hasAttachmentSurfaceZ) {
-            offset = m_attachmentSurfaceZ;
-        } else {
-            offset = totalHeight();
-            qWarning("Interconnect fragment %s is relative to the attachment "
-                     "surface, but the base stackup does not declare "
-                     "attachment_surface_z; using totalHeight()=%.2f um as a "
-                     "best-effort surface (die seating may be approximate)",
-                     path.c_str(), offset);
+            return m_attachmentSurfaceZ;
         }
-    } else if (!frag.zReference().empty()) {
+        const double best = totalHeight();
+        qWarning("Interconnect fragment %s is relative to the attachment "
+                 "surface, but the base stackup does not declare "
+                 "attachment_surface_z; using totalHeight()=%.2f um as a "
+                 "best-effort surface (die seating may be approximate)",
+                 path.c_str(), best);
+        return best;
+    }
+    if (!frag.zReference().empty()) {
         qWarning("Interconnect fragment %s declares unknown z_reference "
                  "'%s'; treating its z values as absolute",
                  path.c_str(), frag.zReference().c_str());
-    } else {
-        qWarning("Interconnect fragment %s carries absolute z values "
-                 "(deprecated: couples the method to one interposer's BEOL "
-                 "height). Add 'z_reference: attachment_surface' and rebase "
-                 "z to 0 so the method seats on any interposer",
-                 path.c_str());
+        return 0.0;
     }
+    qWarning("Interconnect fragment %s carries absolute z values "
+             "(deprecated: couples the method to one interposer's BEOL "
+             "height). Add 'z_reference: attachment_surface' and rebase "
+             "z to 0 so the method seats on any interposer",
+             path.c_str());
+    return 0.0;
+}
 
+size_t LayerStackup::mergeInterconnectFragment(const std::string& key)
+{
+    return mergeInterconnectFragments({key});
+}
+
+size_t LayerStackup::mergeInterconnectFragments(
+    const std::vector<std::string>& keys)
+{
+    std::map<LayerKey, std::pair<LayerElevation, std::string>> staging;
+    for (const auto& k : keys) {
+        std::string path;
+        LayerStackup frag = loadInterconnectFragment(k, &path);
+        if (frag.empty()) continue;
+        stageFragmentLayers(staging, frag,
+                            interconnectFragmentOffset(frag, path), k);
+    }
     size_t merged = 0;
-    for (const auto& l : frag.sortedLayers()) {
-        addLayer(l.layer, l.datatype, l.z_bottom + offset, l.thickness, l.name);
+    for (const auto& [key, entry] : staging) {
+        (void)key;
+        addLayer(entry.first.layer, entry.first.datatype,
+                 entry.first.z_bottom, entry.first.thickness,
+                 entry.first.name);
         ++merged;
     }
     return merged;

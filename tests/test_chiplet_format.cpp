@@ -814,6 +814,39 @@ TEST(InterconnectMergeZ, LegacyAbsoluteFragmentKeepsAbsoluteZ)
     BlenderGDSConfigs::setConfigsDir("");
 }
 
+// ---------------------------------------------------------------------
+// F2 per-die methods: each die seats on ITS OWN method's body stack (the
+// die's connection id selects the fragment). The legacy adapter resolves
+// to a decoy fragment with wrong elevations -- the policy must ignore it
+// whenever any method id resolves.
+// ---------------------------------------------------------------------
+TEST(InterconnectMergeZ, PerDieMethodFragmentsSeatEachDie)
+{
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs");
+    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk_methods").c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/mixed_methods.chiplet");
+    ASSERT_NE(assembly, nullptr);
+
+    // Methods derived from the dies' connections, sorted.
+    const auto ids = assembly->interconnect_method_ids();
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_EQ(ids[0], "method_a");
+    EXPECT_EQ(ids[1], "method_b");
+
+    // die_a: LayerA z (13.83 + 0) + stack 10 = 23.83
+    // die_b: LayerB z (13.83 + 0) + stack 20 = 33.83
+    // If the decoy adapter fragment merged, LayerA would sit at z=5 and
+    // die_a would seat at 15.0 instead.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 23.83, 0.01);
+    EXPECT_NEAR(assembly->calculate_component_z("die_b"), 33.83, 0.01);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
+}
+
 // A relative fragment on a base stackup that does NOT declare its surface
 // falls back to totalHeight() (loud, best-effort) instead of seating at 0.
 TEST(InterconnectMergeZ, RelativeFragmentWithoutDeclaredSurfaceFallsBack)

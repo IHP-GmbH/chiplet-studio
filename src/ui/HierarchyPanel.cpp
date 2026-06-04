@@ -106,15 +106,25 @@ void HierarchyPanel::refresh()
         item->setCheckState(0, Qt::Checked);
     }
 
-    // Row for the assembly-level interconnect adapter (the bumping method).
-    // Not a component: its 3D bodies merge into the interposer's layer
-    // render. It is selectable (provenance in the properties panel) and its
-    // checkbox shows/hides the method's body layers on the interposer.
-    if (!m_assembly->interconnect_adapter().empty()) {
+    // Row for the assembly-level interconnect (the bumping methods). Not a
+    // component: its 3D bodies merge into the interposer's layer render. It
+    // is selectable (provenance in the properties panel) and its checkbox
+    // shows/hides the methods' body layers on the interposer. The tech
+    // column lists the methods the dies use (per-die connection ids); the
+    // legacy adapter id shows when no method is declared.
+    const std::vector<std::string> methodIds =
+        m_assembly->interconnect_method_ids();
+    if (!m_assembly->interconnect_adapter().empty() || !methodIds.empty()) {
+        QStringList methods;
+        for (const auto& id : methodIds) {
+            methods << QString::fromStdString(id);
+        }
         QTreeWidgetItem* ic = new QTreeWidgetItem(root);
         ic->setText(0, "interconnect");
         ic->setText(1, "Interconnect");
-        ic->setText(2, QString::fromStdString(m_assembly->interconnect_adapter()));
+        ic->setText(2, methods.isEmpty()
+                           ? QString::fromStdString(m_assembly->interconnect_adapter())
+                           : methods.join(", "));
         ic->setText(3, "");
         ic->setFlags(ic->flags() | Qt::ItemIsUserCheckable);
         ic->setCheckState(0, Qt::Checked);

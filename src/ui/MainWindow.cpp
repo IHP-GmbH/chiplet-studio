@@ -238,13 +238,16 @@ void MainWindow::setupPanels()
     // layers (they render merged into the interposer component's stackup)
     connect(m_hierarchyPanel, &HierarchyPanel::interconnectVisibilityChanged,
             this, [this](bool visible) {
-                if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
+                if (!m_assembly) {
                     return;
                 }
-                // Raw fragment load: only the layer/datatype keys matter
-                // here, the z reference frame is irrelevant for show/hide.
-                LayerStackup ic = LayerStackup::loadInterconnectFragment(
-                    m_assembly->interconnect_adapter());
+                // Raw union of the active methods' fragments: only the
+                // layer/datatype keys matter here, the z reference frame is
+                // irrelevant for show/hide.
+                LayerStackup ic = LayerStackup::loadInterconnectFragments(
+                    LayerStackup::resolveInterconnectKeys(
+                        m_assembly->interconnect_method_ids(),
+                        m_assembly->interconnect_adapter()));
                 if (ic.empty()) {
                     return;
                 }

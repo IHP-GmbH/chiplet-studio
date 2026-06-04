@@ -63,6 +63,21 @@ const Assembly::string_type& Assembly::interconnect_adapter() const
     return m_interconnect_adapter;
 }
 
+std::vector<Assembly::string_type> Assembly::interconnect_method_ids() const
+{
+    std::vector<string_type> ids;
+    for (const auto& c : m_components) {
+        if (c->type() == ComponentType::Interposer) continue;
+        const string_type& conn = c->connection();
+        if (conn.empty()) continue;
+        if (std::find(ids.begin(), ids.end(), conn) == ids.end()) {
+            ids.push_back(conn);
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
 // Setters - metadata
 
 void Assembly::set_name(const string_type& name)
@@ -320,7 +335,15 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             // shared helper applies the fragment's z-reference rule (relative
             // to the stackup's declared attachment surface, or legacy
             // absolute) identically to the render path.
-            stackup.mergeInterconnectFragment(m_interconnect_adapter);
+            //
+            // Per-die: THIS die's connection id selects the fragment (method
+            // ids are fragment keys), so a die using Option 3 seats on
+            // Option-3 body heights even when other dies use other methods.
+            // The assembly-level adapter is the fallback for stacks whose id
+            // is not a method id (legacy/custom stacks).
+            stackup.mergeInterconnectFragments(
+                LayerStackup::resolveInterconnectKeys(
+                    {comp->connection()}, m_interconnect_adapter));
             for (const auto& layer : stackup.sortedLayers()) {
                 if (!firstLayerName.empty() && layer.name == firstLayerName) {
                     mounting_surface = layer.z_bottom;

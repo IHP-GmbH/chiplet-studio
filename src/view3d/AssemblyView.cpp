@@ -1305,13 +1305,22 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
             }
         }
         if (interposerTech) {
-            // Shared helper = same fragment resolution and z-reference offset
-            // as Assembly::calculate_component_z; the two cannot diverge.
-            const size_t merged = stackup.mergeInterconnectFragment(
-                m_assembly->interconnect_adapter());
+            // Shared helpers = same fragment resolution and z-reference
+            // offset as Assembly::calculate_component_z; the two cannot
+            // diverge. Render merges the UNION of the fragments of all
+            // methods the dies use (per-die connection ids are the keys);
+            // the assembly-level adapter is the legacy fallback when no
+            // method id resolves.
+            const std::vector<std::string> keys =
+                LayerStackup::resolveInterconnectKeys(
+                    m_assembly->interconnect_method_ids(),
+                    m_assembly->interconnect_adapter());
+            const size_t merged = stackup.mergeInterconnectFragments(keys);
             if (merged > 0) {
-                qDebug() << "Merged" << merged << "interconnect body layers for adapter"
-                         << QString::fromStdString(m_assembly->interconnect_adapter())
+                QStringList keyList;
+                for (const auto& k : keys) keyList << QString::fromStdString(k);
+                qDebug() << "Merged" << merged << "interconnect body layers from"
+                         << keyList.join(", ")
                          << "into interposer tech" << QString::fromStdString(techId);
             }
         }
