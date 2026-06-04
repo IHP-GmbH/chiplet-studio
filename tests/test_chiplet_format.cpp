@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <cstdlib>
+#include <fstream>
 #include "formats/ChipletFormat.h"
 #include "core/LayerStackup.h"
 
@@ -723,6 +724,130 @@ TEST(InterconnectMergeZ, StackupPathResolvesPlainProductIdOnly)
     EXPECT_NE(BlenderGDSConfigs::stackupPath("rdl"), expected);
 
     BlenderGDSConfigs::setConfigsDir("");
+}
+
+// ---------------------------------------------------------------------
+// ${VAR} ecosystem-root expansion in path entries (resolve_path).
+// Hermetic: fake roots under a temp tree plus env vars; never depends on
+// real sibling checkouts. Convention: environment -> sibling-checkout
+// walk (anchored at the .chiplet dir) -> ChipletFormatException.
+// Mirrors the Python reader (chiplet_kicad_plugin/hyp_to_gds.py).
+// ---------------------------------------------------------------------
+
+std::filesystem::path writeChipletWithLayout(const std::filesystem::path& dir,
+                                             const std::string& layout)
+{
+    std::filesystem::create_directories(dir);
+    std::filesystem::path file = dir / "pathvars.chiplet";
+    std::ofstream out(file);
+    out << "format_version: \"1.0\"\n"
+        << "assembly:\n"
+        << "  name: \"PathVars\"\n"
+        << "  units: \"um\"\n"
+        << "components:\n"
+        << "  - id: die_a\n"
+        << "    type: die\n"
+        << "    layout: \"" << layout << "\"\n"
+        << "    dimensions: { width: 100, height: 100, thickness: 10 }\n"
+        << "    position: { x: 0, y: 0, z: 0 }\n";
+    return file;
+}
+
+TEST(PathVars, EnvExpansionInLayout)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_env";
+    fs::remove_all(base);
+
+    // Fake interposer PDK root carrying the marker subpath.
+    const fs::path root = base / "custom_pdk";
+    fs::create_directories(root / "libs.tech" / "klayout");
+    setenv("INTERPOSER_PDK_ROOT", root.string().c_str(), 1);
+
+    const fs::path file = writeChipletWithLayout(
+        base / "proj", "${INTERPOSER_PDK_ROOT}/libs.tech/klayout/tech/x.gds");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (root / "libs.tech" / "klayout" / "tech" / "x.gds").string());
+
+    unsetenv("INTERPOSER_PDK_ROOT");
+    fs::remove_all(base);
+}
+
+TEST(PathVars, WalkExpansionFromChipletDir)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_walk";
+    fs::remove_all(base);
+
+    // Sibling checkout two levels above the dir holding the .chiplet.
+    fs::create_directories(base / "gds_to_kicad" / "pdks");
+    unsetenv("GDS_TO_KICAD_ROOT");
+
+    const fs::path file = writeChipletWithLayout(
+        base / "designs" / "proj", "${GDS_TO_KICAD_ROOT}/pdks/sg13g2.lyp");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (base / "gds_to_kicad" / "pdks" / "sg13g2.lyp").string());
+
+    fs::remove_all(base);
+}
+
+TEST(PathVars, BogusEnvFallsThroughToWalk)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_bogus";
+    fs::remove_all(base);
+
+    fs::create_directories(base / "gds_to_kicad" / "pdks");
+    // Set-but-invalid env root (marker subpath missing) must fall through
+    // to the walk instead of failing or resolving to the bogus root.
+    setenv("GDS_TO_KICAD_ROOT", (base / "nonexistent").string().c_str(), 1);
+
+    const fs::path file = writeChipletWithLayout(
+        base / "proj", "${GDS_TO_KICAD_ROOT}/pdks/sg13g2.lyp");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (base / "gds_to_kicad" / "pdks" / "sg13g2.lyp").string());
+
+    unsetenv("GDS_TO_KICAD_ROOT");
+    fs::remove_all(base);
+}
+
+TEST(PathVars, UnresolvableVarThrows)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_bad";
+    fs::remove_all(base);
+    unsetenv("NO_SUCH_ECOSYSTEM_ROOT");
+
+    const fs::path file = writeChipletWithLayout(
+        base / "proj", "${NO_SUCH_ECOSYSTEM_ROOT}/a.gds");
+
+    ChipletFormat format;
+    try {
+        format.load(file.string());
+        FAIL() << "Expected ChipletFormatException";
+    } catch (const ChipletFormatException& e) {
+        EXPECT_NE(std::string(e.what()).find("NO_SUCH_ECOSYSTEM_ROOT"),
+                  std::string::npos);
+    }
+    fs::remove_all(base);
 }
 
 } // namespace

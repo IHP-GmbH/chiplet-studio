@@ -84,6 +84,7 @@ private:
 
     // Utility
     string_type resolve_path(const string_type& relativePath) const;
+    string_type expand_path_vars(const string_type& path) const;
 
     string_type m_basePath;  // Directory containing the .chiplet file
 };
