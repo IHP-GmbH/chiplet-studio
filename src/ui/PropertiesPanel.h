@@ -146,6 +146,8 @@ private:
     ComponentID m_selectedComponentId;
     Assembly* m_assembly = nullptr;
     LayerPropertiesFile m_layerProps;
+    bool m_showingInterconnect = false;  // panel shows the assembly-level
+                                         // interconnect method, not a component
 
     // UI Elements
     QScrollArea* m_scrollArea = nullptr;

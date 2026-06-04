@@ -207,6 +207,7 @@ QLabel* PropertiesPanel::createValueLabel(const QString& text)
 
 void PropertiesPanel::setComponent(const ComponentID& componentId, Assembly* assembly)
 {
+    m_showingInterconnect = false;
     m_selectedComponentId = componentId;
     m_assembly = assembly;
     updateDisplay();
@@ -222,61 +223,9 @@ void PropertiesPanel::setLayerVisibilityResolver(std::function<bool(const QStrin
     m_layerVisibilityResolver = std::move(resolver);
 }
 
-void PropertiesPanel::showInterconnect()
-{
-    clearSelection();
-
-    if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
-        return;
-    }
-    const std::string& adapter = m_assembly->interconnect_adapter();
-
-    // Component group doubles as the identity card: the interconnect is
-    // assembly-level (no position/dimensions/layout of its own -- its 3D
-    // bodies merge into the interposer's layer render).
-    m_idLabel->setText("interconnect");
-    m_typeLabel->setText("Interconnect");
-    m_techLabel->setText(QString::fromStdString(adapter));
-
-    // Provenance rows in the metadata tree: the interconnect PDK identity
-    // (registered Technology) and the resolved 3D stackup fragment.
-    auto addRow = [this](const QString& key, const QString& value) {
-        QTreeWidgetItem* item = new QTreeWidgetItem();
-        item->setText(0, key);
-        item->setText(1, value);
-        item->setToolTip(1, value);
-        m_metadataTree->addTopLevelItem(item);
-    };
-
-    Technology* tech = m_assembly->technology(adapter);
-    if (tech && !tech->description().empty()) {
-        addRow("description", QString::fromStdString(tech->description()));
-    }
-    if (tech && !tech->layer_properties_path().empty()) {
-        addRow("layer_properties",
-               QString::fromStdString(tech->layer_properties_path()));
-    }
-
-    const std::string frag =
-        BlenderGDSConfigs::interconnectStackupFragmentPath(adapter);
-    if (!frag.empty()) {
-        addRow("stackup_fragment", QString::fromStdString(frag));
-        LayerStackup ic;
-        if (ic.loadFromBlenderGDS(frag)) {
-            for (const auto& l : ic.sortedLayers()) {
-                addRow(QString::fromStdString("body: " + l.name),
-                       QString("%1/%2  z %3 um  h %4 um")
-                           .arg(l.layer).arg(l.datatype)
-                           .arg(l.z_bottom, 0, 'f', 2)
-                           .arg(l.thickness, 0, 'f', 2));
-            }
-        }
-    }
-    m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
-}
-
 void PropertiesPanel::clearSelection()
 {
+    m_showingInterconnect = false;  // showInterconnect() re-sets it at the end
     m_selectedComponentId = INVALID_COMPONENT_ID;
 
     // Reset all labels
@@ -334,6 +283,13 @@ void PropertiesPanel::onGroupToggled(bool checked)
 
 void PropertiesPanel::updateDisplay()
 {
+    // Interconnect view: not component-driven; rebuild it instead (unit
+    // changes and external refreshes land here).
+    if (m_showingInterconnect) {
+        showInterconnect();
+        return;
+    }
+
     if (!m_assembly || !is_valid_id(m_selectedComponentId)) {
         clearSelection();
         return;
@@ -531,6 +487,112 @@ QPixmap createPatternSwatch(const LayerStyle& layer, int swatchSize = 16)
 }
 
 } // anonymous namespace
+
+void PropertiesPanel::showInterconnect()
+{
+    clearSelection();
+
+    if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
+        return;
+    }
+    const std::string& adapter = m_assembly->interconnect_adapter();
+
+    // Component group doubles as the identity card: the interconnect is
+    // assembly-level (no position/dimensions/layout of its own -- its 3D
+    // bodies merge into the interposer's layer render).
+    m_idLabel->setText("interconnect");
+    m_typeLabel->setText("Interconnect");
+    m_techLabel->setText(QString::fromStdString(adapter));
+
+    // Provenance rows in the metadata tree: the interconnect PDK identity
+    // (registered Technology) and the resolved 3D stackup fragment.
+    auto addRow = [this](const QString& key, const QString& value) {
+        QTreeWidgetItem* item = new QTreeWidgetItem();
+        item->setText(0, key);
+        item->setText(1, value);
+        item->setToolTip(1, value);
+        m_metadataTree->addTopLevelItem(item);
+    };
+
+    Technology* tech = m_assembly->technology(adapter);
+    if (tech && !tech->description().empty()) {
+        addRow("description", QString::fromStdString(tech->description()));
+    }
+    if (tech && !tech->layer_properties_path().empty()) {
+        addRow("layer_properties",
+               QString::fromStdString(tech->layer_properties_path()));
+    }
+
+    const std::string frag =
+        BlenderGDSConfigs::interconnectStackupFragmentPath(adapter);
+    if (!frag.empty()) {
+        addRow("stackup_fragment", QString::fromStdString(frag));
+    }
+    m_metadataGroup->setVisible(m_metadataTree->topLevelItemCount() > 0);
+
+    // Body layers as a live layer tree, bound to the interposer component
+    // (the merge target, where the bodies render). The existing checkbox
+    // plumbing (onLayerItemChanged -> layerVisibilityChanged -> 3D view)
+    // then works unchanged for show/hide of the interconnect bodies.
+    Component* interposer = nullptr;
+    for (const auto& c : m_assembly->components()) {
+        if (c->type() == ComponentType::Interposer) {
+            interposer = c.get();
+            break;
+        }
+    }
+    LayerStackup ic;
+    if (interposer && !frag.empty() && ic.loadFromBlenderGDS(frag)) {
+        m_selectedComponentId = interposer->id();
+
+        m_blockLayerSync = true;
+        // Swatches from the interconnect PDK's own lyp when available.
+        m_layerProps = LayerPropertiesFile();
+        if (tech && !tech->layer_properties_path().empty()) {
+            m_layerProps.load(tech->layer_properties_path());
+        }
+        int count = 0;
+        for (const auto& l : ic.sortedLayers()) {
+            QTreeWidgetItem* item = new QTreeWidgetItem();
+            for (const auto& lp : m_layerProps.layers()) {
+                if (lp.key.layer == l.layer && lp.key.datatype == l.datatype) {
+                    item->setIcon(0, QIcon(createPatternSwatch(lp, 16)));
+                    break;
+                }
+            }
+            item->setText(0, QString::fromStdString(l.name));
+            item->setText(1, QString("%1/%2").arg(l.layer).arg(l.datatype));
+            bool visible = m_layerVisibilityResolver
+                ? m_layerVisibilityResolver(
+                      QString::fromStdString(m_selectedComponentId),
+                      l.layer, l.datatype)
+                : true;
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+            item->setData(0, Qt::UserRole, l.layer);
+            item->setData(0, Qt::UserRole + 1, l.datatype);
+            QString tooltip = QString("Body: %1\nL/D: %2/%3\nz: %4 um\n"
+                                      "height: %5 um\nRenders on: %6")
+                .arg(QString::fromStdString(l.name))
+                .arg(l.layer).arg(l.datatype)
+                .arg(l.z_bottom, 0, 'f', 2)
+                .arg(l.thickness, 0, 'f', 2)
+                .arg(QString::fromStdString(interposer->id()));
+            item->setToolTip(0, tooltip);
+            item->setToolTip(1, tooltip);
+            m_layerTree->addTopLevelItem(item);
+            ++count;
+        }
+        m_layersGroup->setTitle(QString("Layers (%1)").arg(count));
+        // Force a full rebuild when a real component is selected next (the
+        // tree currently holds only the interconnect body layers).
+        m_layersForComponent = INVALID_COMPONENT_ID;
+        m_blockLayerSync = false;
+    }
+
+    m_showingInterconnect = true;
+}
+
 
 void PropertiesPanel::updateLayersGroup()
 {

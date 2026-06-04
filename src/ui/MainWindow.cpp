@@ -20,6 +20,7 @@
 #include "view3d/GDSAnalyzer.h"
 #include "formats/ChipletFormat.h"
 #include "core/Technology.h"
+#include "core/LayerStackup.h"
 #include "core/commands/CmdMoveComponent.h"
 #include "core/commands/CmdSetRenderMode.h"
 #include "core/Snapper.h"
@@ -231,6 +232,32 @@ void MainWindow::setupPanels()
                 m_propertiesPanel->setAssembly(m_assembly.get());
                 m_propertiesPanel->showInterconnect();
                 m_assemblyView->selectComponent(QString());
+            });
+
+    // Hierarchy interconnect checkbox -> show/hide the method's 3D body
+    // layers (they render merged into the interposer component's stackup)
+    connect(m_hierarchyPanel, &HierarchyPanel::interconnectVisibilityChanged,
+            this, [this](bool visible) {
+                if (!m_assembly || m_assembly->interconnect_adapter().empty()) {
+                    return;
+                }
+                const std::string frag =
+                    BlenderGDSConfigs::interconnectStackupFragmentPath(
+                        m_assembly->interconnect_adapter());
+                LayerStackup ic;
+                if (frag.empty() || !ic.loadFromBlenderGDS(frag)) {
+                    return;
+                }
+                for (const auto& comp : m_assembly->components()) {
+                    if (comp->type() != ComponentType::Interposer) {
+                        continue;
+                    }
+                    QString compId = QString::fromStdString(comp->id());
+                    for (const auto& l : ic.sortedLayers()) {
+                        m_assemblyView->setLayerVisible(
+                            compId, l.layer, l.datatype, visible);
+                    }
+                }
             });
 
     // Hierarchy zoom request -> 3D View
