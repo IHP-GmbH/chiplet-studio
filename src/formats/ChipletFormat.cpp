@@ -1021,16 +1021,118 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     file << out.c_str();
 }
 
+namespace {
+
+// Ecosystem-root variables accepted inside .chiplet path entries. Each maps
+// to the directory name walked for next to the .chiplet file plus the marker
+// subpath that must exist under the root. Mirrors the Python reader
+// (chiplet_kicad_plugin/hyp_to_gds.py) and the discovery convention in
+// adk/docs/integration.md: environment -> sibling-checkout walk -> loud
+// failure.
+struct PathVarMarker {
+    const char* name;
+    const char* dirname;
+    const char* marker; // subpath under the root that must exist
+};
+
+constexpr PathVarMarker kPathVarMarkers[] = {
+    { "INTERPOSER_PDK_ROOT", "interposer", "libs.tech/klayout" },
+    { "GDS_TO_KICAD_ROOT", "gds_to_kicad", "pdks" },
+    { "ADK_ROOT", "adk", "klayout/drc" },
+    { "INTERCONNECT_PDK_ROOT", "interconnect_pdk", "manifest" },
+};
+
+std::string discover_path_var(const std::string& name,
+                              const std::filesystem::path& startDir)
+{
+    const PathVarMarker* marker = nullptr;
+    for (const auto& m : kPathVarMarkers) {
+        if (name == m.name) {
+            marker = &m;
+            break;
+        }
+    }
+
+    // A set-and-valid environment value wins; set-but-invalid (marker
+    // subpath missing) falls through to the walk, mirroring the Python side.
+    if (const char* env = std::getenv(name.c_str())) {
+        if (env[0] != '\0'
+            && (marker == nullptr
+                || std::filesystem::is_directory(
+                       std::filesystem::path(env) / marker->marker))) {
+            return env;
+        }
+    }
+
+    if (marker == nullptr) {
+        return {};
+    }
+
+    std::error_code ec;
+    std::filesystem::path base = std::filesystem::absolute(startDir, ec);
+    if (ec) {
+        base = startDir;
+    }
+    while (!base.empty()) {
+        std::filesystem::path cand = base / marker->dirname;
+        if (std::filesystem::is_directory(cand / marker->marker)) {
+            return cand.string();
+        }
+        std::filesystem::path parent = base.parent_path();
+        if (parent == base) {
+            break;
+        }
+        base = parent;
+    }
+    return {};
+}
+
+} // namespace
+
+ChipletFormat::string_type ChipletFormat::expand_path_vars(const string_type& path) const
+{
+    if (path.find("${") == string_type::npos) {
+        return path;
+    }
+
+    string_type out = path;
+    size_t pos = 0;
+    while ((pos = out.find("${", pos)) != string_type::npos) {
+        size_t end = out.find('}', pos + 2);
+        if (end == string_type::npos) {
+            break; // unterminated reference: pass through untouched
+        }
+        std::string name = out.substr(pos + 2, end - pos - 2);
+        std::string value = discover_path_var(name, m_basePath);
+        if (value.empty()) {
+            throw ChipletFormatException(
+                "cannot resolve ${" + name + "} in path '" + path
+                    + "'; set the " + name + " environment variable or keep "
+                    "the checkout next to the .chiplet file (ecosystem "
+                    "discovery convention, see adk/docs/integration.md)",
+                0, "path");
+        }
+        out.replace(pos, end - pos + 1, value);
+        pos += value.size();
+    }
+    return out;
+}
+
 ChipletFormat::string_type ChipletFormat::resolve_path(const string_type& relativePath) const
 {
     if (relativePath.empty()) {
         return relativePath;
     }
 
+    // Expand ${VAR} ecosystem-root references first (environment ->
+    // sibling-checkout walk -> throw). Plain paths pass through untouched,
+    // so absolute and relative inputs keep their normal semantics.
+    string_type expanded = expand_path_vars(relativePath);
+
     // Check if already absolute
-    std::filesystem::path p(relativePath);
+    std::filesystem::path p(expanded);
     if (p.is_absolute()) {
-        return relativePath;
+        return expanded;
     }
 
     // Resolve relative to base path
