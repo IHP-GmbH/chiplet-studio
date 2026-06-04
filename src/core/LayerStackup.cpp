@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
@@ -288,17 +289,38 @@ std::string interconnectStackupFragmentPath(const std::string& adapter)
 {
     if (adapter.empty()) return "";
 
-    // Env override first (consistent with the Python tools' INTERCONNECT_PDK_ROOT).
+    namespace fs = std::filesystem;
+    const std::string fragName = adapter + ".stackup.yaml";
+    // IHP PDK layout: the fragments live under libs.tech/<tool>/ of the
+    // interconnect PDK, keyed by the consuming tool (chiplet_studio).
+    auto fragmentUnder = [&fragName](const fs::path& pdkRoot) {
+        return pdkRoot / "libs.tech" / "chiplet_studio" / "stackup_fragments"
+               / fragName;
+    };
+    std::error_code ec;
+
+    // Env override first (consistent with the Python tools'
+    // INTERCONNECT_PDK_ROOT). A set-but-invalid value falls through to the
+    // walk, mirroring the ${VAR} reader chain.
     const char* env = std::getenv("INTERCONNECT_PDK_ROOT");
     if (env && env[0] != '\0') {
-        return std::string(env) + "/config/stackup_fragments/" + adapter + ".stackup.yaml";
+        fs::path cand = fragmentUnder(fs::path(env));
+        if (fs::exists(cand, ec)) return cand.string();
     }
 
-    // Fallback: the interconnect PDK as a sibling of the chiplet-studio project
-    // root (<project>/chiplet-studio/configs -> <project>/interconnect_pdk).
+    // Sibling-checkout walk up from the configs dir (ecosystem discovery
+    // convention: no fixed-depth path arithmetic). First hit wins; empty
+    // when no checkout carries the fragment -- callers skip the merge.
     std::string base = getConfigsDir();
     if (base.empty()) return "";
-    return base + "/../../interconnect_pdk/config/stackup_fragments/" + adapter + ".stackup.yaml";
+    fs::path dir = fs::absolute(fs::path(base), ec);
+    if (ec) return "";
+    for (fs::path p = dir; ; p = p.parent_path()) {
+        fs::path cand = fragmentUnder(p / "interconnect_pdk");
+        if (fs::exists(cand, ec)) return cand.string();
+        if (p == p.parent_path()) break;
+    }
+    return "";
 }
 
 std::string colorSchemePath(const std::string& techId, const std::string& scheme)
