@@ -80,6 +80,7 @@ signals:
 
 private slots:
     void onFileOpen();
+    void onFileReload();
     void onFileSave();
     void onFileNew();
 
