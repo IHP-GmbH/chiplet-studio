@@ -87,6 +87,10 @@ void MainWindow::setupMenus()
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onFileOpen);
 
+    QAction* reloadAction = fileMenu->addAction("&Reload");
+    reloadAction->setShortcut(QKeySequence::Refresh);
+    connect(reloadAction, &QAction::triggered, this, &MainWindow::onFileReload);
+
     QAction* saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, &MainWindow::onFileSave);
@@ -455,6 +459,27 @@ void MainWindow::openFile(const QString& path)
         return result;
     });
     m_loadWatcher->setFuture(future);
+}
+
+void MainWindow::onFileReload()
+{
+    // Re-read the current .chiplet from disk. The typical loop is
+    // re-export from KiCad, then refresh here -- no close/reopen.
+    // openFile() runs the same full load pipeline as Open, so
+    // technologies, interconnect fragments and every view rebuild.
+    // Same semantics as Open: the in-memory session is replaced.
+    if (m_currentFilePath.isEmpty()) {
+        statusBar()->showMessage("Nothing to reload (no file loaded)", 3000);
+        return;
+    }
+    if (!QFile::exists(m_currentFilePath)) {
+        statusBar()->showMessage(
+            "Cannot reload: file no longer exists: " + m_currentFilePath,
+            5000);
+        return;
+    }
+    statusBar()->showMessage("Reloading " + m_currentFilePath, 2000);
+    openFile(m_currentFilePath);
 }
 
 void MainWindow::onFileOpen()
