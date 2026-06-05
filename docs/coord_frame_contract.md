@@ -24,6 +24,9 @@ this document by path.
    canonical path. KiCad's `pcbnew` GUI export produces an
    intermediate `.chiplet` whose positions live in the wrong frame
    (PCB-bbox-corner) and is not directly consumable by chiplet-studio.
+6. Interposer `dimensions:` are the **board outline** (prBoundary
+   189/0, drawn from KiCad Edge.Cuts) when present in the GDS;
+   `position:` stays the full-GDS-bbox center (§1.5).
 
 Any tool that writes a `.chiplet` file MUST conform to this contract.
 Any tool that reads one MUST validate that the contract is followed
@@ -54,10 +57,16 @@ The canonical frame for `.chiplet` `position:` values is:
   packaging tool all consume positions as offsets within the GDS
   bbox.
 - The PCB Edge.Cuts bounding box (which KiCad uses natively) **does
-  not always match** the GDS bbox. In the wire-bond demo the shift is
-  (-200 µm, -780 µm) even though widths and heights agree to the µm.
-  The GDS frame is the only one with no such hidden shift relative to
-  what gets fabricated.
+  not always match** the GDS bbox. Historically the wire-bond demo
+  carried a hidden shift of (-200 µm, -780 µm) between the two frames
+  even though widths and heights agreed to the µm. The GDS frame is
+  the only one with no such hidden shift relative to what gets
+  fabricated.
+- Since the converter draws the board outline (Edge.Cuts → prBoundary
+  189/0) into the interposer GDS, the GDS bbox *contains* the outline.
+  When all drawn geometry sits inside the outline — the normal case —
+  the canonical origin coincides with the board outline's lower-left
+  corner, and the historical shift above is zero by construction.
 
 ### 1.3 Diagram (top-down view)
 
@@ -99,6 +108,23 @@ dimensions:
   thickness: 50.0
 ```
 
+### 1.5 Interposer dimensions vs. position
+
+The two fields of the interposer component answer different
+questions and have different sources:
+
+| Field | Source | Meaning |
+|---|---|---|
+| `dimensions: width/height` | bbox of prBoundary 189/0 (the board outline, drawn from KiCad Edge.Cuts) when the layer is present; bbox of all drawn geometry otherwise (legacy GDS) | The fab extent of the interposer — what viewers render as the substrate body |
+| `position: x/y` | half of the **full** GDS bbox (all layers, outline included) | Where the mesh bbox center sits in the canonical frame (`anchor: bbox_center`, §2) |
+
+When the outline contains all drawn geometry, the full bbox equals
+the outline bbox and both fields describe the same rectangle. When
+copper leaks outside the outline (a design error — the converter
+warns loudly at export), `dimensions` keeps the true board size
+while `position` follows the mesh center, preserving die/pillar
+registry in the render at the cost of a shifted substrate body.
+
 The reader uses `position` and `dimensions` together to compute the
 3D world placement (see §5).
 
@@ -138,12 +164,12 @@ components:
     layout: ./interposer.gds
     top_cell: TOP
     position:
-      x: 1326.576    # half of GDS bbox width = 2653.152 / 2
-      y: 2313.005    # half of GDS bbox height = 4626.009 / 2
+      x: 1750.0      # half of GDS bbox width (= outline width when
+      y: 2800.0      #   all geometry is on-board, see §1.5)
       z: 0
     dimensions:
-      width: 2653.152
-      height: 4626.009
+      width: 3500.0  # board outline (prBoundary 189/0), see §1.5
+      height: 5600.0
       thickness: 13.83
 
   - id: U1
@@ -155,8 +181,8 @@ components:
     layout: ./Metal_Test.gds
     top_cell: Metal_Test
     position:
-      x: 1503.584    # die center in interposer-local frame
-      y: 1822.939
+      x: 1954.124    # die center in interposer-local frame
+      y: 2330.481
       z: 61.83       # see §3
     dimensions:
       width: 770.0
