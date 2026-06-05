@@ -262,16 +262,32 @@ TEST_F(CoordFrameContractWirebondDemo, Anchors)
 // 13.83 + 44 = 57.83. Option 1 is the die's design rule set: U1's pad
 // ring has a 79.93 um-pitch pair (sout/GND), legal at Option 1's 75 um
 // minimum but below Option 2's 80 um -- the canonical regen therefore
-// uses --connection cupillar_opt1. XY are the GDS-bbox-corner placement
-// values for the wire-bond demo; their exact numeric values are the
-// regression witness against the 6 previous alignment incidents.
+// selects cupillar_opt1 for U1 (per-die CONNECTION field). XY are the
+// GDS-bbox-corner placement values for the two-die wire-bond demo;
+// since the converter draws the board outline on prBoundary 189/0 the
+// canonical origin is the board outline corner (Edge.Cuts), routing
+// independent. Their exact numeric values are the regression witness
+// against the 6 previous alignment incidents.
 TEST_F(CoordFrameContractWirebondDemo, U1Position)
 {
     auto* u1 = assembly->component("U1");
     ASSERT_NE(u1, nullptr);
-    EXPECT_NEAR(u1->position().x, 1503.58, 0.1);
-    EXPECT_NEAR(u1->position().y, 1822.94, 0.1);
+    EXPECT_NEAR(u1->position().x, 1954.12, 0.1);
+    EXPECT_NEAR(u1->position().y, 2332.48, 0.1);
     EXPECT_NEAR(u1->position().z, 57.83,   0.01);
+}
+
+// U2 sits on vendorx_microbump (18 um Cu + 6 um cap = 24 um stack):
+// z = 13.83 + 24 = 37.83. The per-die method comes from U2's
+// CONNECTION footprint field; this locks the mixed-method demo (U1
+// IHP cu-pillar + U2 vendor microbump in one export).
+TEST_F(CoordFrameContractWirebondDemo, U2Position)
+{
+    auto* u2 = assembly->component("U2");
+    ASSERT_NE(u2, nullptr);
+    EXPECT_NEAR(u2->position().x, 5170.23, 0.1);
+    EXPECT_NEAR(u2->position().y, 2420.27, 0.1);
+    EXPECT_NEAR(u2->position().z, 37.83,   0.01);
 }
 
 TEST_F(CoordFrameContractWirebondDemo, InterposerPosition)
@@ -279,15 +295,21 @@ TEST_F(CoordFrameContractWirebondDemo, InterposerPosition)
     auto* interposer = assembly->component("interposer");
     ASSERT_NE(interposer, nullptr);
     // Interposer position is the bbox center in canonical (GDS-bbox-corner)
-    // coordinates: width/2, height/2, 0.
-    EXPECT_NEAR(interposer->position().x, 1326.58, 0.1);
-    EXPECT_NEAR(interposer->position().y, 2313.00, 0.1);
+    // coordinates: width/2, height/2, 0. Dimensions are the board
+    // outline (prBoundary 189/0 = KiCad Edge.Cuts), not the drawn-copper
+    // extent, per coord_frame_contract.md section 1.5.
+    EXPECT_NEAR(interposer->position().x, 3246.16, 0.1);
+    EXPECT_NEAR(interposer->position().y, 2801.00, 0.1);
     EXPECT_NEAR(interposer->position().z,    0.00, 0.01);
+    EXPECT_NEAR(interposer->dimensions().width,  6492.31, 0.1);
+    EXPECT_NEAR(interposer->dimensions().height, 5602.00, 0.1);
+    EXPECT_NEAR(interposer->dimensions().thickness, 13.83, 0.01);
 }
 
 // Pre-Gate-3 the io_pads pass-through left them in HYP-absolute
-// (~1.3e5 um). Now every pad must sit inside the interposer GDS bbox,
-// which for the wire-bond demo is 2653.152 x 4626.009 um.
+// (~1.3e5 um). Now every pad must sit inside the interposer extent,
+// which for the wire-bond demo is the 6492.312 x 5602.001 um board
+// outline.
 TEST_F(CoordFrameContractWirebondDemo, IOPadsInCanonicalFrame)
 {
     auto* interposer = assembly->component("interposer");
