@@ -484,15 +484,20 @@ std::string interconnectStackupFragmentPath(const std::string& adapter)
     }
 
     // Sibling-checkout walk up from the configs dir (ecosystem discovery
-    // convention: no fixed-depth path arithmetic). First hit wins; empty
-    // when no checkout carries the fragment -- callers skip the merge.
+    // convention: no fixed-depth path arithmetic). Tries the canonical
+    // directory name first, then the GitHub repo name a default clone
+    // produces. First hit wins; empty when no checkout carries the
+    // fragment -- callers skip the merge.
     std::string base = getConfigsDir();
     if (base.empty()) return "";
     fs::path dir = fs::absolute(fs::path(base), ec);
     if (ec) return "";
     for (fs::path p = dir; ; p = p.parent_path()) {
-        fs::path cand = fragmentUnder(p / "interconnect_pdk");
-        if (fs::exists(cand, ec)) return cand.string();
+        for (const char* dirname : { "interconnect_pdk",
+                                     "IHP-Interconnect-IntM4TM2" }) {
+            fs::path cand = fragmentUnder(p / dirname);
+            if (fs::exists(cand, ec)) return cand.string();
+        }
         if (p == p.parent_path()) break;
     }
     return "";
