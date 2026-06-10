@@ -132,6 +132,57 @@ TEST(ChipletFormat, MissingRequiredField)
     }
 }
 
+// Unknown format_version values must be rejected loudly, not consumed.
+TEST(ChipletFormat, RejectsUnknownFormatVersion)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_format_version";
+    fs::remove_all(base);
+    fs::create_directories(base);
+    const fs::path file = base / "future.chiplet";
+    {
+        std::ofstream out(file);
+        out << "format_version: \"2.0\"\n"
+            << "assembly:\n"
+            << "  name: \"Future\"\n"
+            << "  units: \"um\"\n";
+    }
+
+    ChipletFormat format;
+    try {
+        format.load(file.string());
+        FAIL() << "Expected ChipletFormatException";
+    } catch (const ChipletFormatException& e) {
+        const std::string msg = e.what();
+        EXPECT_NE(msg.find("2.0"), std::string::npos);
+        EXPECT_NE(msg.find("1.0"), std::string::npos);
+    }
+    fs::remove_all(base);
+}
+
+// An unquoted YAML scalar 1.0 is the same revision and must load.
+TEST(ChipletFormat, AcceptsUnquotedFormatVersion)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_format_unquoted";
+    fs::remove_all(base);
+    fs::create_directories(base);
+    const fs::path file = base / "unquoted.chiplet";
+    {
+        std::ofstream out(file);
+        out << "format_version: 1.0\n"
+            << "assembly:\n"
+            << "  name: \"Unquoted\"\n"
+            << "  units: \"um\"\n";
+    }
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    EXPECT_EQ(assembly->name(), "Unquoted");
+    fs::remove_all(base);
+}
+
 // Test file not found
 TEST(ChipletFormat, FileNotFound)
 {
@@ -912,9 +963,37 @@ std::filesystem::path writeChipletWithLayout(const std::filesystem::path& dir,
     return file;
 }
 
+// Snapshot-and-restore guard for the env vars these tests mutate. The
+// verify image bakes the ecosystem roots, so later env-gated tests in
+// this binary must see them untouched regardless of test order.
+class EnvVarGuard {
+public:
+    explicit EnvVarGuard(const char* name) : m_name(name) {
+        if (const char* v = std::getenv(name)) {
+            m_hadValue = true;
+            m_value = v;
+        }
+    }
+    ~EnvVarGuard() {
+        if (m_hadValue) {
+            setenv(m_name.c_str(), m_value.c_str(), 1);
+        } else {
+            unsetenv(m_name.c_str());
+        }
+    }
+    EnvVarGuard(const EnvVarGuard&) = delete;
+    EnvVarGuard& operator=(const EnvVarGuard&) = delete;
+
+private:
+    std::string m_name;
+    std::string m_value;
+    bool m_hadValue = false;
+};
+
 TEST(PathVars, EnvExpansionInLayout)
 {
     namespace fs = std::filesystem;
+    EnvVarGuard guard("INTERPOSER_PDK_ROOT");
     const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_env";
     fs::remove_all(base);
 
@@ -934,13 +1013,13 @@ TEST(PathVars, EnvExpansionInLayout)
     EXPECT_EQ(die->layout_path(),
               (root / "libs.tech" / "klayout" / "tech" / "x.gds").string());
 
-    unsetenv("INTERPOSER_PDK_ROOT");
     fs::remove_all(base);
 }
 
 TEST(PathVars, WalkExpansionFromChipletDir)
 {
     namespace fs = std::filesystem;
+    EnvVarGuard guard("GDS_TO_KICAD_ROOT");
     const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_walk";
     fs::remove_all(base);
 
@@ -965,6 +1044,7 @@ TEST(PathVars, WalkExpansionFromChipletDir)
 TEST(PathVars, BogusEnvFallsThroughToWalk)
 {
     namespace fs = std::filesystem;
+    EnvVarGuard guard("GDS_TO_KICAD_ROOT");
     const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_bogus";
     fs::remove_all(base);
 
@@ -984,7 +1064,112 @@ TEST(PathVars, BogusEnvFallsThroughToWalk)
     EXPECT_EQ(die->layout_path(),
               (base / "gds_to_kicad" / "pdks" / "sg13g2.lyp").string());
 
+    fs::remove_all(base);
+}
+
+TEST(PathVars, WalkAcceptsRepoNameAlias)
+{
+    namespace fs = std::filesystem;
+    EnvVarGuard guard("GDS_TO_KICAD_ROOT");
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_alias";
+    fs::remove_all(base);
+
+    // Default-clone layout: the sibling uses the GitHub repo name.
+    fs::create_directories(base / "gds-to-kicad" / "pdks");
     unsetenv("GDS_TO_KICAD_ROOT");
+
+    const fs::path file = writeChipletWithLayout(
+        base / "designs" / "proj", "${GDS_TO_KICAD_ROOT}/pdks/sg13g2.lyp");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (base / "gds-to-kicad" / "pdks" / "sg13g2.lyp").string());
+
+    fs::remove_all(base);
+}
+
+TEST(PathVars, WalkPrefersCanonicalOverAlias)
+{
+    namespace fs = std::filesystem;
+    EnvVarGuard guard("GDS_TO_KICAD_ROOT");
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_pref";
+    fs::remove_all(base);
+
+    // Both names present at the same ancestor: the canonical dir wins,
+    // matching the Python walk order.
+    fs::create_directories(base / "gds_to_kicad" / "pdks");
+    fs::create_directories(base / "gds-to-kicad" / "pdks");
+    unsetenv("GDS_TO_KICAD_ROOT");
+
+    const fs::path file = writeChipletWithLayout(
+        base / "proj", "${GDS_TO_KICAD_ROOT}/pdks/sg13g2.lyp");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (base / "gds_to_kicad" / "pdks" / "sg13g2.lyp").string());
+
+    fs::remove_all(base);
+}
+
+TEST(PathVars, InterposerAliasOpenIntM4TM2)
+{
+    namespace fs = std::filesystem;
+    EnvVarGuard guard("INTERPOSER_PDK_ROOT");
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_intm4";
+    fs::remove_all(base);
+
+    // Interposer PDK checked out under its GitHub repo name.
+    fs::create_directories(base / "OpenIntM4TM2" / "libs.tech" / "klayout");
+    unsetenv("INTERPOSER_PDK_ROOT");
+
+    const fs::path file = writeChipletWithLayout(
+        base / "proj", "${INTERPOSER_PDK_ROOT}/libs.tech/klayout/tech/x.gds");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (base / "OpenIntM4TM2" / "libs.tech" / "klayout" / "tech"
+               / "x.gds").string());
+
+    fs::remove_all(base);
+}
+
+TEST(PathVars, PdkRootResolvesViaWalk)
+{
+    namespace fs = std::filesystem;
+    EnvVarGuard guard("PDK_ROOT");
+    const fs::path base = fs::temp_directory_path() / "chiplet_pathvars_pdk";
+    fs::remove_all(base);
+
+    // Base SG13G2 PDK sibling (standard IHP layout under the root).
+    fs::create_directories(base / "IHP-Open-PDK" / "ihp-sg13g2" / "libs.tech"
+                           / "klayout");
+    unsetenv("PDK_ROOT");
+
+    const fs::path file = writeChipletWithLayout(
+        base / "proj",
+        "${PDK_ROOT}/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyt");
+
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    ASSERT_NE(assembly, nullptr);
+    auto die = assembly->component("die_a");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->layout_path(),
+              (base / "IHP-Open-PDK" / "ihp-sg13g2" / "libs.tech" / "klayout"
+               / "tech" / "sg13g2.lyt").string());
+
     fs::remove_all(base);
 }
 

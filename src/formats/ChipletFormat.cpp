@@ -109,6 +109,15 @@ std::string interface_type_to_string(InterfaceType t)
     return "micro_bump";
 }
 
+namespace {
+
+// The .chiplet format revision this reader/writer implements. load()
+// rejects any other value; bump together with docs/CHIPLET_FORMAT_SPEC.md
+// and the Python writer (chiplet_kicad_plugin/writers/chiplet_writer.py).
+constexpr const char* kSupportedFormatVersion = "1.0";
+
+} // namespace
+
 ChipletFormat::ChipletFormat() = default;
 ChipletFormat::~ChipletFormat() = default;
 
@@ -129,9 +138,19 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         throw ChipletFormatException(e.what(), 0, "YAML");
     }
 
-    // Check format version
+    // Check format version: present and exactly the supported revision.
+    // Unknown versions are rejected instead of silently consuming fields
+    // whose semantics may have changed between revisions.
     if (!root["format_version"]) {
         throw ChipletFormatException("Missing required field", 0, "format_version");
+    }
+    const std::string formatVersion = root["format_version"].as<std::string>("");
+    if (formatVersion != kSupportedFormatVersion) {
+        throw ChipletFormatException(
+            "unsupported format_version '" + formatVersion + "' in " + path
+                + "; this reader supports format_version \""
+                + kSupportedFormatVersion + "\"",
+            0, "format_version");
     }
 
     // Refuse to load intermediate output (KiCad export marks .chiplet
@@ -723,7 +742,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     out << YAML::BeginMap;
 
     // Format version
-    out << YAML::Key << "format_version" << YAML::Value << "1.0";
+    out << YAML::Key << "format_version" << YAML::Value << kSupportedFormatVersion;
 
     // Assembly metadata
     out << YAML::Key << "assembly" << YAML::Value << YAML::BeginMap;
@@ -1072,22 +1091,27 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 namespace {
 
 // Ecosystem-root variables accepted inside .chiplet path entries. Each maps
-// to the directory name walked for next to the .chiplet file plus the marker
-// subpath that must exist under the root. Mirrors the Python reader
-// (chiplet_kicad_plugin/hyp_to_gds.py) and the discovery convention in
-// adk/docs/integration.md: environment -> sibling-checkout walk -> loud
-// failure.
+// to the directory names walked for next to the .chiplet file (canonical
+// name first, then the GitHub repo name a default clone produces) plus the
+// marker subpath that must exist under the root. Mirrors the Python reader
+// (chiplet_kicad_plugin/hyp_to_gds.py _PATH_VAR_MARKERS) and the discovery
+// convention in adk/docs/integration.md: environment -> sibling-checkout
+// walk -> loud failure.
 struct PathVarMarker {
     const char* name;
-    const char* dirname;
-    const char* marker; // subpath under the root that must exist
+    const char* dirnames[3]; // walk candidates, nullptr-terminated
+    const char* marker;      // subpath under the root that must exist
 };
 
 constexpr PathVarMarker kPathVarMarkers[] = {
-    { "INTERPOSER_PDK_ROOT", "interposer", "libs.tech/klayout" },
-    { "GDS_TO_KICAD_ROOT", "gds_to_kicad", "pdks" },
-    { "ADK_ROOT", "adk", "klayout/drc" },
-    { "INTERCONNECT_PDK_ROOT", "interconnect_pdk", "manifest" },
+    { "INTERPOSER_PDK_ROOT", { "interposer", "OpenIntM4TM2" },
+      "libs.tech/klayout" },
+    { "GDS_TO_KICAD_ROOT", { "gds_to_kicad", "gds-to-kicad" }, "pdks" },
+    { "ADK_ROOT", { "adk", "ADK" }, "klayout/drc" },
+    { "INTERCONNECT_PDK_ROOT",
+      { "interconnect_pdk", "IHP-Interconnect-IntM4TM2" }, "manifest" },
+    // Base SG13G2 PDK (standard IHP convention: $PDK_ROOT/ihp-sg13g2/...).
+    { "PDK_ROOT", { "IHP-Open-PDK" }, "ihp-sg13g2/libs.tech/klayout" },
 };
 
 std::string discover_path_var(const std::string& name,
@@ -1122,9 +1146,14 @@ std::string discover_path_var(const std::string& name,
         base = startDir;
     }
     while (!base.empty()) {
-        std::filesystem::path cand = base / marker->dirname;
-        if (std::filesystem::is_directory(cand / marker->marker)) {
-            return cand.string();
+        for (const char* dirname : marker->dirnames) {
+            if (dirname == nullptr) {
+                break;
+            }
+            std::filesystem::path cand = base / dirname;
+            if (std::filesystem::is_directory(cand / marker->marker)) {
+                return cand.string();
+            }
         }
         std::filesystem::path parent = base.parent_path();
         if (parent == base) {
