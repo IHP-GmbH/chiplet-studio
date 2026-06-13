@@ -755,8 +755,20 @@ void MainWindow::onFileSave()
         "Chiplet Files (*.chiplet);;All Files (*)"
     );
 
-    if (!path.isEmpty()) {
-        // TODO: Save assembly to file
+    if (path.isEmpty()) {
+        return;
+    }
+
+    try {
+        ChipletFormat format;
+        format.save(*m_assembly, path.toStdString());
+        m_currentFilePath = path;
+        setWindowTitle(QString("Chiplet Studio - %1").arg(
+            QString::fromStdString(m_assembly->name())));
+        statusBar()->showMessage("Saved: " + path, 3000);
+    } catch (const std::exception& e) {
+        QMessageBox::critical(this, "Error",
+            QString("Failed to save assembly: %1").arg(e.what()));
     }
 }
 
