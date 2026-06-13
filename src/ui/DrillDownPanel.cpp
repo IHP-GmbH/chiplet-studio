@@ -237,15 +237,18 @@ void DrillDownPanel::setupUI()
 void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPath,
                                      const Assembly& assembly)
 {
-    m_assemblyGdsPath = gdsPath;
-    m_assemblyLypPath = lypPath;
-
+    // Only record the paths once the layout actually loads. Storing them up
+    // front left m_assemblyGdsPath holding an invalid path when the GDS was
+    // missing or failed to parse, which wedged returnToAssembly()/Back into
+    // reloading a file that never loads.
     if (!QFile::exists(gdsPath)) {
         qWarning("DrillDownPanel: Assembly GDS not found: %s", qPrintable(gdsPath));
         return;
     }
 
     if (m_view2d->loadLayout(gdsPath, lypPath)) {
+        m_assemblyGdsPath = gdsPath;
+        m_assemblyLypPath = lypPath;
         m_cellMapper->build(assembly, m_view2d->cellNames());
         m_assemblyTopCell = m_view2d->currentCellName();
         m_panelMode = PanelMode::Assembly;

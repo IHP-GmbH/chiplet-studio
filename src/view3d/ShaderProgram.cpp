@@ -80,6 +80,15 @@ void ShaderProgram::release()
     glUseProgram(0);
 }
 
+void ShaderProgram::destroy()
+{
+    if (m_programId != 0 && m_initialized) {
+        glDeleteProgram(m_programId);
+    }
+    m_programId = 0;
+    m_uniformCache.clear();
+}
+
 void ShaderProgram::setUniformMat4(const QString& name, const QMatrix4x4& matrix)
 {
     int loc = uniformLocation(name);

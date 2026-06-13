@@ -207,10 +207,22 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
         db::LoadLayoutOptions options;
         view->load_layout(path.toStdString(), options, true /*add_cellview*/);
 
-        // Load layer properties if provided
+        // Load layer properties if provided. A .lyp parse/IO failure must NOT
+        // fail the whole load: the GDS is already loaded, so degrade to the
+        // default auto-generated layers instead of returning false (which left
+        // the caller thinking nothing loaded).
+        bool useDefaultLayers = lypPath.isEmpty();
         if (!lypPath.isEmpty()) {
-            view->load_layer_props(lypPath.toStdString());
-        } else {
+            try {
+                view->load_layer_props(lypPath.toStdString());
+            } catch (const tl::Exception& e) {
+                qWarning("KLayout2DView::loadLayout: failed to load layer props '%s': %s; "
+                         "falling back to default layers",
+                         qPrintable(lypPath), e.msg().c_str());
+                useDefaultLayers = true;
+            }
+        }
+        if (useDefaultLayers) {
             // Black-box / no-LYP chiplet (commercial / closed PDK node): KLayout
             // auto-creates a visible node for every detected GDS layer, so the
             // metal pads render with default colors. Guarantee the pad-name text

@@ -27,8 +27,28 @@ bool CommandProcessor::execute(CommandPtr cmd)
         return false;
     }
 
-    // Try to merge with previous command (for coalescing rapid updates)
+    // Try to merge with previous command (for coalescing rapid updates).
+    // The incoming command must still be applied to the model: previously merge
+    // only updated the stored command's target and never touched the assembly,
+    // so every move after the first was silently dropped (the component snapped
+    // back and saved files kept the stale position).
     if (!m_undoStack.empty() && m_undoStack.back()->can_merge_with(*cmd)) {
+        bool merged = false;
+        try {
+            merged = cmd->execute(*m_assembly);
+        } catch (const std::exception& e) {
+            qWarning("Command execution (merge) failed: %s", e.what());
+            return false;
+        } catch (...) {
+            qWarning("Command execution (merge) failed with unknown error");
+            return false;
+        }
+        if (!merged) {
+            return false;
+        }
+        if (m_journal) {
+            m_journal->record(*cmd);
+        }
         m_undoStack.back()->merge_with(*cmd);
         emit command_executed(QString::fromStdString(m_undoStack.back()->description()));
         return true;

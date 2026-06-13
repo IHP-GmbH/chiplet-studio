@@ -38,6 +38,63 @@ namespace chiplet {
 #endif
 }
 
+namespace {
+
+// --- Lifetime-safe Python handles -------------------------------------------
+//
+// The previous bindings handed raw Assembly*/Component* to Python. Removing a
+// component (Assembly::remove_component) destroys it while Python still holds
+// the pointer, and any later attribute access is a use-after-free that crashes
+// the whole process. We wrap Assembly and Component in handles that:
+//   * keep the owning Assembly alive (shared_ptr) for Python-created/loaded
+//     assemblies, and
+//   * re-resolve the Component by ID on every access, raising a clean Python
+//     exception instead of dereferencing freed memory.
+// A "borrowed" handle (get_current_assembly) holds no ownership and is only
+// valid while it still matches the active g_scriptAssembly.
+
+struct AssemblyHandle {
+    std::shared_ptr<Assembly> sp;   // owns the assembly (create/load)
+    Assembly* borrowed = nullptr;   // non-owning (get_current_assembly)
+
+    Assembly* get() const {
+        if (sp) return sp.get();
+        if (borrowed && borrowed == g_scriptAssembly) return borrowed;
+        throw std::runtime_error(
+            "Assembly is no longer valid (it was closed or replaced)");
+    }
+    Assembly& ref() const { return *get(); }
+};
+
+struct ComponentHandle {
+    std::shared_ptr<Assembly> sp;   // keep owning assembly alive
+    Assembly* borrowed = nullptr;
+    std::string id;
+
+    Assembly* assembly() const {
+        if (sp) return sp.get();
+        if (borrowed && borrowed == g_scriptAssembly) return borrowed;
+        throw std::runtime_error("Component's assembly is no longer valid");
+    }
+    Component& ref() const {
+        Component* c = assembly()->component(id);
+        if (!c) {
+            throw std::runtime_error("Component '" + id + "' no longer exists");
+        }
+        return *c;
+    }
+};
+
+ComponentHandle makeComponentHandle(const AssemblyHandle& a, const std::string& id) {
+    ComponentHandle h;
+    h.sp = a.sp;
+    h.borrowed = a.borrowed;
+    h.id = id;
+    return h;
+}
+
+} // namespace
+
 PYBIND11_MODULE(chiplet_studio, m) {
     m.doc() = "Chiplet Studio Python API for chiplet assembly design";
 
@@ -98,24 +155,28 @@ PYBIND11_MODULE(chiplet_studio, m) {
         .value("Substrate", ComponentType::Substrate)
         .export_values();
 
-    // Component class
-    py::class_<Component>(m, "Component")
-        .def_property_readonly("id", &Component::id)
+    // Component class (handle that re-resolves by ID; see ComponentHandle)
+    py::class_<ComponentHandle>(m, "Component")
+        .def_property_readonly("id", [](const ComponentHandle& h) { return h.ref().id(); })
         .def_property("name",
-            [](const Component& c) { return c.name(); },
-            [](Component& c, const std::string& name) { c.set_name(name); })
-        .def_property_readonly("type", &Component::type)
-        .def_property_readonly("technology", &Component::technology)
-        .def_property_readonly("layout_path", &Component::layout_path)
-        .def_property_readonly("top_cell", &Component::top_cell)
-        .def_property_readonly("position", &Component::position)
-        .def_property_readonly("rotation", &Component::rotation)
-        .def_property_readonly("dimensions", &Component::dimensions)
-        .def_property_readonly("is_array", &Component::is_array)
-        .def("metadata", &Component::metadata, py::arg("key"))
-        .def("set_metadata", &Component::set_metadata, py::arg("key"), py::arg("value"))
+            [](const ComponentHandle& h) { return h.ref().name(); },
+            [](ComponentHandle& h, const std::string& name) { h.ref().set_name(name); })
+        .def_property_readonly("type", [](const ComponentHandle& h) { return h.ref().type(); })
+        .def_property_readonly("technology", [](const ComponentHandle& h) { return h.ref().technology(); })
+        .def_property_readonly("layout_path", [](const ComponentHandle& h) { return h.ref().layout_path(); })
+        .def_property_readonly("top_cell", [](const ComponentHandle& h) { return h.ref().top_cell(); })
+        .def_property_readonly("position", [](const ComponentHandle& h) { return h.ref().position(); })
+        .def_property_readonly("rotation", [](const ComponentHandle& h) { return h.ref().rotation(); })
+        .def_property_readonly("dimensions", [](const ComponentHandle& h) { return h.ref().dimensions(); })
+        .def_property_readonly("is_array", [](const ComponentHandle& h) { return h.ref().is_array(); })
+        .def("metadata", [](const ComponentHandle& h, const std::string& key) { return h.ref().metadata(key); },
+             py::arg("key"))
+        .def("set_metadata", [](ComponentHandle& h, const std::string& key, const std::string& value) {
+            h.ref().set_metadata(key, value);
+        }, py::arg("key"), py::arg("value"))
         // Move method - direct modification (for standalone Python module)
-        .def("move", [](Component& c, double dx, double dy, double dz) {
+        .def("move", [](ComponentHandle& h, double dx, double dy, double dz) {
+            Component& c = h.ref();
             Position3D pos = c.position();
             pos.x += dx;
             pos.y += dy;
@@ -123,17 +184,20 @@ PYBIND11_MODULE(chiplet_studio, m) {
             c.set_position(pos);
         }, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            "Move component by delta")
-        .def("set_position", [](Component& c, double x, double y, double z) {
+        .def("set_position", [](ComponentHandle& h, double x, double y, double z) {
             Position3D pos;
             pos.x = x;
             pos.y = y;
             pos.z = z;
-            c.set_position(pos);
+            h.ref().set_position(pos);
         }, py::arg("x"), py::arg("y"), py::arg("z"),
            "Set absolute position")
-        .def("set_technology", &Component::set_technology, py::arg("tech_id"),
+        .def("set_technology", [](ComponentHandle& h, const std::string& techId) {
+            h.ref().set_technology(techId);
+        }, py::arg("tech_id"),
              "Set the technology ID for this component")
-        .def("__repr__", [](const Component& c) {
+        .def("__repr__", [](const ComponentHandle& h) {
+            const Component& c = h.ref();
             std::string typeStr;
             switch (c.type()) {
                 case ComponentType::Die: typeStr = "Die"; break;
@@ -154,59 +218,70 @@ PYBIND11_MODULE(chiplet_studio, m) {
             return "<Technology '" + t.id() + "'>";
         });
 
-    // Assembly class (non-copyable due to unique_ptr members)
-    // Note: We use unique_ptr with nodelete as holder because:
-    // 1. Assembly contains unique_ptr members, making it non-copyable
-    // 2. For borrowed assemblies (from get_current_assembly), we use reference policy
-    // 3. For owned assemblies, Python code should use save_assembly() before discarding
-    py::class_<Assembly, std::unique_ptr<Assembly, py::nodelete>>(m, "Assembly")
-        .def(py::init<>())
+    // Assembly class (AssemblyHandle: owns via shared_ptr, or borrows the active
+    // GUI assembly). Component access returns ComponentHandle, never a raw
+    // pointer, so removing a component can never dangle a Python reference.
+    py::class_<AssemblyHandle>(m, "Assembly")
+        .def(py::init([]() {
+            AssemblyHandle h;
+            h.sp = std::make_shared<Assembly>();
+            return h;
+        }))
         .def_property("name",
-            [](const Assembly& a) { return a.name(); },
-            [](Assembly& a, const std::string& name) { a.set_name(name); })
+            [](const AssemblyHandle& h) { return h.ref().name(); },
+            [](AssemblyHandle& h, const std::string& name) { h.ref().set_name(name); })
         .def_property("description",
-            [](const Assembly& a) { return a.description(); },
-            [](Assembly& a, const std::string& desc) { a.set_description(desc); })
+            [](const AssemblyHandle& h) { return h.ref().description(); },
+            [](AssemblyHandle& h, const std::string& desc) { h.ref().set_description(desc); })
         .def_property("author",
-            [](const Assembly& a) { return a.author(); },
-            [](Assembly& a, const std::string& author) { a.set_author(author); })
-        .def_property_readonly("units", &Assembly::units)
+            [](const AssemblyHandle& h) { return h.ref().author(); },
+            [](AssemblyHandle& h, const std::string& author) { h.ref().set_author(author); })
+        .def_property_readonly("units", [](const AssemblyHandle& h) { return h.ref().units(); })
         // Component access
-        .def("component", &Assembly::component, py::return_value_policy::reference,
-             py::arg("id"), "Get component by ID")
-        .def("has_component", &Assembly::has_component, py::arg("id"))
-        .def_property_readonly("component_count", [](const Assembly& a) {
-            return a.components().size();
+        .def("component", [](const AssemblyHandle& h, const std::string& id) -> py::object {
+            if (!h.ref().has_component(id)) {
+                return py::none();
+            }
+            return py::cast(makeComponentHandle(h, id));
+        }, py::arg("id"), "Get component by ID (None if it does not exist)")
+        .def("has_component", [](const AssemblyHandle& h, const std::string& id) {
+            return h.ref().has_component(id);
+        }, py::arg("id"))
+        .def_property_readonly("component_count", [](const AssemblyHandle& h) {
+            return h.ref().components().size();
         })
-        .def("components", [](Assembly& a) {
-            std::vector<Component*> result;
-            for (const auto& c : a.components()) {
-                result.push_back(c.get());
+        .def("components", [](const AssemblyHandle& h) {
+            std::vector<ComponentHandle> result;
+            for (const auto& c : h.ref().components()) {
+                result.push_back(makeComponentHandle(h, c->id()));
             }
             return result;
-        }, py::return_value_policy::reference, "Get all components")
-        // Interface access
-        .def("interface", &Assembly::interface, py::return_value_policy::reference,
-             py::arg("id"), "Get interface by ID")
-        .def("interfaces", [](Assembly& a) {
+        }, "Get all components")
+        // Interface access (returned objects are owned by the assembly; keep the
+        // assembly handle alive for as long as Python keeps them)
+        .def("interface", [](const AssemblyHandle& h, const std::string& id) {
+            return h.ref().interface(id);
+        }, py::return_value_policy::reference_internal, py::arg("id"), "Get interface by ID")
+        .def("interfaces", [](const AssemblyHandle& h) {
             std::vector<Interface*> result;
-            for (const auto& i : a.interfaces()) {
+            for (const auto& i : h.ref().interfaces()) {
                 result.push_back(i.get());
             }
             return result;
-        }, py::return_value_policy::reference, "Get all interfaces")
+        }, py::keep_alive<0, 1>(), "Get all interfaces")
         // Technology access
-        .def("technology", &Assembly::technology, py::return_value_policy::reference,
-             py::arg("id"), "Get technology by ID")
-        .def("technologies", [](Assembly& a) {
+        .def("technology", [](const AssemblyHandle& h, const std::string& id) {
+            return h.ref().technology(id);
+        }, py::return_value_policy::reference_internal, py::arg("id"), "Get technology by ID")
+        .def("technologies", [](const AssemblyHandle& h) {
             std::vector<Technology*> result;
-            for (const auto& t : a.technologies()) {
+            for (const auto& t : h.ref().technologies()) {
                 result.push_back(t.get());
             }
             return result;
-        }, py::return_value_policy::reference, "Get all technologies")
+        }, py::keep_alive<0, 1>(), "Get all technologies")
         // Component creation
-        .def("create_component", [](Assembly& a, const std::string& id,
+        .def("create_component", [](AssemblyHandle& h, const std::string& id,
                                     const std::string& typeStr,
                                     double width, double height, double thickness) {
             ComponentType type = ComponentType::Die;
@@ -223,18 +298,18 @@ PYBIND11_MODULE(chiplet_studio, m) {
             dims.thickness = thickness;
             comp->set_dimensions(dims);
 
-            Component* ptr = comp.get();
-            a.add_component(std::move(comp));
-            return ptr;
-        }, py::return_value_policy::reference,
-           py::arg("id"), py::arg("type"), py::arg("width") = 1000.0,
+            h.ref().add_component(std::move(comp));
+            return makeComponentHandle(h, id);
+        }, py::arg("id"), py::arg("type"), py::arg("width") = 1000.0,
            py::arg("height") = 1000.0, py::arg("thickness") = 100.0,
            "Create a new component and add it to the assembly")
-        .def("remove_component", &Assembly::remove_component, py::arg("id"),
-             "Remove a component by ID")
+        .def("remove_component", [](AssemblyHandle& h, const std::string& id) {
+            return h.ref().remove_component(id);
+        }, py::arg("id"), "Remove a component by ID")
         // Validation
-        .def("is_valid", &Assembly::is_valid)
-        .def("__repr__", [](const Assembly& a) {
+        .def("is_valid", [](const AssemblyHandle& h) { return h.ref().is_valid(); })
+        .def("__repr__", [](const AssemblyHandle& h) {
+            const Assembly& a = h.ref();
             return "<Assembly '" + a.name() + "' with " +
                    std::to_string(a.components().size()) + " components>";
         });
@@ -317,9 +392,16 @@ PYBIND11_MODULE(chiplet_studio, m) {
         .def(py::init<>())
         .def("add_step", &FlowEngine::add_step, py::arg("step"))
         .def("remove_step", &FlowEngine::remove_step, py::arg("id"))
-        .def("step", [](FlowEngine& e, const std::string& id) -> FlowStep* {
-            return e.step(id);
-        }, py::return_value_policy::reference, py::arg("id"))
+        .def("step", [](FlowEngine& e, const std::string& id) -> FlowStep {
+            // Return a copy: FlowEngine::step() points into a std::vector that
+            // add_step/remove_step reallocate, so a borrowed pointer would
+            // dangle. Raise cleanly if the step does not exist.
+            FlowStep* s = e.step(id);
+            if (!s) {
+                throw std::runtime_error("No flow step with id '" + id + "'");
+            }
+            return *s;
+        }, py::arg("id"))
         .def("steps", [](const FlowEngine& e) { return e.steps(); })
         .def("step_count", &FlowEngine::step_count)
         .def("clear_steps", &FlowEngine::clear_steps)
@@ -340,36 +422,46 @@ PYBIND11_MODULE(chiplet_studio, m) {
     // ChipletFormat for loading/saving
     py::class_<ChipletFormat>(m, "ChipletFormat")
         .def(py::init<>())
-        .def("load", &ChipletFormat::load, py::arg("path"),
-             "Load assembly from .chiplet file")
-        .def("save", &ChipletFormat::save, py::arg("assembly"), py::arg("path"),
-             "Save assembly to .chiplet file");
+        .def("load", [](ChipletFormat& fmt, const std::string& path) {
+            AssemblyHandle h;
+            h.sp = std::shared_ptr<Assembly>(fmt.load(path));
+            return h;
+        }, py::arg("path"), "Load assembly from .chiplet file")
+        .def("save", [](ChipletFormat& fmt, const AssemblyHandle& h, const std::string& path) {
+            fmt.save(h.ref(), path);
+        }, py::arg("assembly"), py::arg("path"), "Save assembly to .chiplet file");
 
     // Global functions
     m.def("load_assembly", [](const std::string& path) {
         ChipletFormat format;
-        return format.load(path);
+        AssemblyHandle h;
+        h.sp = std::shared_ptr<Assembly>(format.load(path));
+        return h;
     }, py::arg("path"), "Load an assembly from a .chiplet file");
 
     m.def("create_assembly", []() {
-        return std::make_unique<Assembly>();
+        AssemblyHandle h;
+        h.sp = std::make_shared<Assembly>();
+        return h;
     }, "Create a new empty assembly");
 
-    m.def("save_assembly", [](Assembly& assembly, const std::string& path) {
+    m.def("save_assembly", [](const AssemblyHandle& h, const std::string& path) {
         ChipletFormat format;
-        format.save(assembly, path);
+        format.save(h.ref(), path);
     }, py::arg("assembly"), py::arg("path"), "Save an assembly to a .chiplet file");
 
-    // Get the current assembly from the embedded GUI context
-    // This allows Python scripts running inside Chiplet Studio to access
-    // the same Assembly object that C++ is manipulating
-    m.def("get_current_assembly", []() -> Assembly* {
+    // Get the current assembly from the embedded GUI context.
+    // Returns a borrowed handle: it stays valid only while it still matches the
+    // active g_scriptAssembly, so it raises (instead of dangling) once the GUI
+    // closes or replaces the assembly.
+    m.def("get_current_assembly", []() {
         if (!g_scriptAssembly) {
             throw std::runtime_error("No active assembly - ensure ScriptEngine::set_assembly() was called");
         }
-        return g_scriptAssembly;
-    }, py::return_value_policy::reference,
-       "Get the currently active Assembly from the GUI context");
+        AssemblyHandle h;
+        h.borrowed = g_scriptAssembly;
+        return h;
+    }, "Get the currently active Assembly from the GUI context");
 
     // Version info
     m.attr("__version__") = "0.1.0";
