@@ -38,6 +38,11 @@ public:
     // Shader lifecycle
     void bind();
     void release();
+    // Delete the GL program. MUST be called with the owning GL context current
+    // (e.g. inside makeCurrent()/doneCurrent()). After this the destructor is a
+    // no-op, which avoids glDeleteProgram running with no current context when
+    // the owning widget is torn down.
+    void destroy();
     bool isValid() const { return m_programId != 0; }
 
     // Uniform setters
