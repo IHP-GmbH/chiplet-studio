@@ -115,6 +115,7 @@ private:
     void renderGrid();
     QString pickComponent(int x, int y);
     void updateSceneBounds();
+    void updateClipRange();
     void updateBasePlane();
 
     // Data

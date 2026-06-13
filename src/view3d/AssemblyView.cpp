@@ -385,6 +385,10 @@ void AssemblyView::setClipPosition(float position)
 void AssemblyView::setClipAxis(ClipAxis axis)
 {
     m_clipPlane.setAxis(axis);
+    // Recompute the clip range for the NEW axis from the current scene bounds.
+    // Without this the range kept the previous axis's extents, so X/Y clipping
+    // was wrong until the next geometry rebuild called updateSceneBounds().
+    updateClipRange();
     emit clipPlaneChanged();
     update();
 }
@@ -1602,7 +1606,13 @@ void AssemblyView::updateSceneBounds()
 
     m_scene.setSceneBounds(sceneBounds);
 
-    // Update clip plane range based on current axis
+    // Update clip plane range for the current axis
+    updateClipRange();
+}
+
+void AssemblyView::updateClipRange()
+{
+    const AA_BOUNDING_BOX& sceneBounds = m_scene.sceneBounds();
     float minPos, maxPos;
     switch (m_clipPlane.axis()) {
     case ClipAxis::X:
