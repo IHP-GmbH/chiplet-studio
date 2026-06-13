@@ -27,21 +27,12 @@
 #include "core/Assembly.h"
 #include "core/LayerStackup.h"
 #include "view2d/LayerProperties.h"
-#include "gizmos/TransformGizmo.h"
 #include "LayerMeshBuilder.h"
 #include "ShapeFilter.h"
 
 class QTimer;
 
 namespace chiplet {
-
-/**
- * View mode for 3D view (global rendering strategy)
- */
-enum class ViewMode {
-    BoxMode,      // Simple boxes (fast, schematic)
-    LayerMode     // Layer-by-layer 2.5D visualization (like KLayout 2.5D)
-};
 
 /**
  * AssemblyView is the main 3D view widget for chiplet assemblies.
@@ -84,10 +75,6 @@ public:
     void setClipPosition(float position);
     void setClipAxis(ClipAxis axis);
 
-    // View mode control (BoxMode vs LayerMode)
-    ViewMode viewMode() const { return m_viewMode; }
-    void setViewMode(ViewMode mode);
-
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
 
@@ -102,15 +89,11 @@ public:
     void setBasePlaneVisible(bool visible);
 
 signals:
-    void viewModeChanged(ViewMode mode);
     void clipPlaneChanged();
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
     void shapeFilterChanged(const QString& componentId, double percent);
-
-    // Command system signals (emitted when user requests actions)
-    void moveComponentRequested(const QString& componentId, double dx, double dy, double dz);
 
 protected:
     // OpenGL lifecycle
@@ -132,6 +115,7 @@ private:
     void renderGrid();
     QString pickComponent(int x, int y);
     void updateSceneBounds();
+    void updateClipRange();
     void updateBasePlane();
 
     // Data
@@ -154,7 +138,6 @@ private:
 
     // Rendering
     ShaderProgram m_componentShader;
-    ShaderProgram m_gridShader;
 
     // Legacy per-component mesh map (for fallback/transition)
     std::map<QString, ComponentMesh> m_meshes;
@@ -172,13 +155,6 @@ private:
     QRubberBand* m_rubberBand = nullptr;
     void zoomToRect(const QRect& rect);
 
-    // Gizmo
-    TransformGizmo m_gizmo;
-    GizmoAxis m_activeGizmoAxis = GizmoAxis::None;
-    bool m_isDraggingGizmo = false;
-    QVector3D m_gizmoDragStart;      // Component position at drag start
-    QPoint m_gizmoDragMouseStart;    // Mouse position at drag start
-
     // State
     bool m_initialized = false;
     bool m_needsRebuild = false;
@@ -188,9 +164,6 @@ private:
 
     // Dither patterns for layer fill styles
     DitherPatterns m_ditherPatterns;
-
-    // View mode (BoxMode = simple boxes, LayerMode = 2.5D layer extrusion)
-    ViewMode m_viewMode = ViewMode::LayerMode;  // Default to layer mode
 
     // Layer geometry for 2.5D rendering (component_id -> geometry)
     std::map<QString, Component3DGeometry> m_layerGeometry;
@@ -214,9 +187,6 @@ private:
     void applyLayerVisibilityOverrides(const QString& componentId);
     void applyShapeFilter();
     void rebuildFilteredGeometry(const QString& compId);
-
-    // Render layers for a component
-    void renderLayerGeometry();
 
     // Multi-pass rendering helpers
     void renderOpaquePass(const std::vector<QString>& ids);
@@ -246,14 +216,6 @@ public:
     float fps() const { return m_fps; }
     int drawCallCount() const { return m_drawCallCount; }
     void setShowDebugStats(bool show) { m_showDebugStats = show; }
-
-    // Global Z offset for all components (in micrometers)
-    void setGlobalZOffset(double offset_um);
-    double globalZOffset() const { return m_globalZOffset; }
-
-private:
-    void updateTransforms();
-    double m_globalZOffset = 0.0;
 };
 
 } // namespace chiplet

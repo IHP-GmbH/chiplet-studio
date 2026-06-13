@@ -107,41 +107,6 @@ void main() {
 }
 )";
 
-static const char* gridVertexShader = R"(
-#version 330 core
-layout(location = 0) in vec3 position;
-
-uniform mat4 modelViewProjection;
-
-out vec3 fragPosition;
-out float flogz;
-
-void main() {
-    fragPosition = position;
-    gl_Position = modelViewProjection * vec4(position, 1.0);
-    flogz = 1.0 + gl_Position.w;
-}
-)";
-
-static const char* gridFragmentShader = R"(
-#version 330 core
-in vec3 fragPosition;
-in float flogz;
-
-uniform vec4 gridColor;
-uniform float fadeDistance;
-uniform float Fcoef_half;
-
-out vec4 FragColor;
-
-void main() {
-    float dist = length(fragPosition.xz);
-    float fade = 1.0 - smoothstep(fadeDistance * 0.5, fadeDistance, dist);
-    FragColor = vec4(gridColor.rgb, gridColor.a * fade);
-    gl_FragDepth = log2(max(1e-6, flogz)) * Fcoef_half;
-}
-)";
-
 AssemblyView::AssemblyView(QWidget* parent)
     : QOpenGLWidget(parent)
 {
@@ -164,6 +129,10 @@ AssemblyView::~AssemblyView()
     m_areaStats.clear();
     m_gridMesh.release();
     m_ditherPatterns.cleanup();
+    // Delete the GL program while the context is still current. The member
+    // ShaderProgram destructor otherwise runs after doneCurrent() and calls
+    // glDeleteProgram with no current context.
+    m_componentShader.destroy();
     doneCurrent();
 }
 
@@ -223,27 +192,6 @@ void AssemblyView::selectComponent(const QString& componentId)
             if (!componentId.isEmpty() && m_meshes.count(componentId)) {
                 m_meshes[componentId].setSelected(true);
             }
-
-        // Update gizmo position
-        if (!componentId.isEmpty() && m_assembly) {
-            Component* comp = m_assembly->component(componentId.toStdString());
-            if (comp) {
-                const auto& pos = comp->position();
-                const auto& dims = comp->dimensions();
-                // Position gizmo at center of component
-                QVector3D gizmoPos(
-                    static_cast<float>(pos.x + dims.width / 2.0),
-                    static_cast<float>(pos.y + dims.height / 2.0),
-                    static_cast<float>(pos.z + dims.thickness / 2.0)
-                );
-                m_gizmo.setPosition(gizmoPos);
-                m_gizmo.setVisible(true);
-            } else {
-                m_gizmo.setVisible(false);
-            }
-        } else {
-            m_gizmo.setVisible(false);
-        }
 
         emit selectionChanged(componentId);
         update();
@@ -437,6 +385,10 @@ void AssemblyView::setClipPosition(float position)
 void AssemblyView::setClipAxis(ClipAxis axis)
 {
     m_clipPlane.setAxis(axis);
+    // Recompute the clip range for the NEW axis from the current scene bounds.
+    // Without this the range kept the previous axis's extents, so X/Y clipping
+    // was wrong until the next geometry rebuild called updateSceneBounds().
+    updateClipRange();
     emit clipPlaneChanged();
     update();
 }
@@ -465,16 +417,9 @@ void AssemblyView::initializeGL()
         qWarning() << "Failed to load component shader";
     }
 
-    if (!m_gridShader.loadFromSource(gridVertexShader, gridFragmentShader)) {
-        qWarning() << "Failed to load grid shader";
-    }
-
     // Build solid base plane mesh (instead of grid lines)
     m_gridMesh = MeshBuilder::buildPlaneMesh(100.0f);
     m_gridMesh.upload();
-
-    // Initialize gizmo
-    m_gizmo.initialize();
 
     // Initialize dither patterns
     m_ditherPatterns.initialize();
@@ -516,36 +461,13 @@ void AssemblyView::paintGL()
         return;
     }
 
-    float aspect = static_cast<float>(width()) / height();
-
-    // Get matrices from camera
-    QMatrix4x4 view;
-    QMatrix4x4 projection;
-
-    // Convert our MATRIX4X4 to QMatrix4x4
-    MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
-    MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
-
-    for (int i = 0; i < 16; ++i) {
-        view.data()[i] = viewMat.GetEntry(i);
-        projection.data()[i] = projMat.GetEntry(i);
-    }
-
-    // Render grid
+    // Render grid (renderGrid/renderComponents build their own matrices from
+    // the camera internally).
     renderGrid();
     m_drawCallCount++;
 
     // Render components
     renderComponents();
-
-    // Render gizmo (on top of selected component)
-    if (m_gizmo.isVisible()) {
-        QMatrix4x4 viewProjection = projection * view;
-        VECTOR3D camPos = m_scene.camera().position();
-        QVector3D cameraPosition(camPos.x, camPos.y, camPos.z);
-        m_gizmo.render(viewProjection, cameraPosition);
-        m_drawCallCount++;
-    }
 
     // Update FPS counter
     m_frameCount++;
@@ -678,15 +600,13 @@ void AssemblyView::buildMeshes()
     qDebug() << "Built" << m_meshes.size() << "box meshes ("
              << gdsBounds.size() << " from GDS extents)";
 
-    // Build layer geometry for Detailed components or when in global LayerMode
+    // Pre-build layer geometry for every component (this matched the former
+    // default "Layer" view mode; the per-component render mode then decides
+    // what is actually drawn).
     for (const auto& comp : components) {
         if (!comp) continue;
 
-        bool needsDetail = (comp->render_mode() == RenderMode::Detailed)
-                        || (comp->render_mode() == RenderMode::DetailedNoSubstrate)
-                        || (m_viewMode == ViewMode::LayerMode);
-
-        if (needsDetail) {
+        {
             const LayerPropertiesFile* lyp = nullptr;
             const std::string& techId = comp->technology();
             if (!techId.empty()) {
@@ -836,6 +756,13 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
     m_componentShader.bind();
     setupShaderUniforms();
 
+    // setupShaderUniforms() leaves the shader with the pass-level identity model
+    // (box meshes bake world positions into their vertices). A Detailed
+    // component overwrites model/modelView/mvp with its own transform below;
+    // track that so the next box mesh restores the identity matrices instead of
+    // inheriting the previous component's transform.
+    bool baseMatricesActive = true;
+
     for (const QString& id : ids) {
         Component* comp = m_assembly->component(id.toStdString());
         if (!comp) continue;
@@ -872,6 +799,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             m_componentShader.setUniformMat4("model", model);
             m_componentShader.setUniformMat3("normalMatrix", normalMat);
             m_componentShader.setUniformBool("selected", isSelected);
+            baseMatricesActive = false;  // per-component transform now bound
 
             for (auto& layer : geometry.layers) {
                 if (!layer.visible) continue;
@@ -883,7 +811,27 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
                 m_drawCallCount++;
             }
         } else {
-            // Solid mode or Detailed without GDS: render box mesh
+            // Solid mode or Detailed without GDS: render box mesh.
+            // Restore the pass-level identity matrices if a prior Detailed
+            // component overwrote them, otherwise this box renders with the
+            // wrong transform.
+            if (!baseMatricesActive) {
+                float aspect = static_cast<float>(width()) / height();
+                MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
+                MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
+                QMatrix4x4 view, projection;
+                for (int i = 0; i < 16; ++i) {
+                    view.data()[i] = viewMat.GetEntry(i);
+                    projection.data()[i] = projMat.GetEntry(i);
+                }
+                QMatrix4x4 model;
+                model.setToIdentity();
+                m_componentShader.setUniformMat4("modelViewProjection", projection * view);
+                m_componentShader.setUniformMat4("modelView", view);
+                m_componentShader.setUniformMat4("model", model);
+                m_componentShader.setUniformMat3("normalMatrix", view.normalMatrix());
+                baseMatricesActive = true;
+            }
             auto meshIt = m_meshes.find(id);
             if (meshIt == m_meshes.end()) {
                 if (isFlipped) glFrontFace(GL_CCW);
@@ -1008,15 +956,24 @@ void AssemblyView::onComponentRenderModeChanged(const QString& componentId, Rend
             Component* comp = m_assembly->component(componentId.toStdString());
             if (comp) {
                 makeCurrent();
-                const LayerPropertiesFile* lyp = nullptr;
-                const std::string& techId = comp->technology();
-                if (!techId.empty()) {
-                    auto it = m_layerProps.find(techId);
-                    if (it != m_layerProps.end()) {
-                        lyp = &(it->second);
+                try {
+                    const LayerPropertiesFile* lyp = nullptr;
+                    const std::string& techId = comp->technology();
+                    if (!techId.empty()) {
+                        auto it = m_layerProps.find(techId);
+                        if (it != m_layerProps.end()) {
+                            lyp = &(it->second);
+                        }
                     }
+                    buildLayerGeometry(*comp, lyp);
+                } catch (const std::exception& e) {
+                    // Fired from a HierarchyPanel signal; keep an exception from
+                    // tessellation out of the Qt event loop. Also ensures
+                    // doneCurrent() runs so the context is not left current.
+                    qWarning() << "Exception building layer geometry:" << e.what();
+                } catch (...) {
+                    qWarning() << "Unknown exception building layer geometry";
                 }
-                buildLayerGeometry(*comp, lyp);
                 doneCurrent();
             }
         }
@@ -1125,22 +1082,6 @@ QString AssemblyView::pickComponent(int x, int y)
     }
 
     return QString();
-}
-
-void AssemblyView::setViewMode(ViewMode mode)
-{
-    if (m_viewMode != mode) {
-        m_viewMode = mode;
-        m_needsRebuild = true;
-        if (m_initialized && m_assembly) {
-            makeCurrent();
-            buildMeshes();
-            updateSceneBounds();
-            doneCurrent();
-        }
-        emit viewModeChanged(mode);
-        update();
-    }
 }
 
 namespace {
@@ -1478,7 +1419,15 @@ void AssemblyView::applyShapeFilter()
     }
 
     makeCurrent();
-    rebuildFilteredGeometry(compId);
+    try {
+        rebuildFilteredGeometry(compId);
+    } catch (const std::exception& e) {
+        // Fired from the debounce QTimer slot; an escaping exception would be
+        // uncaught in the Qt event loop and abort. Also ensures doneCurrent().
+        qWarning() << "Exception during shape-filter rebuild:" << e.what();
+    } catch (...) {
+        qWarning() << "Unknown exception during shape-filter rebuild";
+    }
     doneCurrent();
 
     updateSceneBounds();
@@ -1582,76 +1531,6 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
 #endif
 }
 
-void AssemblyView::renderLayerGeometry()
-{
-    if (m_layerGeometry.empty() || !m_componentShader.isValid()) {
-        return;
-    }
-
-    float aspect = static_cast<float>(width()) / height();
-    MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
-    MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
-    VECTOR3D lightDir = m_scene.lightDirection();
-
-    QMatrix4x4 view, projection;
-    for (int i = 0; i < 16; ++i) {
-        view.data()[i] = viewMat.GetEntry(i);
-        projection.data()[i] = projMat.GetEntry(i);
-    }
-
-    m_componentShader.bind();
-    m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
-    m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
-
-    // Clip plane uniforms
-    m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
-    if (m_clipPlane.isEnabled()) {
-        QVector4D plane = m_clipPlane.planeEquation();
-        m_componentShader.setUniformVec4("clipPlane", plane);
-    }
-
-    // Pattern uniforms (disabled for layer rendering)
-    m_componentShader.setUniformBool("usePattern", false);
-    m_componentShader.setUniformFloat("patternScale", 16.0f);
-
-    // Render each component's layer geometry
-    for (auto& [compId, geometry] : m_layerGeometry) {
-        // Skip invisible components
-        if (!isComponentVisible(compId)) {
-            continue;
-        }
-
-        bool isSelected = (compId == m_selectedComponent);
-
-        // Apply component transform
-        QMatrix4x4 model = geometry.transform;
-        QMatrix4x4 modelView = view * model;
-        QMatrix4x4 mvp = projection * modelView;
-        QMatrix3x3 normalMat = modelView.normalMatrix();
-
-        m_componentShader.setUniformMat4("modelViewProjection", mvp);
-        m_componentShader.setUniformMat4("modelView", modelView);
-        m_componentShader.setUniformMat4("model", model);
-        m_componentShader.setUniformMat3("normalMatrix", normalMat);
-        m_componentShader.setUniformBool("selected", isSelected);
-
-        // Render each visible layer
-        for (auto& layer : geometry.layers) {
-            if (!layer.visible) continue;
-            if (!layer.mesh.hasData()) continue;
-
-            QColor color = layer.color;
-            m_componentShader.setUniformVec4("objectColor",
-                QVector4D(color.redF(), color.greenF(), color.blueF(), color.alphaF()));
-
-            layer.mesh.render();
-            m_drawCallCount++;
-        }
-    }
-
-    m_componentShader.release();
-}
-
 void AssemblyView::updateSceneBounds()
 {
     AA_BOUNDING_BOX sceneBounds;
@@ -1727,7 +1606,13 @@ void AssemblyView::updateSceneBounds()
 
     m_scene.setSceneBounds(sceneBounds);
 
-    // Update clip plane range based on current axis
+    // Update clip plane range for the current axis
+    updateClipRange();
+}
+
+void AssemblyView::updateClipRange()
+{
+    const AA_BOUNDING_BOX& sceneBounds = m_scene.sceneBounds();
     float minPos, maxPos;
     switch (m_clipPlane.axis()) {
     case ClipAxis::X:
@@ -1802,24 +1687,6 @@ void AssemblyView::mousePressEvent(QMouseEvent* event)
     }
 
     if (event->button() == Qt::LeftButton) {
-        // First, check for gizmo axis picking (if a component is selected)
-        if (m_gizmo.isVisible() && !m_selectedComponent.isEmpty()) {
-            auto ray = m_scene.screenToRay(event->pos().x(), event->pos().y(), width(), height());
-            GizmoAxis pickedAxis = m_gizmo.pickAxis(ray.origin, ray.direction);
-
-            if (pickedAxis != GizmoAxis::None) {
-                // Start gizmo drag
-                m_isDraggingGizmo = true;
-                m_activeGizmoAxis = pickedAxis;
-                m_gizmo.setHighlightedAxis(pickedAxis);
-                m_gizmoDragMouseStart = event->pos();
-                m_gizmoDragStart = m_gizmo.position();
-                event->accept();
-                update();
-                return;
-            }
-        }
-
         // Check for component picking
         QString picked = pickComponent(event->pos().x(), event->pos().y());
         if (!picked.isEmpty()) {
@@ -1847,30 +1714,6 @@ void AssemblyView::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
 
-    // End gizmo drag and emit move request
-    if (m_isDraggingGizmo && m_activeGizmoAxis != GizmoAxis::None) {
-        QVector3D currentPos = m_gizmo.position();
-        QVector3D delta = currentPos - m_gizmoDragStart;
-
-        // Only emit if there was actual movement
-        if (delta.length() > 0.001f) {
-            // Constrain to active axis
-            double dx = 0, dy = 0, dz = 0;
-            switch (m_activeGizmoAxis) {
-                case GizmoAxis::X: dx = delta.x(); break;
-                case GizmoAxis::Y: dy = delta.y(); break;
-                case GizmoAxis::Z: dz = delta.z(); break;
-                default: break;
-            }
-            emit moveComponentRequested(m_selectedComponent, dx, dy, dz);
-        }
-
-        m_isDraggingGizmo = false;
-        m_activeGizmoAxis = GizmoAxis::None;
-        m_gizmo.setHighlightedAxis(GizmoAxis::None);
-        update();
-    }
-
     m_isDragging = false;
     m_dragButton = Qt::NoButton;
     event->accept();
@@ -1881,69 +1724,6 @@ void AssemblyView::mouseMoveEvent(QMouseEvent* event)
     // Handle rubber-band zoom dragging
     if (m_isRubberBandZoom && m_rubberBand) {
         m_rubberBand->setGeometry(QRect(m_rubberBandOrigin, event->pos()).normalized());
-        event->accept();
-        return;
-    }
-
-    // Handle gizmo dragging
-    if (m_isDraggingGizmo && m_activeGizmoAxis != GizmoAxis::None) {
-        // Calculate drag delta in screen space
-        QPoint mouseDelta = event->pos() - m_gizmoDragMouseStart;
-
-        // Get camera matrices for unprojection
-        float aspect = static_cast<float>(width()) / height();
-        MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
-        MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
-
-        // Project the gizmo position to screen space
-        QMatrix4x4 view, projection;
-        for (int i = 0; i < 16; ++i) {
-            view.data()[i] = viewMat.GetEntry(i);
-            projection.data()[i] = projMat.GetEntry(i);
-        }
-        QMatrix4x4 mvp = projection * view;
-
-        // Get axis direction in world space
-        QVector3D axisDir = TransformGizmo::axisDirection(m_activeGizmoAxis);
-
-        // Project axis direction to screen space to determine drag sensitivity
-        QVector3D worldPos = m_gizmoDragStart;
-        QVector3D worldPosOffset = worldPos + axisDir;
-
-        QVector4D screen1 = mvp * QVector4D(worldPos, 1.0f);
-        QVector4D screen2 = mvp * QVector4D(worldPosOffset, 1.0f);
-
-        if (std::abs(screen1.w()) > 0.001f && std::abs(screen2.w()) > 0.001f) {
-            screen1 /= screen1.w();
-            screen2 /= screen2.w();
-
-            // Convert to pixel coordinates
-            float sx1 = (screen1.x() * 0.5f + 0.5f) * width();
-            float sy1 = (1.0f - (screen1.y() * 0.5f + 0.5f)) * height();
-            float sx2 = (screen2.x() * 0.5f + 0.5f) * width();
-            float sy2 = (1.0f - (screen2.y() * 0.5f + 0.5f)) * height();
-
-            // Screen-space axis direction
-            QVector2D screenAxisDir(sx2 - sx1, sy2 - sy1);
-            float screenAxisLen = screenAxisDir.length();
-
-            if (screenAxisLen > 0.001f) {
-                screenAxisDir.normalize();
-
-                // Project mouse delta onto screen axis direction
-                QVector2D mouseVec(mouseDelta.x(), mouseDelta.y());
-                float projection = QVector2D::dotProduct(mouseVec, screenAxisDir);
-
-                // Convert back to world units
-                float worldDelta = projection / screenAxisLen;
-
-                // Calculate new position
-                QVector3D newPos = m_gizmoDragStart + axisDir * worldDelta;
-                m_gizmo.setPosition(newPos);
-            }
-        }
-
-        update();
         event->accept();
         return;
     }
@@ -2098,45 +1878,6 @@ void AssemblyView::zoomToRect(const QRect& rect)
     // If no hit (all background), only zoom distance without moving target
 
     cam.setDistance(cam.distance() * scale);
-    update();
-}
-
-void AssemblyView::setGlobalZOffset(double offset_um)
-{
-    if (m_globalZOffset == offset_um) return;
-    m_globalZOffset = offset_um;
-    updateTransforms();
-}
-
-void AssemblyView::updateTransforms()
-{
-    if (!m_assembly || !m_initialized) return;
-
-    const auto& components = m_assembly->components();
-
-    // Update layer geometry transforms (LayerMode)
-    for (const auto& comp : components) {
-        if (!comp) continue;
-        QString compId = QString::fromStdString(comp->id());
-        auto it = m_layerGeometry.find(compId);
-        if (it != m_layerGeometry.end()) {
-            const auto& pos = comp->position();
-            // Z offset only applies to dies, not interposers/substrates
-            double zOff = (comp->type() == ComponentType::Interposer ||
-                           comp->type() == ComponentType::Substrate) ? 0.0 : m_globalZOffset;
-            it->second.transform.setToIdentity();
-            it->second.transform.translate(
-                static_cast<float>(pos.x / 1000.0),
-                static_cast<float>((pos.z + zOff) / 1000.0),
-                static_cast<float>(-pos.y / 1000.0));
-            if (comp->orientation() == Orientation::FaceDown) {
-                it->second.transform.scale(-1.0f, 1.0f, 1.0f);
-            }
-        }
-    }
-
-    m_bvhDirty = true;
-    updateSceneBounds();
     update();
 }
 

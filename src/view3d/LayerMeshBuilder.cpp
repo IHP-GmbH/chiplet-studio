@@ -600,21 +600,32 @@ std::vector<int> LayerMeshBuilder::triangulatePolygonLegacy(const SimplePolygon&
     // Copy points to working array
     std::vector<Point2D> pts = poly.points;
 
-    // Ensure counter-clockwise winding
+    // Ensure counter-clockwise winding. When we reverse the working array, the
+    // produced indices are into the REVERSED array, but the caller applies them
+    // to poly.points (the original order), so they must be mapped back:
+    // working index k corresponds to original index (n-1-k). origIndex makes
+    // every return path agnostic to whether we reversed.
+    std::vector<int> origIndex(n);
     if (poly.area() < 0) {
         std::reverse(pts.begin(), pts.end());
+        for (size_t i = 0; i < n; ++i) origIndex[i] = static_cast<int>(n - 1 - i);
+    } else {
+        for (size_t i = 0; i < n; ++i) origIndex[i] = static_cast<int>(i);
     }
+
+    auto toOriginal = [&origIndex](std::vector<int> idx) {
+        for (int& v : idx) v = origIndex[v];
+        return idx;
+    };
 
     // Simple case: triangle
     if (n == 3) {
-        result = {0, 1, 2};
-        return result;
+        return toOriginal({0, 1, 2});
     }
 
     // Simple case: quad
     if (n == 4) {
-        result = {0, 1, 2, 0, 2, 3};
-        return result;
+        return toOriginal({0, 1, 2, 0, 2, 3});
     }
 
     // Build active vertex list
@@ -672,7 +683,7 @@ std::vector<int> LayerMeshBuilder::triangulatePolygonLegacy(const SimplePolygon&
         result.push_back(active[2]);
     }
 
-    return result;
+    return toOriginal(result);
 }
 
 bool LayerMeshBuilder::isEar(const std::vector<Point2D>& pts, int i, int prev, int next,

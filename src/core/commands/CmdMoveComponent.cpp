@@ -89,11 +89,23 @@ CommandPtr CmdMoveComponent::deserialize(const nlohmann::json& j)
     const auto& data = j.at("data");
     ComponentID id = data.at("id").get<std::string>();
 
-    const auto& oldArr = data.at("old");
-    Position3D oldPos{oldArr[0].get<double>(), oldArr[1].get<double>(), oldArr[2].get<double>()};
+    // A corrupt/truncated journal can carry "old"/"new" that are not 3-element
+    // arrays. nlohmann's operator[] would be UB on a non-array or out-of-range
+    // index, so validate before indexing. Throwing here is safe: CommandFactory
+    // and the journal replay loop both catch and log deserialization errors.
+    auto parsePosition = [&data](const char* key) -> Position3D {
+        const auto& arr = data.at(key);
+        if (!arr.is_array() || arr.size() != 3) {
+            throw std::runtime_error(
+                std::string("CmdMoveComponent: '") + key +
+                "' must be a 3-element array");
+        }
+        return Position3D{arr[0].get<double>(), arr[1].get<double>(),
+                          arr[2].get<double>()};
+    };
 
-    const auto& newArr = data.at("new");
-    Position3D newPos{newArr[0].get<double>(), newArr[1].get<double>(), newArr[2].get<double>()};
+    Position3D oldPos = parsePosition("old");
+    Position3D newPos = parsePosition("new");
 
     return std::make_unique<CmdMoveComponent>(id, oldPos, newPos);
 }

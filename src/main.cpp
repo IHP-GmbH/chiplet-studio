@@ -110,30 +110,38 @@ int main(int argc, char *argv[])
     // Register built-in command types for deserialization
     chiplet::CommandFactory::register_builtin_commands();
 
-    // Check for crash recovery
-    std::filesystem::path appDataDir =
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
-
-    // Create app data directory if it doesn't exist
-    if (!std::filesystem::exists(appDataDir)) {
-        std::filesystem::create_directories(appDataDir);
-    }
-
-    // Check for orphaned journal and offer recovery
+    // Check for crash recovery. Filesystem access here can throw
+    // (std::filesystem_error on a missing/unwritable AppData location); a
+    // throw out of main() would abort before the window is ever shown, so we
+    // degrade gracefully to "no recovery" instead.
     std::unique_ptr<chiplet::Assembly> recoveredAssembly;
 
-    if (chiplet::CommandJournal::has_orphaned_journal(appDataDir)) {
-        // Create an assembly for potential recovery
-        recoveredAssembly = std::make_unique<chiplet::Assembly>();
-        recoveredAssembly->set_name("Recovered Session");
+    try {
+        std::filesystem::path appDataDir =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
 
-        auto result = chiplet::CrashRecoveryDialog::check_and_recover(
-            appDataDir, recoveredAssembly.get());
-
-        if (result != chiplet::CrashRecoveryDialog::Result::Recovered) {
-            // User discarded or cancelled - don't use the assembly
-            recoveredAssembly.reset();
+        // Create app data directory if it doesn't exist
+        if (!std::filesystem::exists(appDataDir)) {
+            std::filesystem::create_directories(appDataDir);
         }
+
+        // Check for orphaned journal and offer recovery
+        if (chiplet::CommandJournal::has_orphaned_journal(appDataDir)) {
+            // Create an assembly for potential recovery
+            recoveredAssembly = std::make_unique<chiplet::Assembly>();
+            recoveredAssembly->set_name("Recovered Session");
+
+            auto result = chiplet::CrashRecoveryDialog::check_and_recover(
+                appDataDir, recoveredAssembly.get());
+
+            if (result != chiplet::CrashRecoveryDialog::Result::Recovered) {
+                // User discarded or cancelled - don't use the assembly
+                recoveredAssembly.reset();
+            }
+        }
+    } catch (const std::exception& e) {
+        qWarning("Crash-recovery check skipped: %s", e.what());
+        recoveredAssembly.reset();
     }
 
     chiplet::MainWindow window;

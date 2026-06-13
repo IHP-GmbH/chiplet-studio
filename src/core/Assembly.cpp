@@ -133,6 +133,23 @@ void Assembly::add_component(std::unique_ptr<Component> component)
         return;
     }
     const ComponentID& id = component->id();
+
+    // Adding a component whose ID already exists previously left the old object
+    // orphaned in the vector while the index pointed at the new one, so the
+    // vector (and component_count) desynced from the index. Replace in place
+    // instead, keeping both consistent.
+    auto existing = m_component_index.find(id);
+    if (existing != m_component_index.end()) {
+        for (auto& slot : m_components) {
+            if (slot->id() == id) {
+                Component* ptr = component.get();
+                slot = std::move(component);
+                existing->second = ptr;
+                return;
+            }
+        }
+    }
+
     Component* ptr = component.get();
     m_components.push_back(std::move(component));
     m_component_index[id] = ptr;

@@ -151,7 +151,6 @@ set(VIEW3D_SOURCES
     src/view3d/GDSAnalyzer.cpp
     src/view3d/LayerMeshBuilder.cpp
     src/view3d/ShapeFilter.cpp
-    src/view3d/gizmos/TransformGizmo.cpp
     ${VIEW3D_MATH_SOURCES}
 )
 
