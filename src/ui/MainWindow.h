@@ -105,7 +105,6 @@ private:
     void setupMenus();
     void setupPanels();
     void setupClipToolbar();
-    void setupSnapToolbar();
     void setupViewModeToolbar();
     void setupScriptConsole();
     void setupFlowPanel();
@@ -114,6 +113,7 @@ private:
 
     std::unique_ptr<Assembly> m_assembly;
     HierarchyPanel* m_hierarchyPanel = nullptr;
+    QDockWidget* m_hierarchyDock = nullptr;
     PropertiesPanel* m_propertiesPanel = nullptr;
     AssemblyView* m_assemblyView = nullptr;
 
@@ -150,15 +150,7 @@ private:
     QAction* m_undoAction = nullptr;
     QAction* m_redoAction = nullptr;
 
-    // Snapping state
-    QCheckBox* m_snapEnable = nullptr;
-    QDoubleSpinBox* m_gridSizeSpinBox = nullptr;
-    bool m_snapEnabled = false;
-    double m_gridSize = 10.0;  // Default: 10um
-
     // View mode toolbar
-    QButtonGroup* m_viewModeGroup = nullptr;
-    QDoubleSpinBox* m_zOffsetSpinBox = nullptr;
     QSlider* m_shapeFilterSlider = nullptr;
     QLabel* m_shapeFilterLabel = nullptr;
 
