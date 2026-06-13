@@ -334,6 +334,13 @@ void FlowEngine::start_process(FlowStep& flowStep)
         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
         [this, step_id](int exitCode, QProcess::ExitStatus exitStatus) {
             FlowStep* s = step(step_id);
+            // A crashed process fires both errorOccurred and finished. If
+            // errorOccurred already finalized this step, bail out so we don't
+            // emit step_finished/flow_finished twice and advance m_currentIndex
+            // a second time.
+            if (s && s->status != StepStatus::Running) {
+                return;
+            }
             if (s) {
                 s->exit_code = exitCode;
                 if (exitCode == 0 && exitStatus == QProcess::NormalExit) {

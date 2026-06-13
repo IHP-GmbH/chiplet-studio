@@ -842,6 +842,13 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
     m_componentShader.bind();
     setupShaderUniforms();
 
+    // setupShaderUniforms() leaves the shader with the pass-level identity model
+    // (box meshes bake world positions into their vertices). A Detailed
+    // component overwrites model/modelView/mvp with its own transform below;
+    // track that so the next box mesh restores the identity matrices instead of
+    // inheriting the previous component's transform.
+    bool baseMatricesActive = true;
+
     for (const QString& id : ids) {
         Component* comp = m_assembly->component(id.toStdString());
         if (!comp) continue;
@@ -878,6 +885,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             m_componentShader.setUniformMat4("model", model);
             m_componentShader.setUniformMat3("normalMatrix", normalMat);
             m_componentShader.setUniformBool("selected", isSelected);
+            baseMatricesActive = false;  // per-component transform now bound
 
             for (auto& layer : geometry.layers) {
                 if (!layer.visible) continue;
@@ -889,7 +897,27 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
                 m_drawCallCount++;
             }
         } else {
-            // Solid mode or Detailed without GDS: render box mesh
+            // Solid mode or Detailed without GDS: render box mesh.
+            // Restore the pass-level identity matrices if a prior Detailed
+            // component overwrote them, otherwise this box renders with the
+            // wrong transform.
+            if (!baseMatricesActive) {
+                float aspect = static_cast<float>(width()) / height();
+                MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
+                MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
+                QMatrix4x4 view, projection;
+                for (int i = 0; i < 16; ++i) {
+                    view.data()[i] = viewMat.GetEntry(i);
+                    projection.data()[i] = projMat.GetEntry(i);
+                }
+                QMatrix4x4 model;
+                model.setToIdentity();
+                m_componentShader.setUniformMat4("modelViewProjection", projection * view);
+                m_componentShader.setUniformMat4("modelView", view);
+                m_componentShader.setUniformMat4("model", model);
+                m_componentShader.setUniformMat3("normalMatrix", view.normalMatrix());
+                baseMatricesActive = true;
+            }
             auto meshIt = m_meshes.find(id);
             if (meshIt == m_meshes.end()) {
                 if (isFlipped) glFrontFace(GL_CCW);
