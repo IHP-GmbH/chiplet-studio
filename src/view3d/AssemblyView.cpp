@@ -164,6 +164,12 @@ AssemblyView::~AssemblyView()
     m_areaStats.clear();
     m_gridMesh.release();
     m_ditherPatterns.cleanup();
+    // Delete GL programs/buffers while the context is still current. Member
+    // ShaderProgram/TransformGizmo destructors otherwise run after doneCurrent()
+    // and call glDeleteProgram/glDeleteBuffers with no current context.
+    m_componentShader.destroy();
+    m_gridShader.destroy();
+    m_gizmo.release();
     doneCurrent();
 }
 
@@ -1008,15 +1014,24 @@ void AssemblyView::onComponentRenderModeChanged(const QString& componentId, Rend
             Component* comp = m_assembly->component(componentId.toStdString());
             if (comp) {
                 makeCurrent();
-                const LayerPropertiesFile* lyp = nullptr;
-                const std::string& techId = comp->technology();
-                if (!techId.empty()) {
-                    auto it = m_layerProps.find(techId);
-                    if (it != m_layerProps.end()) {
-                        lyp = &(it->second);
+                try {
+                    const LayerPropertiesFile* lyp = nullptr;
+                    const std::string& techId = comp->technology();
+                    if (!techId.empty()) {
+                        auto it = m_layerProps.find(techId);
+                        if (it != m_layerProps.end()) {
+                            lyp = &(it->second);
+                        }
                     }
+                    buildLayerGeometry(*comp, lyp);
+                } catch (const std::exception& e) {
+                    // Fired from a HierarchyPanel signal; keep an exception from
+                    // tessellation out of the Qt event loop. Also ensures
+                    // doneCurrent() runs so the context is not left current.
+                    qWarning() << "Exception building layer geometry:" << e.what();
+                } catch (...) {
+                    qWarning() << "Unknown exception building layer geometry";
                 }
-                buildLayerGeometry(*comp, lyp);
                 doneCurrent();
             }
         }
@@ -1478,7 +1493,15 @@ void AssemblyView::applyShapeFilter()
     }
 
     makeCurrent();
-    rebuildFilteredGeometry(compId);
+    try {
+        rebuildFilteredGeometry(compId);
+    } catch (const std::exception& e) {
+        // Fired from the debounce QTimer slot; an escaping exception would be
+        // uncaught in the Qt event loop and abort. Also ensures doneCurrent().
+        qWarning() << "Exception during shape-filter rebuild:" << e.what();
+    } catch (...) {
+        qWarning() << "Unknown exception during shape-filter rebuild";
+    }
     doneCurrent();
 
     updateSceneBounds();

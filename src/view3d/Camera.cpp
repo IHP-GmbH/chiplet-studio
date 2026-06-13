@@ -82,6 +82,16 @@ void Camera::fitToBox(const AA_BOUNDING_BOX& box)
 
     float maxDim = std::max({size.x, size.y, size.z});
 
+    // Guard against a degenerate or empty box (maxDim <= 0, e.g. an assembly
+    // with no geometry, or an uninitialized bbox where mins > maxes). Without
+    // this m_distance becomes 0 (or negative/NaN), yielding a singular view
+    // matrix and a blank, unrecoverable 3D view.
+    if (!(maxDim > 0.0f)) {  // also catches NaN
+        m_distance = 1000.0f;  // same sane default as reset()
+        updateClipPlanes();
+        return;
+    }
+
     // Distance to fit object in view based on FOV
     float fovRad = static_cast<float>(m_fov * M_PI / 180.0);
     m_distance = (maxDim * 0.5f) / std::tan(fovRad * 0.5f) * 1.5f;

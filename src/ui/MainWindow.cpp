@@ -568,7 +568,26 @@ void MainWindow::onAssemblyLoadFinished()
         return;
     }
 
-    // Successfully loaded - update UI on main thread
+    // Successfully loaded - update UI on main thread.
+    //
+    // Detach every consumer from the OUTGOING assembly BEFORE the move below
+    // frees it. detectAndSelectCells() can open a modal CellSelectionDialog,
+    // whose nested event loop processes a pending repaint of the 3D view; if the
+    // views/command-processor/script-engine still held the just-freed assembly,
+    // that repaint would be a use-after-free. After cell selection we repoint
+    // everything to the new assembly (below).
+    m_assemblyView->setAssembly(nullptr);
+    m_hierarchyPanel->setAssembly(nullptr);
+    m_propertiesPanel->clearSelection();
+    m_propertiesPanel->setAssembly(nullptr);
+    if (m_netGraphPanel) {
+        m_netGraphPanel->setAssembly(nullptr);
+    }
+    m_commandProcessor.reset();  // holds a raw Assembly*
+    if (m_scriptEngine) {
+        m_scriptEngine->clear_assembly();  // nulls g_scriptAssembly
+    }
+
     m_assembly = std::move(result.assembly);
     m_currentFilePath = m_pendingLoadPath;
     m_pendingLoadPath.clear();

@@ -210,6 +210,29 @@ void ScriptEngine::shutdown()
         }
         g_scriptMoveCallback = nullptr;
 
+        // Restore sys.stdout/stderr to the originals BEFORE dropping our redirect
+        // objects. The redirects wrap a py::cpp_function capturing `this`; since
+        // the singleton interpreter outlives this ScriptEngine, leaving them
+        // installed means any later print() (incl. interpreter shutdown / another
+        // engine) calls a dangling callback. Only restore if sys.stdout/stderr
+        // still point to OUR redirect (a newer engine may have replaced them).
+        try {
+            py::gil_scoped_acquire gil;
+            py::module_ sys = py::module_::import("sys");
+            py::object curOut = sys.attr("stdout");
+            py::object curErr = sys.attr("stderr");
+            if (!m_impl->stdoutRedirect.is_none() &&
+                curOut.is(m_impl->stdoutRedirect)) {
+                sys.attr("stdout") = sys.attr("__stdout__");
+            }
+            if (!m_impl->stderrRedirect.is_none() &&
+                curErr.is(m_impl->stderrRedirect)) {
+                sys.attr("stderr") = sys.attr("__stderr__");
+            }
+        } catch (const std::exception& e) {
+            qWarning() << "Failed to restore sys.stdout/stderr:" << e.what();
+        }
+
         // Clear Python objects held by this instance
         m_impl->stdoutRedirect = py::object();
         m_impl->stderrRedirect = py::object();
