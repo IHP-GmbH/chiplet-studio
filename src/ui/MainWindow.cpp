@@ -23,7 +23,6 @@
 #include "core/LayerStackup.h"
 #include "core/commands/CmdMoveComponent.h"
 #include "core/commands/CmdSetRenderMode.h"
-#include "core/Snapper.h"
 #include "scripting/ScriptEngine.h"
 #include "core/flow/FlowEngine.h"
 #include "core/flow/FlowConfig.h"
@@ -60,7 +59,6 @@ MainWindow::MainWindow(QWidget* parent)
     setupMenus();
     setupPanels();
     setupClipToolbar();
-    setupSnapToolbar();
     setupViewModeToolbar();
     setupScriptConsole();
     setupFlowPanel();
@@ -132,10 +130,10 @@ void MainWindow::setupMenus()
 void MainWindow::setupPanels()
 {
     // Hierarchy panel (left dock)
-    QDockWidget* hierarchyDock = new QDockWidget("Hierarchy", this);
-    m_hierarchyPanel = new HierarchyPanel(hierarchyDock);
-    hierarchyDock->setWidget(m_hierarchyPanel);
-    addDockWidget(Qt::LeftDockWidgetArea, hierarchyDock);
+    m_hierarchyDock = new QDockWidget("Hierarchy", this);
+    m_hierarchyPanel = new HierarchyPanel(m_hierarchyDock);
+    m_hierarchyDock->setWidget(m_hierarchyPanel);
+    addDockWidget(Qt::LeftDockWidgetArea, m_hierarchyDock);
 
     // Properties panel (right dock)
     m_propertiesDock = new QDockWidget("Properties", this);
@@ -179,6 +177,25 @@ void MainWindow::setupPanels()
     // Tab the 2D view with Properties panel
     tabifyDockWidget(m_propertiesDock, m_klayout2DDock);
     m_propertiesDock->raise();  // Properties visible by default
+
+    // View menu toggles so closed docks can be reopened. Without these, closing
+    // Properties or Hierarchy via the title-bar X left no way to bring them back.
+    {
+        QMenu* viewMenu = menuBar()->findChild<QMenu*>("viewMenu");
+        if (!viewMenu) {
+            viewMenu = menuBar()->addMenu("&View");
+            viewMenu->setObjectName("viewMenu");
+        }
+        QAction* toggleHierarchy = m_hierarchyDock->toggleViewAction();
+        toggleHierarchy->setText("Hierarchy");
+        toggleHierarchy->setShortcut(QKeySequence("F2"));
+        viewMenu->addAction(toggleHierarchy);
+
+        QAction* toggleProperties = m_propertiesDock->toggleViewAction();
+        toggleProperties->setText("Properties");
+        toggleProperties->setShortcut(QKeySequence("F3"));
+        viewMenu->addAction(toggleProperties);
+    }
 
     // Central 3D view widget
     m_assemblyView = new AssemblyView(this);
@@ -349,30 +366,6 @@ void MainWindow::setupPanels()
     // 3D View double-click for drill-down (if signal exists)
     connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
-
-    // 3D View move request -> CommandProcessor
-    connect(m_assemblyView, &AssemblyView::moveComponentRequested,
-            this, [this](const QString& componentId, double dx, double dy, double dz) {
-                if (!m_commandProcessor || !m_assembly) {
-                    return;
-                }
-                Component* comp = m_assembly->component(componentId.toStdString());
-                if (!comp) {
-                    return;
-                }
-                Position3D oldPos = comp->position();
-                Position3D newPos = {oldPos.x + dx, oldPos.y + dy, oldPos.z + dz};
-
-                // Apply snapping if enabled
-                if (m_snapEnabled && m_gridSize > 0.0) {
-                    newPos = Snapper::snap(newPos, m_gridSize);
-                }
-
-                auto cmd = std::make_unique<CmdMoveComponent>(
-                    componentId.toStdString(), oldPos, newPos);
-                m_commandProcessor->execute(std::move(cmd));
-                m_assemblyView->update();
-            });
 
     // Hierarchy panel render mode change request -> CommandProcessor
     connect(m_hierarchyPanel, &HierarchyPanel::renderModeChangeRequested,
@@ -971,130 +964,12 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
     }
 }
 
-void MainWindow::setupSnapToolbar()
-{
-    QToolBar* snapToolbar = addToolBar("Snapping");
-    snapToolbar->setMovable(false);
-
-    // Snap checkbox
-    m_snapEnable = new QCheckBox("Snap", this);
-    m_snapEnable->setToolTip("Snap to grid");
-    m_snapEnable->setChecked(false);
-    snapToolbar->addWidget(m_snapEnable);
-
-    snapToolbar->addSeparator();
-
-    // Grid size spinbox
-    QLabel* gridLabel = new QLabel("Grid:", this);
-    snapToolbar->addWidget(gridLabel);
-
-    m_gridSizeSpinBox = new QDoubleSpinBox(this);
-    m_gridSizeSpinBox->setRange(0.1, 1000.0);
-    m_gridSizeSpinBox->setValue(10.0);  // Default: 10um
-    m_gridSizeSpinBox->setSuffix(" um");
-    m_gridSizeSpinBox->setDecimals(1);
-    m_gridSizeSpinBox->setToolTip("Grid spacing in micrometers");
-    snapToolbar->addWidget(m_gridSizeSpinBox);
-
-    // Preset buttons
-    QPushButton* btn1um = new QPushButton("1", this);
-    QPushButton* btn10um = new QPushButton("10", this);
-    QPushButton* btn100um = new QPushButton("100", this);
-
-    btn1um->setFixedWidth(30);
-    btn10um->setFixedWidth(30);
-    btn100um->setFixedWidth(35);
-
-    btn1um->setToolTip("Set grid to 1um");
-    btn10um->setToolTip("Set grid to 10um");
-    btn100um->setToolTip("Set grid to 100um");
-
-    snapToolbar->addWidget(btn1um);
-    snapToolbar->addWidget(btn10um);
-    snapToolbar->addWidget(btn100um);
-
-    // Connect signals
-    connect(m_snapEnable, &QCheckBox::toggled, this, [this](bool checked) {
-        m_snapEnabled = checked;
-    });
-
-    connect(m_gridSizeSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double value) {
-        m_gridSize = value;
-    });
-
-    connect(btn1um, &QPushButton::clicked, this, [this]() {
-        m_gridSizeSpinBox->setValue(1.0);
-    });
-    connect(btn10um, &QPushButton::clicked, this, [this]() {
-        m_gridSizeSpinBox->setValue(10.0);
-    });
-    connect(btn100um, &QPushButton::clicked, this, [this]() {
-        m_gridSizeSpinBox->setValue(100.0);
-    });
-}
-
 void MainWindow::setupViewModeToolbar()
 {
     QToolBar* renderToolbar = addToolBar("View Mode");
     renderToolbar->setMovable(false);
 
-    // Label
-    QLabel* modeLabel = new QLabel("View:", this);
-    renderToolbar->addWidget(modeLabel);
-
-    // Button group for exclusive selection
-    m_viewModeGroup = new QButtonGroup(this);
-    m_viewModeGroup->setExclusive(true);
-
-    // Box mode button (simple boxes)
-    QPushButton* btnBox = new QPushButton("Box", this);
-    btnBox->setCheckable(true);
-    btnBox->setToolTip("Simple box representation (fast)");
-    btnBox->setFixedWidth(50);
-    m_viewModeGroup->addButton(btnBox, static_cast<int>(ViewMode::BoxMode));
-    renderToolbar->addWidget(btnBox);
-
-    // Layer mode button (KLayout 2.5D style)
-    QPushButton* btnLayer = new QPushButton("Layer", this);
-    btnLayer->setCheckable(true);
-    btnLayer->setChecked(true);  // Default mode
-    btnLayer->setToolTip("Layer-by-layer 2.5D visualization (like KLayout)");
-    btnLayer->setFixedWidth(50);
-    m_viewModeGroup->addButton(btnLayer, static_cast<int>(ViewMode::LayerMode));
-    renderToolbar->addWidget(btnLayer);
-
-    // Connect button group to AssemblyView
-    connect(m_viewModeGroup, QOverload<int>::of(&QButtonGroup::idClicked),
-            this, [this](int id) {
-        if (m_assemblyView) {
-            m_assemblyView->setViewMode(static_cast<ViewMode>(id));
-        }
-    });
-
-    // Z offset control
-    renderToolbar->addSeparator();
-    QLabel* zLabel = new QLabel("Z Offset (um):", this);
-    renderToolbar->addWidget(zLabel);
-
-    m_zOffsetSpinBox = new QDoubleSpinBox(this);
-    m_zOffsetSpinBox->setRange(-10000.0, 10000.0);
-    m_zOffsetSpinBox->setSingleStep(1.0);
-    m_zOffsetSpinBox->setDecimals(1);
-    m_zOffsetSpinBox->setValue(0.0);
-    m_zOffsetSpinBox->setToolTip("Global Z offset for all components (micrometers)");
-    m_zOffsetSpinBox->setFixedWidth(90);
-    renderToolbar->addWidget(m_zOffsetSpinBox);
-
-    connect(m_zOffsetSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double value) {
-        if (m_assemblyView) {
-            m_assemblyView->setGlobalZOffset(value);
-        }
-    });
-
     // Shape filter slider (area-based polygon filtering for Detailed mode)
-    renderToolbar->addSeparator();
     QLabel* filterLabel = new QLabel("Filter:", this);
     renderToolbar->addWidget(filterLabel);
 
