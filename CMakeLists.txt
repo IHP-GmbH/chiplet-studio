@@ -85,6 +85,10 @@ endif()
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
+    # Vendored Apache-2.0 .chiplet reference reader/writer (see
+    # src/formats/chiplet_format_io/VENDORED.md). Lets the host #include
+    # <chiplet_format_io/chiplet_format_io.hpp>.
+    ${CMAKE_SOURCE_DIR}/src/formats/chiplet_format_io/include
     ${CMAKE_SOURCE_DIR}/src/view3d
     ${KLAYOUT_SRC_DIR}
     ${KLAYOUT_SRC_DIR}/db/db
@@ -125,6 +129,7 @@ set(FLOW_SOURCES
 
 set(FORMAT_SOURCES
     src/formats/ChipletFormat.cpp
+    src/formats/chiplet_format_io/src/chiplet_format_io.cpp
 )
 
 set(VIEW3D_MATH_SOURCES

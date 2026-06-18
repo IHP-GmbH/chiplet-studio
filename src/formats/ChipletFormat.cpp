@@ -3,6 +3,14 @@
 
 /**
  * ChipletFormat.cpp - Implementation of .chiplet YAML parser/writer
+ *
+ * The .chiplet *parsing* is delegated to the vendored, Apache-2.0
+ * chiplet_format_io reference library (dependency-clean: yaml-cpp only, no Qt
+ * or KLayout). This host maps the library's plain ChipletDocument into the
+ * studio's core/Assembly and keeps the studio-specific concerns the reference
+ * library deliberately stays out of: path resolution, qWarning diagnostics, z
+ * auto-calculation, techfile auto-load and flow parsing. The *writer* (save) is
+ * unchanged and still emits via yaml-cpp directly.
  */
 
 #include "ChipletFormat.h"
@@ -10,6 +18,7 @@
 #include "core/ConnectionStack.h"
 #include "core/IOPad.h"
 #include "core/flow/FlowConfig.h"
+#include <chiplet_format_io/chiplet_format_io.hpp>
 #include <yaml-cpp/yaml.h>
 #include <QDebug>
 #include <cmath>
@@ -37,36 +46,6 @@ const char* ChipletFormatException::what() const noexcept
 {
     return m_message.c_str();
 }
-
-// Helper functions for parsing 3D structures from YAML
-namespace {
-
-Position3D parsePosition3D(const YAML::Node& node)
-{
-    Position3D pos;
-    if (node["x"]) pos.x = node["x"].as<double>();
-    if (node["y"]) pos.y = node["y"].as<double>();
-    if (node["z"]) pos.z = node["z"].as<double>();
-    return pos;
-}
-
-Rotation3D parseRotation3D(const YAML::Node& node)
-{
-    Rotation3D rot;
-    if (node["z"]) rot.z = node["z"].as<double>();
-    return rot;
-}
-
-Dimensions3D parseDimensions3D(const YAML::Node& node)
-{
-    Dimensions3D dims;
-    if (node["width"]) dims.width = node["width"].as<double>();
-    if (node["height"]) dims.height = node["height"].as<double>();
-    if (node["thickness"]) dims.thickness = node["thickness"].as<double>();
-    return dims;
-}
-
-} // anonymous namespace
 
 // Type conversion functions
 ComponentType string_to_component_type(const std::string& s)
@@ -123,223 +102,212 @@ ChipletFormat::~ChipletFormat() = default;
 
 std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
 {
-    // Store base path for relative path resolution
+    // Store base path for relative path resolution.
     std::filesystem::path filePath(path);
     m_basePath = filePath.parent_path().string();
     if (m_basePath.empty()) {
         m_basePath = ".";
     }
 
-    // Load YAML file
-    YAML::Node root;
+    // Parse + validate the document with the vendored Apache-2.0 reference
+    // library. It owns the format itself (YAML grammar, the format_version
+    // gate, the intermediate-file guard, required-field and interface-type
+    // validation) and returns a dependency-clean ChipletDocument. Translate its
+    // error type into this reader's public exception so callers' contracts hold.
+    namespace cfio = chiplet_format_io;
+    cfio::ChipletDocument doc;
     try {
-        root = YAML::LoadFile(path);
-    } catch (const YAML::Exception& e) {
-        throw ChipletFormatException(e.what(), 0, "YAML");
-    }
-
-    // Check format version: present and exactly the supported revision.
-    // Unknown versions are rejected instead of silently consuming fields
-    // whose semantics may have changed between revisions.
-    if (!root["format_version"]) {
-        throw ChipletFormatException("Missing required field", 0, "format_version");
-    }
-    const std::string formatVersion = root["format_version"].as<std::string>("");
-    if (formatVersion != kSupportedFormatVersion) {
-        throw ChipletFormatException(
-            "unsupported format_version '" + formatVersion + "' in " + path
-                + "; this reader supports format_version \""
-                + kSupportedFormatVersion + "\"",
-            0, "format_version");
-    }
-
-    // Refuse to load intermediate output (KiCad export marks .chiplet
-    // files as intermediate when they live in PCB-bbox-corner instead
-    // of the canonical GDS-bbox-corner frame). The finalizer is
-    // hyp_to_gds.py --update-chiplet-file, which strips this block.
-    // See coord_frame_contract.md §4.1 (Option a) and §5.1.
-    if (root["_metadata"]
-        && root["_metadata"]["finalize_required"]
-        && root["_metadata"]["finalize_required"].as<bool>(false)) {
-        std::string finalizer = "hyp_to_gds.py --update-chiplet-file";
-        if (root["_metadata"]["finalizer"]) {
-            finalizer = root["_metadata"]["finalizer"].as<std::string>(finalizer);
-        }
-        throw ChipletFormatException(
-            "this .chiplet is intermediate (PCB-bbox-corner frame); "
-            "run " + finalizer + " to finalize",
-            0,
-            "_metadata.finalize_required");
+        doc = cfio::load(path);  // allow_intermediate=false, validate=true
+    } catch (const cfio::ChipletFormatError& e) {
+        throw ChipletFormatException(e.what());
     }
 
     auto assembly = std::make_unique<Assembly>();
 
-    // Parse sections
-    if (root["assembly"]) {
-        parse_assembly_metadata(root["assembly"], *assembly);
-    } else {
-        throw ChipletFormatException("Missing required section", 0, "assembly");
+    // --- Assembly metadata ---
+    assembly->set_name(doc.assembly.name);
+    if (!doc.assembly.description.empty())
+        assembly->set_description(doc.assembly.description);
+    if (!doc.assembly.author.empty())
+        assembly->set_author(doc.assembly.author);
+    if (!doc.assembly.created.empty())
+        assembly->set_created(doc.assembly.created);
+    if (!doc.assembly.modified.empty())
+        assembly->set_modified(doc.assembly.modified);
+    if (!doc.assembly.units.empty())
+        assembly->set_units(doc.assembly.units);
+    if (!doc.assembly.assembly_gds.empty())
+        assembly->set_assembly_gds(resolve_path(doc.assembly.assembly_gds));
+    if (!doc.assembly.io_technology.empty())
+        assembly->set_io_technology(doc.assembly.io_technology);
+
+    // --- Technologies (insertion order preserved) ---
+    for (const auto& tech : doc.technologies) {
+        assembly->add_technology(build_technology(tech));
     }
 
-    if (root["technologies"]) {
-        parse_technologies(root["technologies"], *assembly);
-    }
-
-    if (root["connection_stacks"]) {
-        parse_connection_stacks(root["connection_stacks"], *assembly);
-    }
-
-    if (root["components"]) {
-        parse_components(root["components"], *assembly);
-    }
-
-    // Interconnect adapter (optional): selects the bumping method whose 3D
-    // bodies are merged into the stackup during auto_calculate_z. Mirrors the
-    // interposer adapter; absent = interposer-only (no interconnect bodies).
-    if (root["interconnect"] && root["interconnect"]["adapter"]) {
-        std::string adapter = root["interconnect"]["adapter"].as<std::string>();
-        assembly->set_interconnect_adapter(adapter);
-
-        // Optional PDK-backed identity of the method (interconnect PDK lyp +
-        // provenance). Registered like any other technology so viewers list
-        // the interconnect alongside the die/interposer PDKs instead of
-        // folding it into the interposer. A same-id entry already declared
-        // under technologies: wins over this derived subblock.
-        if (root["interconnect"]["technology"] && !assembly->technology(adapter)) {
-            assembly->add_technology(
-                parse_technology_entry(adapter, root["interconnect"]["technology"]));
+    // --- Connection stacks ---
+    for (const auto& s : doc.connection_stacks) {
+        ConnectionStack stack;
+        stack.id = s.id;
+        stack.description = s.description;
+        for (const auto& l : s.layers) {
+            ConnectionStackLayer layer;
+            layer.name = l.name;
+            layer.material = l.material;
+            layer.height = l.height;
+            layer.diameter = l.diameter;
+            stack.layers.push_back(layer);
         }
+        assembly->add_connection_stack(stack);
     }
 
-    // Auto-calculate z for components with connection stacks and z == 0.0
-    auto_calculate_z(*assembly);
-
-    if (root["interfaces"]) {
-        parse_interfaces(root["interfaces"], *assembly);
-    }
-
-    if (root["netlist"]) {
-        parse_netlist(root["netlist"], *assembly);
-    }
-
-    if (root["flow"]) {
-        FlowConfig flowConfig;
-        FlowDefinition def = flowConfig.parse_flow_definition(root["flow"], *assembly);
-        if (def.working_directory.empty()) {
-            def.working_directory = m_basePath;
-        }
-        assembly->set_flow_definition(std::move(def));
-    }
-
-    // design_rules, default_views - skipped for now (future extension)
-
-    return assembly;
-}
-
-void ChipletFormat::parse_assembly_metadata(const YAML::Node& node, Assembly& assembly)
-{
-    if (node["name"]) {
-        assembly.set_name(node["name"].as<std::string>());
-    } else {
-        throw ChipletFormatException("Missing required field", 0, "assembly.name");
-    }
-
-    if (node["description"]) {
-        assembly.set_description(node["description"].as<std::string>());
-    }
-
-    if (node["author"]) {
-        assembly.set_author(node["author"].as<std::string>());
-    }
-
-    if (node["created"]) {
-        assembly.set_created(node["created"].as<std::string>());
-    }
-
-    if (node["modified"]) {
-        assembly.set_modified(node["modified"].as<std::string>());
-    }
-
-    if (node["units"]) {
-        assembly.set_units(node["units"].as<std::string>());
-    }
-
-    if (node["assembly_gds"]) {
-        assembly.set_assembly_gds(resolve_path(node["assembly_gds"].as<std::string>()));
-    }
-
-    if (node["io_technology"]) {
-        assembly.set_io_technology(node["io_technology"].as<std::string>());
-    }
-}
-
-void ChipletFormat::parse_technologies(const YAML::Node& node, Assembly& assembly)
-{
-    if (!node.IsMap()) {
-        throw ChipletFormatException("Expected a map", 0, "technologies");
-    }
-
-    for (const auto& item : node) {
-        std::string techId = item.first.as<std::string>();
-        assembly.add_technology(parse_technology_entry(techId, item.second));
-    }
-}
-
-std::unique_ptr<Technology> ChipletFormat::parse_technology_entry(
-    const string_type& techId, const YAML::Node& techNode)
-{
-    auto tech = std::make_unique<Technology>(techId);
-
-    if (techNode["description"]) {
-        tech->set_description(techNode["description"].as<std::string>());
-    }
-
-    if (techNode["layer_properties"]) {
-        std::string lpPath = techNode["layer_properties"].as<std::string>();
-        std::string resolvedLypPath = resolve_path(lpPath);
-        tech->set_layer_properties_path(resolvedLypPath);
-
-        // Auto-load techfile based on layer_properties path
-        // If layer_properties is "pdks/ihp-sg13g2/sg13g2.lyp"
-        // Try loading "pdks/ihp-sg13g2/techfile/sg13g2.txt"
-        std::filesystem::path lypPath(resolvedLypPath);
-        std::string stem = lypPath.stem().string();  // "sg13g2"
-        std::filesystem::path parent = lypPath.parent_path();  // "pdks/ihp-sg13g2"
-        std::filesystem::path techfile = parent / "techfile" / (stem + ".txt");
-
-        if (std::filesystem::exists(techfile)) {
-            tech->load_process_def(techfile.string());
-        }
-    }
-
-    if (techNode["dbu"]) {
-        tech->set_dbu(techNode["dbu"].as<double>());
-    }
-
-    // stackup is skipped for now (future extension)
-
-    return tech;
-}
-
-void ChipletFormat::parse_components(const YAML::Node& node, Assembly& assembly)
-{
-    if (!node.IsSequence()) {
-        throw ChipletFormatException("Expected a sequence", 0, "components");
-    }
-
-    // Track components that did not declare `anchor:` so we can emit a
-    // single file-level warning instead of one per component.
-    // Per coord_frame_contract.md §2.2, the reader defaults to
-    // bbox_center on absence and must warn (helps catch legacy files
-    // before they cause silent geometry mismatches).
+    // --- Components ---
+    // Per coord_frame_contract.md §2.2 the reader defaults a missing `anchor:`
+    // to bbox_center and emits a single file-level warning (helps catch legacy
+    // files before they cause silent geometry mismatches).
+    constexpr double kPositionWarnThreshold_um = 1.0e5;
     std::vector<std::string> missingAnchor;
 
-    for (const auto& compNode : node) {
-        parse_component(compNode, assembly);
-        const auto& comp = assembly.components().back();
-        if (!comp->anchor_declared()) {
-            missingAnchor.push_back(comp->id());
+    for (const auto& c : doc.components) {
+        auto component = std::make_unique<Component>(
+            c.id, string_to_component_type(c.type));
+
+        if (!c.technology.empty()) component->set_technology(c.technology);
+        if (!c.connection.empty()) component->set_connection(c.connection);
+        if (!c.layout.empty()) component->set_layout_path(resolve_path(c.layout));
+
+        // cells[] vs legacy top_cell: a single cell is stored via set_top_cell
+        // (cells[0]) for backward compatibility, multiple via set_cells.
+        if (c.cells.size() == 1) {
+            component->set_top_cell(c.cells.front());
+        } else if (c.cells.size() > 1) {
+            component->set_cells(c.cells);
         }
+
+        {
+            Position3D pos;
+            pos.x = c.position.x;
+            pos.y = c.position.y;
+            pos.z = c.position.z;
+            component->set_position(pos);
+        }
+
+        if (c.rotation.z != 0.0) {
+            Rotation3D rot;
+            rot.z = c.rotation.z;
+            component->set_rotation(rot);
+        }
+
+        // Orientation (face-up default; flip_chip/face_down -> FaceDown). Render
+        // mode stays at the constructor default regardless of orientation.
+        if (c.orientation == "flip_chip" || c.orientation == "face_down") {
+            component->set_orientation(Orientation::FaceDown);
+        }
+
+        // Anchor convention (coord_frame_contract.md §2). Present-and-valid sets
+        // the anchor and marks it declared; present-but-unknown warns and is
+        // treated as undeclared (so the file-level summary warns too); absent
+        // leaves the BboxCenter default, undeclared.
+        if (c.anchor.has_value()) {
+            auto parsed = string_to_anchor(c.anchor.value());
+            if (parsed.has_value()) {
+                component->set_anchor(parsed.value());
+                component->set_anchor_declared(true);
+            } else {
+                qWarning("[chiplet] component '%s': unknown anchor value '%s' "
+                         "(expected gds_origin or bbox_center); defaulting to "
+                         "bbox_center",
+                         c.id.c_str(), c.anchor.value().c_str());
+            }
+        }
+        if (!component->anchor_declared()) {
+            missingAnchor.push_back(c.id);
+        }
+
+        // Heuristic guard against HYP-absolute or other foreign-frame leaks
+        // (contract §5): warn loudly when |position.x|/|position.y| exceed
+        // 1e5 µm — the wire-bond demo io_pads bug surfaced exactly there.
+        const auto& posCheck = component->position();
+        if (std::fabs(posCheck.x) > kPositionWarnThreshold_um
+            || std::fabs(posCheck.y) > kPositionWarnThreshold_um) {
+            qWarning("[chiplet] component '%s': position (%.3f, %.3f) µm "
+                     "exceeds %.0e µm — likely a foreign-frame leak (e.g. "
+                     "HYP-absolute). See coord_frame_contract.md §1.",
+                     c.id.c_str(), posCheck.x, posCheck.y,
+                     kPositionWarnThreshold_um);
+        }
+
+        {
+            Dimensions3D dims;
+            dims.width = c.dimensions.width;
+            dims.height = c.dimensions.height;
+            dims.thickness = c.dimensions.thickness;
+            component->set_dimensions(dims);
+        }
+
+        if (c.array.has_value()) {
+            const auto& la = c.array.value();
+            ComponentArray arr;
+            arr.pattern = la.pattern;
+            arr.countX = la.count_x;
+            arr.countY = la.count_y;
+            arr.pitchX = la.pitch_x;
+            arr.pitchY = la.pitch_y;
+            arr.startPosition.x = la.start_position.x;
+            arr.startPosition.y = la.start_position.y;
+            arr.startPosition.z = la.start_position.z;
+            component->set_array(arr);
+        }
+
+        for (const auto& kv : c.metadata) {
+            component->set_metadata(kv.first, kv.second);
+        }
+
+        // External I/O pads (e.g. wire-bond pads on the interposer).
+        std::vector<std::string> oobPads;
+        for (const auto& lp : c.io_pads) {
+            IOPad pad;
+            if (!lp.id.empty()) pad.set_id(lp.id);
+            if (!lp.io_class.empty())
+                pad.set_io_class(string_to_io_class(lp.io_class));
+            if (!lp.net.empty()) pad.set_net(lp.net);
+            {
+                IOPadPosition p;
+                p.x = lp.pos_x;
+                p.y = lp.pos_y;
+                pad.set_position(p);
+            }
+            {
+                IOPadSize sz;
+                sz.x = lp.size_x;
+                sz.y = lp.size_y;
+                pad.set_size(sz);
+            }
+            if (!lp.layer.empty()) pad.set_layer(lp.layer);
+
+            const auto& padPos = pad.position();
+            if (std::fabs(padPos.x) > kPositionWarnThreshold_um
+                || std::fabs(padPos.y) > kPositionWarnThreshold_um) {
+                oobPads.push_back(pad.id());
+            }
+
+            component->add_io_pad(pad);
+        }
+        if (!oobPads.empty()) {
+            std::string idList;
+            for (size_t i = 0; i < oobPads.size(); ++i) {
+                if (i > 0) idList += ", ";
+                idList += oobPads[i];
+            }
+            qWarning("[chiplet] component '%s': %zu io_pad(s) with "
+                     "position outside ±1e5 µm — likely HYP-absolute "
+                     "leak. Affected pads: %s. See "
+                     "coord_frame_contract.md section 6.",
+                     c.id.c_str(), oobPads.size(), idList.c_str());
+        }
+
+        assembly->add_component(std::move(component));
     }
 
     if (!missingAnchor.empty()) {
@@ -354,355 +322,121 @@ void ChipletFormat::parse_components(const YAML::Node& node, Assembly& assembly)
         qWarning("[chiplet] See chiplet-studio/docs/coord_frame_contract.md "
                  "section 2 for the anchor contract.");
     }
-}
 
-void ChipletFormat::parse_component(const YAML::Node& node, Assembly& assembly)
-{
-    // Required fields
-    if (!node["id"]) {
-        throw ChipletFormatException("Missing required field", 0, "component.id");
-    }
-    std::string id = node["id"].as<std::string>();
-
-    if (!node["type"]) {
-        throw ChipletFormatException("Missing required field for " + id, 0, "component.type");
-    }
-    ComponentType type = string_to_component_type(node["type"].as<std::string>());
-
-    auto component = std::make_unique<Component>(id, type);
-
-    // Technology reference
-    if (node["technology"]) {
-        component->set_technology(node["technology"].as<std::string>());
-    }
-
-    // Connection stack reference
-    if (node["connection"]) {
-        component->set_connection(node["connection"].as<std::string>());
-    }
-
-    // Layout file
-    if (node["layout"]) {
-        std::string layoutPath = node["layout"].as<std::string>();
-        component->set_layout_path(resolve_path(layoutPath));
-    }
-
-    // Cells - support both new 'cells' array and legacy 'top_cell' string
-    if (node["cells"]) {
-        // New format: cells is an array
-        if (node["cells"].IsSequence()) {
-            std::vector<std::string> cells;
-            for (const auto& cellNode : node["cells"]) {
-                cells.push_back(cellNode.as<std::string>());
-            }
-            component->set_cells(cells);
-        } else {
-            // Single cell as string (alternate format)
-            component->set_top_cell(node["cells"].as<std::string>());
-        }
-    } else if (node["top_cell"]) {
-        // Legacy format: single top_cell string -> convert to cells[0]
-        component->set_top_cell(node["top_cell"].as<std::string>());
-    }
-
-    // Position
-    if (node["position"]) {
-        component->set_position(parsePosition3D(node["position"]));
-    }
-
-    // Rotation
-    if (node["rotation"]) {
-        component->set_rotation(parseRotation3D(node["rotation"]));
-    }
-
-    // Orientation (face-up or flip-chip). Render mode stays at the
-    // constructor default (Transparent for dies, Solid for substrates)
-    // regardless of orientation: a Transparent overview opens faster
-    // and lets the user see the whole assembly at a glance. Users
-    // promote individual components to Detailed via the Hierarchy
-    // panel when they need to inspect cu-pillar contact / GDS
-    // tessellation.
-    if (node["orientation"]) {
-        std::string orient = node["orientation"].as<std::string>("face_up");
-        if (orient == "flip_chip" || orient == "face_down")
-            component->set_orientation(Orientation::FaceDown);
-    }
-
-    // Anchor convention (see coord_frame_contract.md §2). Drives mesh
-    // centering downstream. When absent, default to BboxCenter (the
-    // pre-contract behavior for interposers); the file-level warning
-    // is emitted by parse_components.
-    if (node["anchor"]) {
-        std::string anchorStr = node["anchor"].as<std::string>();
-        auto parsed = string_to_anchor(anchorStr);
-        if (parsed.has_value()) {
-            component->set_anchor(parsed.value());
-            component->set_anchor_declared(true);
-        } else {
-            qWarning("[chiplet] component '%s': unknown anchor value '%s' "
-                     "(expected gds_origin or bbox_center); defaulting to "
-                     "bbox_center",
-                     id.c_str(), anchorStr.c_str());
-            // Treat as undeclared so the file-level summary warns too.
+    // --- Interconnect adapter (optional) ---
+    // Selects the bumping method whose 3D bodies are merged into the stackup
+    // during auto_calculate_z. Its PDK-backed technology is registered like any
+    // other technology so viewers list it alongside the die/interposer PDKs; a
+    // same-id entry already declared under technologies: wins over it.
+    if (doc.interconnect.has_value()) {
+        assembly->set_interconnect_adapter(doc.interconnect->adapter);
+        if (doc.interconnect->technology.has_value()
+            && !assembly->technology(doc.interconnect->adapter)) {
+            assembly->add_technology(
+                build_technology(doc.interconnect->technology.value()));
         }
     }
 
-    // Heuristic guard against HYP-absolute or other foreign-frame leaks
-    // (per contract §5: warn loudly when |position.x| or |position.y|
-    // exceeds 1e5 µm — the wire-bond demo io_pads bug surfaced exactly
-    // there).
-    const auto& posCheck = component->position();
-    constexpr double kPositionWarnThreshold_um = 1.0e5;
-    if (std::fabs(posCheck.x) > kPositionWarnThreshold_um
-        || std::fabs(posCheck.y) > kPositionWarnThreshold_um) {
-        qWarning("[chiplet] component '%s': position (%.3f, %.3f) µm "
-                 "exceeds %.0e µm — likely a foreign-frame leak (e.g. "
-                 "HYP-absolute). See coord_frame_contract.md §1.",
-                 id.c_str(), posCheck.x, posCheck.y,
-                 kPositionWarnThreshold_um);
-    }
+    // Auto-calculate z for components with connection stacks and z == 0.0.
+    auto_calculate_z(*assembly);
 
-    // Dimensions
-    if (node["dimensions"]) {
-        component->set_dimensions(parseDimensions3D(node["dimensions"]));
-    }
-
-    // Array configuration (for DieArray type)
-    if (node["array"]) {
-        const YAML::Node& arrayNode = node["array"];
-        ComponentArray arr;
-
-        if (arrayNode["pattern"]) {
-            arr.pattern = arrayNode["pattern"].as<std::string>();
-        }
-
-        if (arrayNode["count"]) {
-            if (arrayNode["count"]["x"]) arr.countX = arrayNode["count"]["x"].as<int>();
-            if (arrayNode["count"]["y"]) arr.countY = arrayNode["count"]["y"].as<int>();
-        }
-
-        if (arrayNode["pitch"]) {
-            if (arrayNode["pitch"]["x"]) arr.pitchX = arrayNode["pitch"]["x"].as<double>();
-            if (arrayNode["pitch"]["y"]) arr.pitchY = arrayNode["pitch"]["y"].as<double>();
-        }
-
-        if (arrayNode["start_position"]) {
-            arr.startPosition = parsePosition3D(arrayNode["start_position"]);
-        }
-
-        component->set_array(arr);
-    }
-
-    // Custom metadata
-    if (node["metadata"]) {
-        const YAML::Node& metaNode = node["metadata"];
-        if (metaNode.IsMap()) {
-            for (const auto& item : metaNode) {
-                component->set_metadata(
-                    item.first.as<std::string>(),
-                    item.second.as<std::string>()
-                );
-            }
-        }
-    }
-
-    // External I/O pads (e.g. wire-bond pads on the interposer).
-    // Optional and additive: existing files without io_pads are unaffected.
-    if (node["io_pads"] && node["io_pads"].IsSequence()) {
-        // Track io_pads whose declared position falls outside the
-        // plausible range for the canonical frame — a heuristic to
-        // catch HYP-absolute leaks (wire-bond demo bug, see contract
-        // §6). One warning per parent component, listing pad ids.
-        std::vector<std::string> oobPads;
-
-        for (const auto& padNode : node["io_pads"]) {
-            IOPad pad;
-            if (padNode["id"]) {
-                pad.set_id(padNode["id"].as<std::string>());
-            }
-            if (padNode["io_class"]) {
-                pad.set_io_class(string_to_io_class(
-                    padNode["io_class"].as<std::string>()));
-            }
-            if (padNode["net"]) {
-                pad.set_net(padNode["net"].as<std::string>());
-            }
-            if (padNode["position"]) {
-                IOPadPosition p;
-                if (padNode["position"]["x"]) {
-                    p.x = padNode["position"]["x"].as<double>();
-                }
-                if (padNode["position"]["y"]) {
-                    p.y = padNode["position"]["y"].as<double>();
-                }
-                pad.set_position(p);
-            }
-            if (padNode["size"]) {
-                IOPadSize sz;
-                if (padNode["size"]["x"]) {
-                    sz.x = padNode["size"]["x"].as<double>();
-                }
-                if (padNode["size"]["y"]) {
-                    sz.y = padNode["size"]["y"].as<double>();
-                }
-                pad.set_size(sz);
-            }
-            if (padNode["layer"]) {
-                pad.set_layer(padNode["layer"].as<std::string>());
-            }
-
-            constexpr double kPositionWarnThreshold_um = 1.0e5;
-            const auto& padPos = pad.position();
-            if (std::fabs(padPos.x) > kPositionWarnThreshold_um
-                || std::fabs(padPos.y) > kPositionWarnThreshold_um) {
-                oobPads.push_back(pad.id());
-            }
-
-            component->add_io_pad(pad);
-        }
-
-        if (!oobPads.empty()) {
-            std::string idList;
-            for (size_t i = 0; i < oobPads.size(); ++i) {
-                if (i > 0) idList += ", ";
-                idList += oobPads[i];
-            }
-            qWarning("[chiplet] component '%s': %zu io_pad(s) with "
-                     "position outside ±1e5 µm — likely HYP-absolute "
-                     "leak. Affected pads: %s. See "
-                     "coord_frame_contract.md section 6.",
-                     id.c_str(), oobPads.size(), idList.c_str());
-        }
-    }
-
-    assembly.add_component(std::move(component));
-}
-
-void ChipletFormat::parse_connection_stacks(const YAML::Node& node, Assembly& assembly)
-{
-    if (!node.IsMap()) {
-        throw ChipletFormatException("Expected a map", 0, "connection_stacks");
-    }
-
-    for (const auto& item : node) {
-        ConnectionStack stack;
-        stack.id = item.first.as<std::string>();
-        const YAML::Node& stackNode = item.second;
-
-        if (stackNode["description"]) {
-            stack.description = stackNode["description"].as<std::string>();
-        }
-
-        if (stackNode["layers"] && stackNode["layers"].IsSequence()) {
-            for (const auto& layerNode : stackNode["layers"]) {
-                ConnectionStackLayer layer;
-                if (layerNode["name"]) layer.name = layerNode["name"].as<std::string>();
-                if (layerNode["material"]) layer.material = layerNode["material"].as<std::string>();
-                if (layerNode["height"]) layer.height = layerNode["height"].as<double>();
-                if (layerNode["diameter"]) layer.diameter = layerNode["diameter"].as<double>();
-                stack.layers.push_back(layer);
-            }
-        }
-
-        assembly.add_connection_stack(stack);
-    }
-}
-
-void ChipletFormat::parse_interfaces(const YAML::Node& node, Assembly& assembly)
-{
-    if (!node.IsSequence()) {
-        throw ChipletFormatException("Expected a sequence", 0, "interfaces");
-    }
-
-    for (const auto& ifaceNode : node) {
-        if (!ifaceNode["id"]) {
-            throw ChipletFormatException("Missing required field", 0, "interface.id");
-        }
-        if (!ifaceNode["type"]) {
-            throw ChipletFormatException("Missing required field", 0, "interface.type");
-        }
-
-        std::string id = ifaceNode["id"].as<std::string>();
-        InterfaceType type = interface_type_from_string(ifaceNode["type"].as<std::string>());
-
-        auto iface = std::make_unique<Interface>(id, type);
-
-        if (ifaceNode["from"]) {
-            const YAML::Node& fromNode = ifaceNode["from"];
+    // --- Interfaces ---
+    for (const auto& i : doc.interfaces) {
+        auto iface = std::make_unique<Interface>(
+            i.id, interface_type_from_string(i.type));
+        if (i.from.has_value()) {
             InterfaceEndpoint ep;
-            if (fromNode["component"]) ep.component = fromNode["component"].as<std::string>();
-            if (fromNode["surface"]) ep.surface = fromNode["surface"].as<std::string>();
-            if (fromNode["port_layer"]) ep.portLayer = fromNode["port_layer"].as<std::string>();
+            ep.component = i.from->component;
+            ep.surface = i.from->surface;
+            ep.portLayer = i.from->port_layer;
             iface->set_from(ep);
         }
-
-        if (ifaceNode["to"]) {
-            const YAML::Node& toNode = ifaceNode["to"];
+        if (i.to.has_value()) {
             InterfaceEndpoint ep;
-            if (toNode["component"]) ep.component = toNode["component"].as<std::string>();
-            if (toNode["surface"]) ep.surface = toNode["surface"].as<std::string>();
-            if (toNode["port_layer"]) ep.portLayer = toNode["port_layer"].as<std::string>();
+            ep.component = i.to->component;
+            ep.surface = i.to->surface;
+            ep.portLayer = i.to->port_layer;
             iface->set_to(ep);
         }
-
-        if (ifaceNode["physical"]) {
-            const YAML::Node& physNode = ifaceNode["physical"];
+        if (i.physical.has_value()) {
             InterfacePhysical phys;
-            if (physNode["pitch"]) phys.pitch = physNode["pitch"].as<double>();
-            if (physNode["diameter"]) phys.diameter = physNode["diameter"].as<double>();
-            if (physNode["height"]) phys.height = physNode["height"].as<double>();
+            phys.pitch = i.physical->pitch;
+            phys.diameter = i.physical->diameter;
+            phys.height = i.physical->height;
             iface->set_physical(phys);
         }
-
-        assembly.add_interface(std::move(iface));
+        assembly->add_interface(std::move(iface));
     }
+
+    // --- Netlist ---
+    if (doc.netlist.present) {
+        Netlist netlist;
+        for (const auto& n : doc.netlist.nets) {
+            Net net(n.name, string_to_net_class(n.net_class));
+            net.set_external(n.external);
+            for (const auto& conn : n.connections) {
+                NetConnection nc;
+                nc.component = conn.component;
+                nc.pin = conn.pin;
+                nc.layer = conn.layer;
+                net.add_connection(nc);
+            }
+            netlist.add_net(std::move(net));
+        }
+        if (!doc.netlist.external_netlist.empty()) {
+            netlist.set_external_netlist_path(doc.netlist.external_netlist);
+        }
+        assembly->set_netlist(std::move(netlist));
+    }
+
+    // --- Flow definition ---
+    // The reference library preserves the flow block verbatim; FlowConfig (which
+    // resolves ${...} variables against the assembly at parse time) stays the
+    // host's concern.
+    if (doc.has_flow && !doc.flow_yaml.empty()) {
+        YAML::Node flowNode = YAML::Load(doc.flow_yaml);
+        FlowConfig flowConfig;
+        FlowDefinition def = flowConfig.parse_flow_definition(flowNode, *assembly);
+        if (def.working_directory.empty()) {
+            def.working_directory = m_basePath;
+        }
+        assembly->set_flow_definition(std::move(def));
+    }
+
+    // design_rules, default_views - skipped for now (future extension)
+
+    return assembly;
 }
 
-void ChipletFormat::parse_netlist(const YAML::Node& node, Assembly& assembly)
+std::unique_ptr<Technology> ChipletFormat::build_technology(
+    const chiplet_format_io::Technology& tech)
 {
-    Netlist netlist;
+    auto out = std::make_unique<Technology>(tech.id);
 
-    if (node["nets"] && node["nets"].IsSequence()) {
-        for (const auto& netNode : node["nets"]) {
-            if (!netNode["name"]) {
-                throw ChipletFormatException("Missing required field", 0, "netlist.nets[].name");
-            }
+    if (!tech.description.empty()) {
+        out->set_description(tech.description);
+    }
 
-            std::string name = netNode["name"].as<std::string>();
-            std::string classStr = netNode["class"] ? netNode["class"].as<std::string>() : "signal";
-            NetClass nc = string_to_net_class(classStr);
+    if (!tech.layer_properties.empty()) {
+        std::string resolvedLypPath = resolve_path(tech.layer_properties);
+        out->set_layer_properties_path(resolvedLypPath);
 
-            Net net(name, nc);
-
-            if (netNode["external"]) {
-                net.set_external(netNode["external"].as<bool>());
-            }
-
-            if (netNode["connections"] && netNode["connections"].IsSequence()) {
-                for (const auto& connNode : netNode["connections"]) {
-                    NetConnection conn;
-                    if (connNode["component"]) {
-                        conn.component = connNode["component"].as<std::string>();
-                    }
-                    if (connNode["pin"]) {
-                        conn.pin = connNode["pin"].as<std::string>();
-                    }
-                    if (connNode["layer"]) {
-                        conn.layer = connNode["layer"].as<std::string>();
-                    }
-                    net.add_connection(conn);
-                }
-            }
-
-            netlist.add_net(std::move(net));
+        // Auto-load the GDS3D techfile that sits beside the .lyp:
+        // "<dir>/<stem>.lyp" -> "<dir>/techfile/<stem>.txt".
+        std::filesystem::path lypPath(resolvedLypPath);
+        std::string stem = lypPath.stem().string();
+        std::filesystem::path parent = lypPath.parent_path();
+        std::filesystem::path techfile = parent / "techfile" / (stem + ".txt");
+        if (std::filesystem::exists(techfile)) {
+            out->load_process_def(techfile.string());
         }
     }
 
-    if (node["external_netlist"]) {
-        netlist.set_external_netlist_path(node["external_netlist"].as<std::string>());
+    if (tech.has_dbu) {
+        out->set_dbu(tech.dbu);
     }
 
-    assembly.set_netlist(std::move(netlist));
+    return out;
 }
 
 void ChipletFormat::auto_calculate_z(Assembly& assembly)
