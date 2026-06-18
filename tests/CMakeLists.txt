@@ -28,7 +28,6 @@ add_executable(chiplet_tests
     test_klayout_bridge.cpp
     test_gds_loading.cpp
     test_layer_properties.cpp
-    test_clip_plane.cpp
     test_component_style.cpp
     test_hierarchy_panel.cpp
     test_properties_panel.cpp
@@ -63,7 +62,7 @@ target_include_directories(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/GDS3D/math
 )
 
-# Find Qt6 (needed for LayerProperties XML parsing, ClipPlane vectors, HierarchyPanel, and KLayout2DView)
+# Find Qt6 (needed for LayerProperties XML parsing, HierarchyPanel, and KLayout2DView)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Core5Compat Test Concurrent)
 
 # Base libraries (using GTest::gtest, not gtest_main - we provide our own main for early Python init)
@@ -100,7 +99,6 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayout2DView.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/EmbeddedDispatcher.cpp
-    ${CMAKE_SOURCE_DIR}/src/view3d/ClipPlane.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/math/VECTOR3D.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/math/VECTOR4D.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/math/MATRIX4X4.cpp

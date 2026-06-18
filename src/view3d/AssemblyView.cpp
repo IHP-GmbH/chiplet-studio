@@ -36,13 +36,11 @@ uniform mat3 normalMatrix;
 
 out vec3 fragNormal;
 out vec3 fragPosition;
-out vec3 worldPosition;
 out float flogz;
 
 void main() {
     fragNormal = normalMatrix * normal;
     fragPosition = vec3(modelView * vec4(position, 1.0));
-    worldPosition = vec3(model * vec4(position, 1.0));
     gl_Position = modelViewProjection * vec4(position, 1.0);
     flogz = 1.0 + gl_Position.w;
 }
@@ -53,18 +51,12 @@ static const char* componentFragmentShader = R"(
 #version 330 core
 in vec3 fragNormal;
 in vec3 fragPosition;
-in vec3 worldPosition;
 in float flogz;
 
 uniform vec4 objectColor;
 uniform vec3 lightDirection;
 uniform bool selected;
 uniform float Fcoef_half;
-
-// Clip plane: vec4(normal.xyz, distance)
-// Fragments are discarded if dot(position, normal) + distance < 0
-uniform vec4 clipPlane;
-uniform bool clipEnabled;
 
 // Dither pattern support
 uniform sampler2D patternTexture;
@@ -74,14 +66,6 @@ uniform float patternScale;  // Typically 16.0 for 16x16 patterns
 out vec4 FragColor;
 
 void main() {
-    // Clip plane test
-    if (clipEnabled) {
-        float dist = dot(worldPosition, clipPlane.xyz) + clipPlane.w;
-        if (dist < 0.0) {
-            discard;
-        }
-    }
-
     // Pattern test - discard fragments where pattern alpha is 0
     if (usePattern) {
         vec2 patternCoord = gl_FragCoord.xy / patternScale;
@@ -365,31 +349,6 @@ void AssemblyView::fitToComponent(const QString& componentId)
 void AssemblyView::resetCamera()
 {
     m_scene.camera().reset();
-    update();
-}
-
-void AssemblyView::setClipEnabled(bool enabled)
-{
-    m_clipPlane.setEnabled(enabled);
-    emit clipPlaneChanged();
-    update();
-}
-
-void AssemblyView::setClipPosition(float position)
-{
-    m_clipPlane.setPosition(position);
-    emit clipPlaneChanged();
-    update();
-}
-
-void AssemblyView::setClipAxis(ClipAxis axis)
-{
-    m_clipPlane.setAxis(axis);
-    // Recompute the clip range for the NEW axis from the current scene bounds.
-    // Without this the range kept the previous axis's extents, so X/Y clipping
-    // was wrong until the next geometry rebuild called updateSceneBounds().
-    updateClipRange();
-    emit clipPlaneChanged();
     update();
 }
 
@@ -739,12 +698,6 @@ void AssemblyView::setupShaderUniforms()
     m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
     m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
-    m_componentShader.setUniformBool("clipEnabled", m_clipPlane.isEnabled());
-    if (m_clipPlane.isEnabled()) {
-        QVector4D plane = m_clipPlane.planeEquation();
-        m_componentShader.setUniformVec4("clipPlane", plane);
-    }
-
     m_componentShader.setUniformBool("usePattern", false);
     m_componentShader.setUniformFloat("patternScale", 16.0f);
 }
@@ -1027,8 +980,6 @@ void AssemblyView::renderGrid()
     m_componentShader.setUniformVec4("objectColor", QVector4D(0.95f, 0.95f, 0.95f, 1.0f));
     m_componentShader.setUniformBool("selected", false);
 
-    // No clipping for base plane
-    m_componentShader.setUniformBool("clipEnabled", false);
     m_componentShader.setUniformBool("usePattern", false);
 
     m_gridMesh.render();
@@ -1605,31 +1556,6 @@ void AssemblyView::updateSceneBounds()
              << ") maxes=(" << sceneBounds.maxes.x << "," << sceneBounds.maxes.y << "," << sceneBounds.maxes.z << ")";
 
     m_scene.setSceneBounds(sceneBounds);
-
-    // Update clip plane range for the current axis
-    updateClipRange();
-}
-
-void AssemblyView::updateClipRange()
-{
-    const AA_BOUNDING_BOX& sceneBounds = m_scene.sceneBounds();
-    float minPos, maxPos;
-    switch (m_clipPlane.axis()) {
-    case ClipAxis::X:
-        minPos = sceneBounds.mins.x;
-        maxPos = sceneBounds.maxes.x;
-        break;
-    case ClipAxis::Y:
-        minPos = sceneBounds.mins.y;
-        maxPos = sceneBounds.maxes.y;
-        break;
-    case ClipAxis::Z:
-    default:
-        minPos = sceneBounds.mins.z;
-        maxPos = sceneBounds.maxes.z;
-        break;
-    }
-    m_clipPlane.setRange(minPos, maxPos);
 }
 
 void AssemblyView::updateBasePlane()
