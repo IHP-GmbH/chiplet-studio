@@ -16,7 +16,6 @@
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
 #include "view3d/AssemblyView.h"
-#include "view3d/ClipPlane.h"
 #include "view3d/GDSAnalyzer.h"
 #include "formats/ChipletFormat.h"
 #include "core/Technology.h"
@@ -35,9 +34,6 @@
 #include <QToolBar>
 #include <QSlider>
 #include <QLabel>
-#include <QCheckBox>
-#include <QPushButton>
-#include <QButtonGroup>
 #include <QDoubleSpinBox>
 #include <QProgressDialog>
 #include <QTimer>
@@ -47,6 +43,7 @@
 #include <QFileInfo>
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
+#include <QScreen>
 
 namespace chiplet {
 
@@ -58,7 +55,6 @@ MainWindow::MainWindow(QWidget* parent)
 
     setupMenus();
     setupPanels();
-    setupClipToolbar();
     setupViewModeToolbar();
     setupScriptConsole();
     setupFlowPanel();
@@ -765,132 +761,6 @@ void MainWindow::onFileSave()
     }
 }
 
-void MainWindow::setupClipToolbar()
-{
-    m_clipToolbar = addToolBar("Cross-section");
-    m_clipToolbar->setMovable(false);
-
-    // Enable checkbox
-    m_clipEnable = new QCheckBox("Clip", this);
-    m_clipEnable->setToolTip("Enable cross-section view");
-    m_clipToolbar->addWidget(m_clipEnable);
-
-    m_clipToolbar->addSeparator();
-
-    // Axis buttons (X, Y, Z)
-    m_axisGroup = new QButtonGroup(this);
-    m_axisGroup->setExclusive(true);
-
-    QPushButton* btnX = new QPushButton("X", this);
-    QPushButton* btnY = new QPushButton("Y", this);
-    QPushButton* btnZ = new QPushButton("Z", this);
-
-    btnX->setCheckable(true);
-    btnY->setCheckable(true);
-    btnZ->setCheckable(true);
-    btnZ->setChecked(true);  // Default axis
-
-    btnX->setFixedWidth(30);
-    btnY->setFixedWidth(30);
-    btnZ->setFixedWidth(30);
-
-    btnX->setToolTip("Clip along X axis (YZ plane)");
-    btnY->setToolTip("Clip along Y axis (XZ plane)");
-    btnZ->setToolTip("Clip along Z axis (XY plane)");
-
-    m_axisGroup->addButton(btnX, static_cast<int>(ClipAxis::X));
-    m_axisGroup->addButton(btnY, static_cast<int>(ClipAxis::Y));
-    m_axisGroup->addButton(btnZ, static_cast<int>(ClipAxis::Z));
-
-    m_clipToolbar->addWidget(btnX);
-    m_clipToolbar->addWidget(btnY);
-    m_clipToolbar->addWidget(btnZ);
-
-    m_clipToolbar->addSeparator();
-
-    // Position slider
-    m_clipSlider = new QSlider(Qt::Horizontal, this);
-    m_clipSlider->setRange(0, 1000);
-    m_clipSlider->setValue(500);  // Middle position
-    m_clipSlider->setMinimumWidth(150);
-    m_clipSlider->setToolTip("Clip plane position");
-    m_clipToolbar->addWidget(m_clipSlider);
-
-    // Position label
-    m_clipPosLabel = new QLabel("0.0", this);
-    m_clipPosLabel->setMinimumWidth(60);
-    m_clipPosLabel->setAlignment(Qt::AlignCenter);
-    m_clipToolbar->addWidget(m_clipPosLabel);
-
-    m_clipToolbar->addSeparator();
-
-    // Flip button
-    m_flipButton = new QPushButton("Flip", this);
-    m_flipButton->setToolTip("Flip clip direction");
-    m_flipButton->setFixedWidth(40);
-    m_clipToolbar->addWidget(m_flipButton);
-
-    // Connect signals
-    connect(m_clipEnable, &QCheckBox::toggled,
-            this, &MainWindow::onClipToggle);
-
-    connect(m_axisGroup, QOverload<int>::of(&QButtonGroup::idClicked),
-            this, &MainWindow::onClipAxisChanged);
-
-    connect(m_clipSlider, &QSlider::valueChanged,
-            this, &MainWindow::onClipPositionChanged);
-
-    connect(m_flipButton, &QPushButton::clicked,
-            this, &MainWindow::onClipFlip);
-
-    // Connect to AssemblyView for position label updates
-    connect(m_assemblyView, &AssemblyView::clipPlaneChanged,
-            this, &MainWindow::updateClipPositionLabel);
-}
-
-void MainWindow::onClipToggle(bool enabled)
-{
-    if (m_assemblyView) {
-        m_assemblyView->setClipEnabled(enabled);
-    }
-}
-
-void MainWindow::onClipAxisChanged(int axis)
-{
-    if (m_assemblyView) {
-        m_assemblyView->setClipAxis(static_cast<ClipAxis>(axis));
-        // Reset slider to middle
-        m_clipSlider->setValue(500);
-    }
-}
-
-void MainWindow::onClipPositionChanged(int value)
-{
-    if (m_assemblyView) {
-        float normalizedPos = value / 1000.0f;
-        m_assemblyView->clipPlane().setNormalizedPosition(normalizedPos);
-        m_assemblyView->update();
-        updateClipPositionLabel();
-    }
-}
-
-void MainWindow::onClipFlip()
-{
-    if (m_assemblyView) {
-        m_assemblyView->clipPlane().flip();
-        m_assemblyView->update();
-    }
-}
-
-void MainWindow::updateClipPositionLabel()
-{
-    if (m_assemblyView) {
-        // Get position in mm (scene units)
-        float pos = m_assemblyView->clipPlane().position();
-        m_clipPosLabel->setText(QString("%1").arg(pos, 0, 'f', 1));
-    }
-}
-
 void MainWindow::onComponentDrillDown(const QString& componentId)
 {
     if (!m_assembly || componentId.isEmpty()) {
@@ -969,6 +839,13 @@ void MainWindow::setupViewModeToolbar()
     QToolBar* renderToolbar = addToolBar("View Mode");
     renderToolbar->setMovable(false);
 
+    // Push the filter cluster to the top-right corner: an expanding spacer eats
+    // the free width so the control sits flush right, sized at about a quarter
+    // of the screen width.
+    QWidget* spacer = new QWidget(this);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    renderToolbar->addWidget(spacer);
+
     // Shape filter slider (area-based polygon filtering for Detailed mode)
     QLabel* filterLabel = new QLabel("Filter:", this);
     renderToolbar->addWidget(filterLabel);
@@ -976,7 +853,11 @@ void MainWindow::setupViewModeToolbar()
     m_shapeFilterSlider = new QSlider(Qt::Horizontal, this);
     m_shapeFilterSlider->setRange(0, 1000);
     m_shapeFilterSlider->setValue(0);
-    m_shapeFilterSlider->setMinimumWidth(120);
+    int sliderWidth = 240;
+    if (QScreen* screen = QApplication::primaryScreen()) {
+        sliderWidth = screen->availableGeometry().width() / 4;
+    }
+    m_shapeFilterSlider->setFixedWidth(sliderWidth);
     m_shapeFilterSlider->setEnabled(false);  // no component selected yet
     m_shapeFilterSlider->setToolTip(
         "Shape area filter for the selected component: hide small polygons (0% = show all)");

@@ -18,9 +18,6 @@ class QToolBar;
 class QAction;
 class QSlider;
 class QLabel;
-class QCheckBox;
-class QPushButton;
-class QButtonGroup;
 class QDoubleSpinBox;
 class QProgressDialog;
 class QTimer;
@@ -84,13 +81,6 @@ private slots:
     void onFileSave();
     void onFileNew();
 
-    // Clip plane controls
-    void onClipToggle(bool enabled);
-    void onClipAxisChanged(int axis);
-    void onClipPositionChanged(int value);
-    void onClipFlip();
-    void updateClipPositionLabel();
-
     // 2D drill-down
     void onComponentDrillDown(const QString& componentId);
 
@@ -104,7 +94,6 @@ private slots:
 private:
     void setupMenus();
     void setupPanels();
-    void setupClipToolbar();
     void setupViewModeToolbar();
     void setupScriptConsole();
     void setupFlowPanel();
@@ -136,14 +125,6 @@ private:
     // Net graph
     NetGraphPanel* m_netGraphPanel = nullptr;
     QDockWidget* m_netGraphDock = nullptr;
-
-    // Clip plane toolbar widgets
-    QToolBar* m_clipToolbar = nullptr;
-    QCheckBox* m_clipEnable = nullptr;
-    QButtonGroup* m_axisGroup = nullptr;
-    QSlider* m_clipSlider = nullptr;
-    QLabel* m_clipPosLabel = nullptr;
-    QPushButton* m_flipButton = nullptr;
 
     // Command system
     std::unique_ptr<CommandProcessor> m_commandProcessor;

@@ -21,7 +21,6 @@
 #include "ShaderProgram.h"
 #include "ComponentMesh.h"
 #include "SceneManager.h"
-#include "ClipPlane.h"
 #include "DitherPatterns.h"
 #include "math/BVH.h"
 #include "core/Assembly.h"
@@ -68,13 +67,6 @@ public:
     void fitToComponent(const QString& componentId);
     void resetCamera();
 
-    // Clip plane control
-    ClipPlane& clipPlane() { return m_clipPlane; }
-    const ClipPlane& clipPlane() const { return m_clipPlane; }
-    void setClipEnabled(bool enabled);
-    void setClipPosition(float position);
-    void setClipAxis(ClipAxis axis);
-
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
 
@@ -89,7 +81,6 @@ public:
     void setBasePlaneVisible(bool visible);
 
 signals:
-    void clipPlaneChanged();
     void componentClicked(const QString& componentId);
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
@@ -115,7 +106,6 @@ private:
     void renderGrid();
     QString pickComponent(int x, int y);
     void updateSceneBounds();
-    void updateClipRange();
     void updateBasePlane();
 
     // Data
@@ -158,9 +148,6 @@ private:
     // State
     bool m_initialized = false;
     bool m_needsRebuild = false;
-
-    // Clip plane
-    ClipPlane m_clipPlane;
 
     // Dither patterns for layer fill styles
     DitherPatterns m_ditherPatterns;

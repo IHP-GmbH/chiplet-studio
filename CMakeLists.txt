@@ -145,7 +145,6 @@ set(VIEW3D_SOURCES
     src/view3d/ComponentMesh.cpp
     src/view3d/MeshBuilder.cpp
     src/view3d/AssemblyView.cpp
-    src/view3d/ClipPlane.cpp
     src/view3d/DitherPatterns.cpp
     src/view3d/GDSLayerExtractor.cpp
     src/view3d/GDSAnalyzer.cpp
