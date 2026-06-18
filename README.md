@@ -150,7 +150,7 @@ chiplet-studio/
 ## Documentation
 
 - `docs/ARCHITECTURE.md` - Architecture and technical decisions
-- `docs/CHIPLET_FORMAT_SPEC.md` - The `.chiplet` file format
+- `docs/CHIPLET_FORMAT_SPEC.md` - Pointer to the canonical `.chiplet` spec (IHP-GmbH/chiplet-spec)
 - `docs/coord_frame_contract.md` - Coordinate frame contract for the pipeline
 - `docs/interconnect_render_contract.md` - Interconnect body rendering and die seating contract
 - `docs/FLOW_ORCHESTRATOR.md` - Flow orchestration
