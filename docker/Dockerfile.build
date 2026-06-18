@@ -73,6 +73,18 @@ ARG GID=1000
 RUN groupadd -g ${GID} builder && \
     useradd -u ${UID} -g ${GID} -m builder
 
+# PDK roots at FIXED container paths so the image carries no host-specific
+# paths and runs on any host (the run-*.sh launchers mount each host PDK dir
+# onto the matching path here; see scripts/pdk-env.sh). The resolution chain is
+# env -> textvar -> sibling walk, so these are the authoritative source: e.g.
+# chiplet-studio's interconnect stackup-fragment lookup reads
+# INTERCONNECT_PDK_ROOT first, which is what makes CuPillar/bump bodies render.
+# Mirrors adk-tools/Dockerfile. Placed late so it never invalidates the apt
+# build-cache layers above.
+ENV INTERCONNECT_PDK_ROOT=/opt/pdks/interconnect_pdk \
+    INTERPOSER_PDK_ROOT=/opt/pdks/interposer \
+    PDK_ROOT=/opt/pdks/ihp-sg13g2
+
 WORKDIR /workspace
 
 # Default command: build everything

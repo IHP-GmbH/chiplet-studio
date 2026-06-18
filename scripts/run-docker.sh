@@ -34,6 +34,9 @@ IHP_PDK="${HOME}/git/ihp_pdk"
 # KLayout library paths
 KLAYOUT_LIBS="$HETERO_PROJECT/chiplet-studio/extern/klayout/bin-release"
 
+# PDK roots -> fixed container paths (defines PDK_MOUNTS)
+source "$SCRIPT_DIR/pdk-env.sh"
+
 cd "$PROJECT_DIR"
 
 # Check if built
@@ -77,6 +80,7 @@ docker run --rm \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
     -v "$HETERO_PROJECT:$HETERO_PROJECT:ro" \
     -v "$IHP_PDK:$IHP_PDK:ro" \
+    "${PDK_MOUNTS[@]}" \
     --user "$(id -u):$(id -g)" \
     --network host \
     "$IMAGE" \

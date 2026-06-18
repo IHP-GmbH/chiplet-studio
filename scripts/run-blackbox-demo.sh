@@ -22,6 +22,10 @@ set -e
 PROJECT_ROOT="${HOME}/git/heterogenic_chip_design_project"
 CHIPLET_FILE="${PROJECT_ROOT}/chiplet-studio/examples/blackbox/blackbox_demo.chiplet"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# PDK roots -> fixed container paths (defines PDK_MOUNTS)
+source "$SCRIPT_DIR/pdk-env.sh"
+
 if [ ! -f "$CHIPLET_FILE" ]; then
     echo "Error: blackbox_demo.chiplet not found at: $CHIPLET_FILE"
     exit 1
@@ -35,6 +39,7 @@ docker run --rm \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
     -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     -v "${PROJECT_ROOT}/chiplet-studio:/workspace" \
+    "${PDK_MOUNTS[@]}" \
     --network host \
     -u $(id -u):$(id -g) \
     chiplet-studio-build \

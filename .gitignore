@@ -47,3 +47,6 @@ qrc_*.cpp
 # OS
 .DS_Store
 Thumbs.db
+
+# Local session tracking (not for the git tree)
+SESSION_LOG.md

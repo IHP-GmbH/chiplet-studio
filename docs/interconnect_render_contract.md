@@ -114,3 +114,27 @@ hierarchy's interconnect row and its properties view.
   variable or sibling-checkout walk; no fixed-depth paths.
 - The `.chiplet` identity: `interconnect.technology` round-trips and the
   method is a first-class Technology in the UI.
+
+## Running: PDK discovery in Docker vs host
+
+The fragment lookup (`interconnectStackupFragmentPath`) resolves the
+interconnect PDK as **env var first** (`INTERCONNECT_PDK_ROOT`), then a
+sibling-checkout walk up from the `configs/` dir. This matters operationally:
+
+- **Docker**: the `run-*.sh` launchers mount chiplet-studio at `/workspace`,
+  which decouples it from the PDK tree, so the sibling walk cannot find the
+  interconnect PDK. The env var is therefore required. The build image bakes
+  it at a fixed container path (`docker/Dockerfile.build`:
+  `INTERCONNECT_PDK_ROOT=/opt/pdks/interconnect_pdk`, plus the interposer and
+  base-PDK roots), and the launchers mount the host PDK dirs onto those paths
+  via `scripts/pdk-env.sh`. This keeps the image free of host-specific paths
+  so it runs on any host; override the `HOST_*` vars in `pdk-env.sh` if your
+  local checkouts live elsewhere. Without it, `mergeInterconnectFragments`
+  returns 0 and the bodies never enter the interposer mesh (no log line
+  `Merged N interconnect body layers ...`).
+- **Host (no Docker)**: the image ENV does not apply — export
+  `INTERCONNECT_PDK_ROOT` / `INTERPOSER_PDK_ROOT` / `PDK_ROOT` yourself, or
+  rely on the sibling walk if your checkouts are laid out for it.
+
+Per L3, the bodies are part of the interposer mesh, so they only render when
+the **interposer** component is in a Detailed render mode.
