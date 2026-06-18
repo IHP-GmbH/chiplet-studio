@@ -2,11 +2,17 @@
 
 A 3D chiplet assembly design tool that uses KLayout as a library for 2D layout operations.
 
+It reads the `.chiplet` interchange format, shows the assembly in an interactive
+3D view, lets you drill down into the real GDS/OASIS layout in 2D, run a build
+pipeline, inspect connectivity, and automate everything from an embedded Python
+console.
+
 ## Features
 
-- **3D Visualization** - Interactive assembly view with orbit camera
-- **2D Drill-down** - KLayout-based GDS/OASIS viewing
-- **Cross-section View** - Shader-based clipping planes
+- **3D Visualization** - Interactive assembly view with orbit camera and per-component render modes
+- **2D Drill-down** - KLayout-based GDS/OASIS viewing, with an assembly view and a shape-filtering slider
+- **Flow Orchestrator** - Run a configurable build pipeline against the assembly (View > Flow Pipeline)
+- **Net Graph** - Inspect the assembly's connectivity
 - **Hierarchy Panel** - Tree view with component selection sync
 - **Properties Panel** - Component details with unit conversion
 - **Python Scripting** - Embedded Python interpreter for automation
@@ -15,11 +21,11 @@ A 3D chiplet assembly design tool that uses KLayout as a library for 2D layout o
 
 Chiplet Studio includes an embedded Python interpreter for automation and scripting.
 
-### Using the Script Console
+### Using the Python Console
 
-1. Open **View > Script Console** (or press `Ctrl+P`)
+1. Open **View > Python Console** (or press `` Ctrl+` ``)
 2. Type Python commands interactively
-3. Use `chiplet_studio` module to manipulate the assembly
+3. Use the `chiplet_studio` module to manipulate the assembly
 
 ### Example Script
 
@@ -54,8 +60,9 @@ for comp in asm.components():
 - `has_component(id)` - Check if component exists
 
 **Component:**
-- `id`, `name`, `type` - Read-only properties
-- `position`, `dimensions` - Read-only (use setters)
+- `id`, `type` - Read-only properties
+- `name` - Read-write (settable from Python)
+- `position`, `dimensions` - Read-only (use the setters below)
 - `set_position(x, y, z)` - Set absolute position
 - `move(dx, dy, dz)` - Relative movement
 - `set_technology(tech_id)` - Set technology reference
@@ -109,12 +116,12 @@ self-contained bundle with `scripts/build-portable.sh`:
 
 This writes to `dist/`:
 
-- **`chiplet-studio-portable.tar.gz`** (recommended) — extract anywhere and run:
+- **`chiplet-studio-portable.tar.gz`** (recommended); extract anywhere and run:
   ```bash
   tar xf chiplet-studio-portable.tar.gz
   ./chiplet-studio-portable/AppRun [assembly.chiplet]
   ```
-- **`Chiplet_Studio-x86_64.AppImage`** — single file:
+- **`Chiplet_Studio-x86_64.AppImage`**, single file:
   ```bash
   chmod +x Chiplet_Studio-x86_64.AppImage
   ./Chiplet_Studio-x86_64.AppImage [assembly.chiplet]
@@ -137,15 +144,23 @@ CHIPLET_GL=software ./AppRun   # always use the bundled software renderer
 ```
 chiplet-studio/
 ├── src/
-│   ├── core/      # Data model (Assembly, Component, Technology)
-│   ├── formats/   # .chiplet YAML parser
-│   ├── view3d/    # OpenGL 3D visualization
-│   ├── view2d/    # KLayout integration
-│   └── ui/        # Qt UI components
-├── tests/         # Google Test suite (170 tests)
-├── docs/          # Documentation
-└── extern/klayout # KLayout submodule
+│   ├── main.cpp    # Application entry point
+│   ├── core/       # Data model (Assembly, Component, Technology), flow engine
+│   ├── formats/    # .chiplet consumer over the vendored chiplet_format_io library
+│   ├── view3d/     # OpenGL 3D visualization
+│   ├── view2d/     # KLayout integration
+│   ├── scripting/  # Embedded Python (pybind11)
+│   └── ui/         # Qt UI components
+├── tests/          # Google Test suite (562 tests via ctest)
+├── docs/           # Documentation
+└── extern/klayout  # KLayout submodule
 ```
+
+`src/formats/` no longer hand-parses the format: `ChipletFormat` is a thin
+consumer that delegates `.chiplet` parsing and validation to the vendored,
+Apache-2.0 `chiplet_format_io` reference library (a verbatim copy of
+IHP-GmbH/chiplet-spec; see `src/formats/chiplet_format_io/VENDORED.md`) and maps
+its `ChipletDocument` into `core/Assembly`.
 
 ## Documentation
 

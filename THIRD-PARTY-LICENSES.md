@@ -16,10 +16,11 @@ source for the copyleft components (KLayout, libgdsto3d, Qt, libstdc++).
 
 | Component | License (SPDX) | Linkage | Source / license text |
 |-----------|----------------|---------|-----------------------|
-| KLayout | `GPL-3.0-or-later` | dynamic (.so) | submodule `extern/klayout` — `extern/klayout/LICENSE` |
-| GDS3D `libgdsto3d` (built as `chiplet_gds3d`) | `LGPL-2.1-or-later` | static | submodule `extern/GDS3D/libgdsto3d` — per-file headers |
+| KLayout | `GPL-3.0-or-later` | dynamic (.so) | submodule `extern/klayout`, license at `extern/klayout/LICENSE` |
+| GDS3D `libgdsto3d` (built as `chiplet_gds3d`) | `LGPL-2.1-or-later` | static | submodule `extern/GDS3D/libgdsto3d`, per-file headers |
 | GDS3D `math/` (Paul Baker) | `BSD-3-Clause` | static | `extern/GDS3D/math/License.txt` |
 | Clipper (Angus Johnson) | `BSL-1.0` | static | header in `extern/GDS3D/libgdsto3d/clipper/clipper.cpp` |
+| `chiplet_format_io` (chiplet-spec reference reader/writer) | `Apache-2.0` | static | vendored in `src/formats/chiplet_format_io/`, per-file SPDX headers; see `VENDORED.md` |
 | Qt 6 | `LGPL-3.0-only` | dynamic (.so) | https://doc.qt.io/qt-6/lgpl.html |
 | yaml-cpp | `MIT` | dynamic | https://github.com/jbeder/yaml-cpp |
 | nlohmann/json | `MIT` | header-only | https://github.com/nlohmann/json |
@@ -35,6 +36,13 @@ Notes:
   govern. LGPL-2.1-or-later is GPL-3.0-compatible.
 - **Qt** is used under LGPL-3.0 and linked dynamically; the portable bundle ships
   Qt as shared libraries, satisfying the LGPL relink requirement.
+- **`chiplet_format_io`** is a verbatim copy of the `.chiplet` reference
+  reader/writer from `IHP-GmbH/chiplet-spec` (`reference/cpp/`), compiled straight
+  into the binary; `src/formats/ChipletFormat.cpp` delegates parsing and
+  validation to it. It is permissive Apache-2.0, which is GPL-3.0-compatible, so
+  it adds no corresponding-source obligation beyond the existing copyleft set. Do
+  not edit the vendored files in place; fix bugs upstream and re-vendor (see
+  `src/formats/chiplet_format_io/VENDORED.md`).
 
 ## Bundled additionally in the portable distribution
 
