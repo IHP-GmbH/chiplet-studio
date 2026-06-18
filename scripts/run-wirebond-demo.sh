@@ -25,6 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHIPLET_STUDIO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$CHIPLET_STUDIO_DIR/.." && pwd)}"
 
+# PDK roots -> fixed container paths (defines PDK_MOUNTS)
+source "$SCRIPT_DIR/pdk-env.sh"
+
 DEFAULT_CHIPLET="${PROJECT_ROOT}/kicad_designs/interposer_wire_bonding_demo/interposer_wire_bonding_demo.chiplet"
 CHIPLET_FILE="${1:-${CHIPLET_FILE:-$DEFAULT_CHIPLET}}"
 
@@ -42,6 +45,7 @@ docker run --rm \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
     -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     -v "${CHIPLET_STUDIO_DIR}:/workspace" \
+    "${PDK_MOUNTS[@]}" \
     --network host \
     -u $(id -u):$(id -g) \
     chiplet-studio-build \
