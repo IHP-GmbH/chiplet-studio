@@ -13,9 +13,13 @@
 #include <stdexcept>
 #include "core/Assembly.h"
 
-// Forward declaration to avoid exposing yaml-cpp in header
-namespace YAML {
-    class Node;
+// Forward declaration of the vendored Apache-2.0 reference reader's document
+// model. Its full definition lives in <chiplet_format_io/chiplet_format_io.hpp>
+// and is pulled in by the .cpp only, keeping those types off this header's
+// public surface (and yaml-cpp out of it entirely).
+namespace chiplet_format_io {
+    struct ChipletDocument;
+    struct Technology;
 }
 
 namespace chiplet {
@@ -72,19 +76,17 @@ public:
     void save(const Assembly& assembly, const string_type& path);
 
 private:
-    // Parsing helpers (throw on error)
-    void parse_assembly_metadata(const YAML::Node& node, Assembly& assembly);
-    void parse_technologies(const YAML::Node& node, Assembly& assembly);
-    std::unique_ptr<Technology> parse_technology_entry(const string_type& techId,
-                                                       const YAML::Node& techNode);
-    void parse_connection_stacks(const YAML::Node& node, Assembly& assembly);
-    void parse_components(const YAML::Node& node, Assembly& assembly);
-    void parse_component(const YAML::Node& node, Assembly& assembly);
-    void parse_interfaces(const YAML::Node& node, Assembly& assembly);
-    void parse_netlist(const YAML::Node& node, Assembly& assembly);
+    // Build a core Technology from a parsed reference-library technology entry:
+    // resolve the .lyp path against the .chiplet directory, set the dbu, and
+    // auto-load the adjacent GDS3D techfile when one exists. Used for both the
+    // technologies: map and the interconnect: technology subblock.
+    std::unique_ptr<Technology> build_technology(
+        const chiplet_format_io::Technology& tech);
+
+    // Auto-calculate z for components that have a connection stack and z == 0.
     void auto_calculate_z(Assembly& assembly);
 
-    // Utility
+    // Path resolution: relative-to-.chiplet plus ${VAR} ecosystem-root expansion.
     string_type resolve_path(const string_type& relativePath) const;
     string_type expand_path_vars(const string_type& path) const;
 
