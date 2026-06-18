@@ -15,21 +15,22 @@ Three parties contribute, each through its own artifact:
 |---|---|---|
 | interposer PDK | technology stackup YAML | the substrate layers and the **attachment surface z** (`attachment_surface_z`) |
 | interconnect PDK | `libs.tech/chiplet_studio/stackup_fragments/<method>.stackup.yaml` | the method's 3D **body layers** (GDS layer/datatype, heights), z relative to the attachment surface (`z_reference: attachment_surface`) |
-| `.chiplet` | per-die `connection:` + `interconnect:` block | each die's **method** (= fragment key); the block carries the legacy/fallback **adapter** + the PDK-backed technology identity |
+| `.chiplet` | per-die `connection:` + `interconnect:` block | each die's **method** (= fragment key); the block carries the legacy/fallback **adapter** plus the PDK-backed technology identity |
 
 At load time the studio registers the interconnect method as a Technology
 (keyed by the adapter id) so it appears alongside the die/interposer PDKs
 with its own layer properties and provenance.
 
 At render and z-calculation time the method's stackup fragment is merged
-into the **interposer technology's** stackup — and only that one. The
-merge is additive and idempotent (`addLayer` overwrites by layer key) and
-is implemented once — `LayerStackup::mergeInterconnectFragment` — which
-both consumers call, so their views of the body layers cannot diverge:
+into the **interposer technology's** stackup, and only that one. The
+merge is additive and idempotent (`addLayer` overwrites by layer key).
+Both consumers call the same entry point, `LayerStackup::mergeInterconnectFragments`
+(the singular `mergeInterconnectFragment` is a one-key convenience that
+delegates to it), so their views of the body layers cannot diverge:
 
-- `AssemblyView::buildLayerGeometry` — gives the body layers z/height in
+- `AssemblyView::buildLayerGeometry` gives the body layers z/height in
   the interposer component's mesh.
-- `Assembly::calculate_component_z` — locates the mounting surface (the
+- `Assembly::calculate_component_z` locates the mounting surface (the
   z where a die's connection stack starts) by looking up the stack's
   first layer name in the merged stackup.
 
@@ -39,69 +40,74 @@ render-side and surface-lookup data.
 
 ## Conventions (load-bearing, keep them true)
 
-**C1 — Body shapes live in the interposer's layout.** Generators place
+**C1, body shapes live in the interposer's layout.** Generators place
 the interconnect body polygons (e.g. 500/35, 501/35, or a vendor's
 510/35, 511/35) inside the GDS that the interposer component references.
 The studio renders them as layers of the interposer mesh whose elevations
 come from the merged fragment. Any future generation flow must keep this
 invariant or the bodies will not render.
 
-**C2 — Fragment is keyed by method.** One fragment per interconnect
-method (`cupillar_opt2.stackup.yaml`, …); a die's `connection:` id
+**C2, fragment is keyed by method.** One fragment per interconnect
+method (`cupillar_opt2.stackup.yaml`, and so on); a die's `connection:` id
 selects it, so each option carries its own body heights. Adapter-keyed
 fragments remain in the PDK as deprecated family-default fallbacks.
 `LayerStackup::resolveInterconnectKeys` is the single policy point:
 method ids that resolve win; the adapter is used only when none does,
 and never overwrites resolved per-method values.
 
-**C3 — Merge is scoped to the interposer technology.** Merging into any
+**C3, merge is scoped to the interposer technology.** Merging into any
 other technology corrupts flip-chip rendering: a FaceDown die's stackup
 `totalHeight()` is its z-inversion reference, and inflating it shifts
 every die layer upward by the body-stack height.
 
 ## Known couplings and their state
 
-**L1 — Fragment z is relative to the attachment surface (resolved).**
+**L1, fragment z is relative to the attachment surface (resolved).**
 Fragments declare `z_reference: attachment_surface` and use z values
 relative to 0, so they carry method-owned data only (body heights); the
 interposer stackup YAML declares `attachment_surface_z` (for IntM4TM2:
-13.83, the exposed pad top — TopMetal2 top at the passivation opening).
+13.83, the exposed pad top, TopMetal2 top at the passivation opening).
 The shared merge helper applies the offset, so the same fragment seats
 dies correctly on any interposer that declares its surface. Degraded
 paths are loud, never silent: a fragment without the marker keeps the
 legacy absolute interpretation (deprecation warning), and a base stackup
 without the declaration gets a best-effort `totalHeight()` offset
 (warning names the missing key). Note that the attachment surface is a
-declared value, not `max_z` of the stackup — passivation geometry rises
+declared value, not `max_z` of the stackup; passivation geometry rises
 above the real mounting surface.
 
-**L2 — Method selection is per die (resolved).** One interconnect PDK
+**L2, method selection is per die (resolved).** One interconnect PDK
 per assembly; what varies per die is the method within it. The per-die
 `connection:` id selects the fragment: die seating merges only the die's
 own method fragment (exact per die), the render path merges the union of
 the methods present (body layer keys are disjoint across vendors by
 manifest construction), and the assembly DRC scopes each method's
 pitch/spacing rules to its dies' pads (see the ADK adapter contract,
-"Per-method refinement"). Options of one family share GDS body layers,
-so a mixed-option union renders the taller body per shared layer,
-loudly — the per-layer render model can show one height per key; a truly
-per-die body render belongs to L3's mesh-group work. The board is the
-data source for the selection: each die footprint's `CONNECTION` field
-(exposed per die in the export dialog) names its method, and the GDS
-generator draws each die's body polygons with its own method's layers
-and diameter — mixed-method assemblies carry every method's bodies in
-one export. In the hierarchy, each die shows its method as a child row
-whose properties view gives the per-method fragment provenance.
+"Per-method refinement", in the adk-tools repo). Options of one family
+share GDS body layers, so a mixed-option union renders the taller body
+per shared layer, loudly; the per-layer render model can show one height
+per key, but a truly per-die body render belongs to L3's mesh-group work.
+The board is the data source for the selection: each die footprint's
+`CONNECTION` field (exposed per die in the upstream export dialog) names
+its method, and the GDS generator draws each die's body polygons with its
+own method's layers and diameter, so mixed-method assemblies carry every
+method's bodies in one export. (That export flow lives in the upstream
+KiCad generator, not in this repo; it is cross-repo context, kept here so
+the selection chain is legible.) In the hierarchy, each die shows its
+method as a child row whose properties view gives the per-method fragment
+provenance.
 
-**L3 — Bodies inherit the interposer's render identity.** Being part of
+**L3, bodies inherit the interposer's render identity.** Being part of
 the interposer mesh, the bodies share its render mode and selection, and
 their colors resolve through the interposer technology rather than the
 interconnect PDK's layer properties.
 
 *Target:* a dedicated mesh group built from the fragment's layer keys,
 giving the method its own render mode, 3D selection and `interconnect.lyp`
-colors. Until then, per-layer show/hide is available through the
-hierarchy's interconnect row and its properties view.
+colors. Until then, the only control is a whole-interconnect show/hide:
+the hierarchy's assembly-level interconnect row is a single checkbox that
+toggles all the active methods' body layers together, and its properties
+view shows fragment provenance only (no per-layer toggles).
 
 ## What is deliberately decoupled already
 
@@ -132,7 +138,7 @@ sibling-checkout walk up from the `configs/` dir. This matters operationally:
   local checkouts live elsewhere. Without it, `mergeInterconnectFragments`
   returns 0 and the bodies never enter the interposer mesh (no log line
   `Merged N interconnect body layers ...`).
-- **Host (no Docker)**: the image ENV does not apply — export
+- **Host (no Docker)**: the image ENV does not apply, so export
   `INTERCONNECT_PDK_ROOT` / `INTERPOSER_PDK_ROOT` / `PDK_ROOT` yourself, or
   rely on the sibling walk if your checkouts are laid out for it.
 
