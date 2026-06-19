@@ -166,8 +166,8 @@ its `ChipletDocument` into `core/Assembly`.
 
 - `docs/ARCHITECTURE.md` - Architecture and technical decisions
 - `docs/CHIPLET_FORMAT_SPEC.md` - Pointer to the canonical `.chiplet` spec (IHP-GmbH/chiplet-spec)
-- `docs/coord_frame_contract.md` - Coordinate frame contract for the pipeline
-- `docs/interconnect_render_contract.md` - Interconnect body rendering and die seating contract
+- `docs/coord_frame_contract.md` - Pointer to the canonical coordinate-frame contract (IHP-GmbH/chiplet-spec)
+- `docs/interconnect_render_contract.md` - Interconnect body rendering and die seating contract (Chiplet Studio implementation contract)
 - `docs/FLOW_ORCHESTRATOR.md` - Flow orchestration
 - `docs/CODE_STYLE.md` - Coding standards
 
