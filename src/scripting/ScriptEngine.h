@@ -126,7 +126,6 @@ private:
     std::unique_ptr<Impl> m_impl;
 
     void setup_stdout_redirect();
-    void setup_move_callback();
 };
 
 } // namespace chiplet
