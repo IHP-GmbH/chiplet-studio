@@ -32,6 +32,9 @@ namespace py = pybind11;
 #include "core/Assembly.h"
 #include "core/LayerStackup.h"
 
+#include <filesystem>
+#include <memory>
+
 #ifdef HAVE_PYTHON
 // Global Python interpreter guard - must be created before Qt and
 // destroyed after Qt to avoid segfault in Docker environments
@@ -161,6 +164,11 @@ int main(int argc, char *argv[])
             QTimer::singleShot(0, &window, [&window, filePath]() {
                 window.openFile(filePath);
             });
+        } else {
+            // Diagnose instead of silently ignoring the positional path. The
+            // GUI still launches and the exit code is unchanged, preserving the
+            // documented argv[1] CLI contract.
+            qWarning("Chiplet Studio: file not found: %s", qPrintable(filePath));
         }
     }
 

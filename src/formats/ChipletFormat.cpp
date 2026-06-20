@@ -136,8 +136,12 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         assembly->set_modified(doc.assembly.modified);
     if (!doc.assembly.units.empty())
         assembly->set_units(doc.assembly.units);
-    if (!doc.assembly.assembly_gds.empty())
+    if (!doc.assembly.assembly_gds.empty()) {
         assembly->set_assembly_gds(resolve_path(doc.assembly.assembly_gds));
+        // Keep the verbatim string so a round-trip save does not bake in the
+        // resolved absolute path (destroying ${VAR}/relative portability).
+        assembly->set_assembly_gds_source(doc.assembly.assembly_gds);
+    }
     if (!doc.assembly.io_technology.empty())
         assembly->set_io_technology(doc.assembly.io_technology);
 
@@ -175,7 +179,10 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
 
         if (!c.technology.empty()) component->set_technology(c.technology);
         if (!c.connection.empty()) component->set_connection(c.connection);
-        if (!c.layout.empty()) component->set_layout_path(resolve_path(c.layout));
+        if (!c.layout.empty()) {
+            component->set_layout_path(resolve_path(c.layout));
+            component->set_layout_path_source(c.layout);
+        }
 
         // cells[] vs legacy top_cell: a single cell is stored via set_top_cell
         // (cells[0]) for backward compatibility, multiple via set_cells.
@@ -269,8 +276,19 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
         for (const auto& lp : c.io_pads) {
             IOPad pad;
             if (!lp.id.empty()) pad.set_id(lp.id);
-            if (!lp.io_class.empty())
-                pad.set_io_class(string_to_io_class(lp.io_class));
+            if (!lp.io_class.empty()) {
+                // string_to_io_class throws std::runtime_error on an unknown
+                // value; translate it so load() honors its documented
+                // ChipletFormatException-only contract (external consumers,
+                // including adk-tools, catch on that type).
+                try {
+                    pad.set_io_class(string_to_io_class(lp.io_class));
+                } catch (const std::exception& e) {
+                    throw ChipletFormatException(
+                        std::string("invalid io_class '") + lp.io_class + "'", 0,
+                        "component '" + c.id + "' io_pad '" + lp.id + "'");
+                }
+            }
             if (!lp.net.empty()) pad.set_net(lp.net);
             {
                 IOPadPosition p;
@@ -420,6 +438,7 @@ std::unique_ptr<Technology> ChipletFormat::build_technology(
     if (!tech.layer_properties.empty()) {
         std::string resolvedLypPath = resolve_path(tech.layer_properties);
         out->set_layer_properties_path(resolvedLypPath);
+        out->set_layer_properties_source(tech.layer_properties);
 
         // Auto-load the GDS3D techfile that sits beside the .lyp:
         // "<dir>/<stem>.lyp" -> "<dir>/techfile/<stem>.txt".
@@ -464,7 +483,9 @@ static void emit_technology_fields(YAML::Emitter& out, const Technology& tech)
 
     if (!tech.layer_properties_path().empty()) {
         out << YAML::Key << "layer_properties" << YAML::Value
-            << tech.layer_properties_path();
+            << (tech.layer_properties_source().empty()
+                    ? tech.layer_properties_path()
+                    : tech.layer_properties_source());
     }
 
     out << YAML::Key << "dbu" << YAML::Value << tech.dbu();
@@ -495,7 +516,10 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     }
     out << YAML::Key << "units" << YAML::Value << assembly.units();
     if (!assembly.assembly_gds().empty()) {
-        out << YAML::Key << "assembly_gds" << YAML::Value << assembly.assembly_gds();
+        out << YAML::Key << "assembly_gds" << YAML::Value
+            << (assembly.assembly_gds_source().empty()
+                    ? assembly.assembly_gds()
+                    : assembly.assembly_gds_source());
     }
     if (!assembly.io_technology().empty()) {
         out << YAML::Key << "io_technology" << YAML::Value << assembly.io_technology();
@@ -598,7 +622,10 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             }
 
             if (!comp->layout_path().empty()) {
-                out << YAML::Key << "layout" << YAML::Value << comp->layout_path();
+                out << YAML::Key << "layout" << YAML::Value
+                    << (comp->layout_path_source().empty()
+                            ? comp->layout_path()
+                            : comp->layout_path_source());
             }
 
             // Save cells - use 'cells' array for multi-cell, 'top_cell' for single (backward compat)
@@ -862,10 +889,15 @@ std::string discover_path_var(const std::string& name,
     // A set-and-valid environment value wins; set-but-invalid (marker
     // subpath missing) falls through to the walk, mirroring the Python side.
     if (const char* env = std::getenv(name.c_str())) {
+        // Use the error_code overload: the throwing one would let an ELOOP/EACCES
+        // on a hostile env value escape load() as a filesystem_error instead of
+        // the documented ChipletFormatException. On any OS error treat the env
+        // candidate as invalid and fall through to the walk.
+        std::error_code ec_env;
         if (env[0] != '\0'
             && (marker == nullptr
                 || std::filesystem::is_directory(
-                       std::filesystem::path(env) / marker->marker))) {
+                       std::filesystem::path(env) / marker->marker, ec_env))) {
             return env;
         }
     }
@@ -885,7 +917,8 @@ std::string discover_path_var(const std::string& name,
                 break;
             }
             std::filesystem::path cand = base / dirname;
-            if (std::filesystem::is_directory(cand / marker->marker)) {
+            std::error_code ec_cand;
+            if (std::filesystem::is_directory(cand / marker->marker, ec_cand)) {
                 return cand.string();
             }
         }

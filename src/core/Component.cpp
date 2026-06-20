@@ -72,6 +72,16 @@ const Component::string_type& Component::layout_path() const
     return m_layoutPath;
 }
 
+void Component::set_layout_path_source(const string_type& path)
+{
+    m_layoutPathSource = path;
+}
+
+const Component::string_type& Component::layout_path_source() const
+{
+    return m_layoutPathSource;
+}
+
 void Component::set_top_cell(const string_type& cell)
 {
     // Backward compatibility: set as first (and only) cell

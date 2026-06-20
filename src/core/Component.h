@@ -137,6 +137,13 @@ public:
     void set_layout_path(const string_type& path);
     const string_type& layout_path() const;
 
+    // Verbatim layout path as written in the .chiplet file (may contain ${VAR}
+    // or a relative path). The reader records it so the writer can round-trip it
+    // instead of baking in the resolved absolute path. Empty for in-memory
+    // assemblies; callers should fall back to layout_path() then.
+    void set_layout_path_source(const string_type& path);
+    const string_type& layout_path_source() const;
+
     // Legacy top_cell (backward compatibility - returns cells[0])
     void set_top_cell(const string_type& cell);
     const string_type& top_cell() const;
@@ -200,6 +207,7 @@ private:
     string_type m_technology;
     string_type m_connection;
     string_type m_layoutPath;
+    string_type m_layoutPathSource;  // verbatim ${VAR}/relative path from the file
     std::vector<string_type> m_cells;  // List of cells to visualize (replaces m_topCell)
     position_type m_position;
     rotation_type m_rotation;

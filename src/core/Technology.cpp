@@ -44,6 +44,16 @@ const Technology::string_type& Technology::layer_properties_path() const
     return m_layerPropertiesPath;
 }
 
+void Technology::set_layer_properties_source(const string_type& path)
+{
+    m_layerPropertiesSource = path;
+}
+
+const Technology::string_type& Technology::layer_properties_source() const
+{
+    return m_layerPropertiesSource;
+}
+
 void Technology::set_dbu(double dbu)
 {
     m_dbu = dbu;
