@@ -153,6 +153,10 @@ private:
 
     void setupAutoSave();
     void initializeCommandProcessor();
+    // Detach every view/processor/script binding from the current assembly
+    // before it is replaced or freed, and clear the 2D dock. Used by the load,
+    // New and crash-recovery paths so they all share the same safe ordering.
+    void detachAssemblyFromViews();
     QString autoSavePath() const;
     QString resolveAssemblyGdsPath() const;
     void loadAssemblyGds();

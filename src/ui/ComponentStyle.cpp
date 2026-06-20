@@ -7,6 +7,7 @@
 
 #include "ComponentStyle.h"
 #include <yaml-cpp/yaml.h>
+#include <cstdio>   // std::sscanf
 #include <fstream>
 
 namespace chiplet {

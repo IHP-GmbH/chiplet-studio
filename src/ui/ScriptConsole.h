@@ -110,7 +110,6 @@ private:
     int m_historyIndex;
     QString m_currentInput;
     bool m_waitingForMore;  // True when waiting for multiline input
-    QString m_multilineBuffer;
 };
 
 } // namespace chiplet

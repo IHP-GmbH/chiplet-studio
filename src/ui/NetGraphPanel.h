@@ -56,6 +56,10 @@ public:
     static constexpr int ROLE_COMPONENT_ID = Qt::UserRole;
     static constexpr int ROLE_NET_CLASS = Qt::UserRole + 1;
     static constexpr int ROLE_ITEM_TYPE = Qt::UserRole + 2;
+    // Endpoint component ids stored on each edge so highlightComponent() can
+    // match by netlist relationship instead of fragile pixel proximity.
+    static constexpr int ROLE_EDGE_COMP1 = Qt::UserRole + 3;
+    static constexpr int ROLE_EDGE_COMP2 = Qt::UserRole + 4;
 
     // Item type values stored in ROLE_ITEM_TYPE
     static constexpr int TYPE_NODE = 1;
@@ -89,7 +93,6 @@ private:
     QLabel* m_emptyLabel = nullptr;
     QGraphicsView* m_view = nullptr;
     QGraphicsScene* m_scene = nullptr;
-    QWidget* m_legendFrame = nullptr;
 
     // Filter checkboxes
     QCheckBox* m_filterSignal = nullptr;

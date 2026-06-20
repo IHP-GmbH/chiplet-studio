@@ -387,8 +387,38 @@ void MainWindow::setupPanels()
             });
 }
 
+void MainWindow::detachAssemblyFromViews()
+{
+    // Detach every consumer from the current assembly BEFORE it is replaced or
+    // freed. detectAndSelectCells() (load path) can spin a modal dialog whose
+    // nested event loop processes a pending 3D repaint; a view still holding the
+    // just-freed assembly would be a use-after-free. clearSelection precedes the
+    // properties panel's setAssembly(nullptr) so it drops any stale component
+    // pointer first.
+    m_assemblyView->setAssembly(nullptr);
+    m_hierarchyPanel->setAssembly(nullptr);
+    m_propertiesPanel->clearSelection();
+    m_propertiesPanel->setAssembly(nullptr);
+    if (m_netGraphPanel) {
+        m_netGraphPanel->setAssembly(nullptr);
+    }
+    m_commandProcessor.reset();  // holds a raw Assembly*
+    if (m_scriptEngine) {
+        m_scriptEngine->clear_assembly();  // nulls g_scriptAssembly
+    }
+    // Reset the 2D drill-down dock so it does not show geometry from the
+    // outgoing assembly.
+    if (m_klayout2DView) {
+        m_klayout2DView->clearLayout();
+    }
+    if (m_drillDownPanel) {
+        m_drillDownPanel->clearContext();
+    }
+}
+
 void MainWindow::onFileNew()
 {
+    detachAssemblyFromViews();  // detach from the outgoing assembly before it is freed
     m_assembly = std::make_unique<Assembly>();
     m_assembly->set_name("Untitled");
     m_currentFilePath.clear();
@@ -422,6 +452,14 @@ void MainWindow::onFileNew()
 void MainWindow::openFile(const QString& path)
 {
     if (path.isEmpty() || !QFile::exists(path)) {
+        return;
+    }
+
+    // Ignore a re-entrant open while a load is already in flight; otherwise the
+    // previous QProgressDialog leaks and the in-flight future is detached. This
+    // does not block the first CLI/startup open (no load is in flight then).
+    if (m_loadProgress || (m_loadWatcher && m_loadWatcher->isRunning())) {
+        statusBar()->showMessage("A load is already in progress", 3000);
         return;
     }
 
@@ -484,38 +522,8 @@ void MainWindow::onFileOpen()
         return;
     }
 
-    // Store path and reset cancel flag
-    m_pendingLoadPath = path;
-    m_loadCanceled = false;
-
-    // Emit signal for testing
-    emit loadingStarted(path);
-
-    // Create and show progress dialog
-    m_loadProgress = new QProgressDialog("Loading Assembly...", "Cancel", 0, 0, this);
-    m_loadProgress->setWindowTitle("Loading");
-    m_loadProgress->setWindowModality(Qt::WindowModal);
-    m_loadProgress->setMinimumDuration(0);  // Show immediately
-    m_loadProgress->setValue(0);
-
-    // Connect cancel button
-    connect(m_loadProgress, &QProgressDialog::canceled,
-            this, &MainWindow::onLoadCanceled);
-
-    // Start async loading
-    // Note: We capture path by value since it needs to outlive this scope
-    QFuture<LoadResult> future = QtConcurrent::run([path]() -> LoadResult {
-        LoadResult result;
-        try {
-            ChipletFormat format;
-            result.assembly = format.load(path.toStdString());
-        } catch (const std::exception& e) {
-            result.error = QString::fromStdString(e.what());
-        }
-        return result;
-    });
-
-    m_loadWatcher->setFuture(future);
+    // Single async-load pipeline (also used by the CLI and Reload paths).
+    openFile(path);
 }
 
 void MainWindow::onAssemblyLoadFinished()
@@ -557,43 +565,22 @@ void MainWindow::onAssemblyLoadFinished()
         return;
     }
 
-    // Successfully loaded - update UI on main thread.
-    //
-    // Detach every consumer from the OUTGOING assembly BEFORE the move below
-    // frees it. detectAndSelectCells() can open a modal CellSelectionDialog,
-    // whose nested event loop processes a pending repaint of the 3D view; if the
-    // views/command-processor/script-engine still held the just-freed assembly,
-    // that repaint would be a use-after-free. After cell selection we repoint
-    // everything to the new assembly (below).
-    m_assemblyView->setAssembly(nullptr);
-    m_hierarchyPanel->setAssembly(nullptr);
-    m_propertiesPanel->clearSelection();
-    m_propertiesPanel->setAssembly(nullptr);
-    if (m_netGraphPanel) {
-        m_netGraphPanel->setAssembly(nullptr);
-    }
-    m_commandProcessor.reset();  // holds a raw Assembly*
-    if (m_scriptEngine) {
-        m_scriptEngine->clear_assembly();  // nulls g_scriptAssembly
-    }
+    // Successfully loaded - update UI on main thread. Detach every consumer
+    // from the OUTGOING assembly before the move below frees it (the
+    // cell-selection dialog's nested event loop could otherwise repaint a freed
+    // assembly). Everything is repointed to the new assembly below.
+    detachAssemblyFromViews();
 
     m_assembly = std::move(result.assembly);
     m_currentFilePath = m_pendingLoadPath;
     m_pendingLoadPath.clear();
 
-    // Detect cells for components that need them (shows dialog if needed)
-    bool cellsChanged = detectAndSelectCells();
-
-    // If cells were detected/selected, save back to file
-    if (cellsChanged && !m_currentFilePath.isEmpty()) {
-        try {
-            ChipletFormat format;
-            format.save(*m_assembly, m_currentFilePath.toStdString());
-            statusBar()->showMessage("Saved cell selections to " + m_currentFilePath, 3000);
-        } catch (const std::exception& e) {
-            qWarning() << "Failed to save cell selections:" << e.what();
-        }
-    }
+    // Detect cells for components that need them (shows dialog if needed). The
+    // selections are applied IN MEMORY only: opening a file must not silently
+    // overwrite it. Previously this rewrote the source even when the user
+    // cancelled and baked resolved absolute paths over the original ${VAR}
+    // strings. Selections persist when the user explicitly saves.
+    detectAndSelectCells();
 
     // Update all views (mesh generation happens here on main thread)
     m_assemblyView->setAssembly(m_assembly.get());
@@ -809,6 +796,7 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
         return;
     }
 
+    detachAssemblyFromViews();  // detach from any outgoing assembly before it is freed
     m_assembly = std::move(assembly);
     m_currentFilePath.clear();  // Recovered, needs Save As
     m_assemblyView->setAssembly(m_assembly.get());

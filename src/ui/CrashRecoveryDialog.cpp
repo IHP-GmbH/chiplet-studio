@@ -200,10 +200,4 @@ void CrashRecoveryDialog::onDiscard()
     }
 }
 
-void CrashRecoveryDialog::onViewDetails()
-{
-    m_detailsText->setVisible(!m_detailsText->isVisible());
-    m_detailsButton->setText(m_detailsText->isVisible() ? "Hide Details" : "View Details");
-}
-
 } // namespace chiplet

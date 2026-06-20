@@ -34,7 +34,6 @@ class QFormLayout;
 namespace chiplet {
 
 class Assembly;
-class KLayoutBridge;
 class Technology;
 
 /**
@@ -202,9 +201,6 @@ private:
     // Value labels - Layout
     QLabel* m_layoutPathLabel = nullptr;
     QLabel* m_topCellLabel = nullptr;
-    QLabel* m_formatLabel = nullptr;
-    QLabel* m_cellCountLabel = nullptr;
-    QLabel* m_bboxLabel = nullptr;
 
     // Layers tree + name/datatype filter
     QLineEdit* m_layerFilter = nullptr;
