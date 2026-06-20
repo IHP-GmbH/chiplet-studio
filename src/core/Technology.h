@@ -62,6 +62,12 @@ public:
     void set_layer_properties_path(const string_type& path);
     const string_type& layer_properties_path() const;
 
+    // Verbatim layer_properties path from the file (may be ${VAR}/relative);
+    // empty for in-memory technologies. Lets the writer round-trip the source
+    // string instead of the resolved absolute path.
+    void set_layer_properties_source(const string_type& path);
+    const string_type& layer_properties_source() const;
+
     void set_dbu(double dbu);
     double dbu() const;
 
@@ -130,6 +136,7 @@ private:
     string_type m_id;
     string_type m_description;
     string_type m_layerPropertiesPath;
+    string_type m_layerPropertiesSource;  // verbatim ${VAR}/relative path from the file
     double m_dbu = 0.001;  // Default: 1nm
 
     // GDS3D process definition

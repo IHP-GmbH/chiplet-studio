@@ -84,6 +84,10 @@ public:
     const string_type& modified() const;
     const string_type& units() const;
     const string_type& assembly_gds() const;
+    // Verbatim assembly_gds path from the file (may be ${VAR}/relative); empty
+    // for in-memory assemblies. Lets the writer round-trip the source string
+    // instead of the resolved absolute path. See Component::layout_path_source.
+    const string_type& assembly_gds_source() const;
     const string_type& io_technology() const;
     const string_type& interconnect_adapter() const;
 
@@ -102,6 +106,7 @@ public:
     void set_modified(const string_type& modified);
     void set_units(const string_type& units);
     void set_assembly_gds(const string_type& path);
+    void set_assembly_gds_source(const string_type& path);
     void set_io_technology(const string_type& tech);
     void set_interconnect_adapter(const string_type& adapter);
 
@@ -177,6 +182,7 @@ private:
     string_type m_modified;
     string_type m_units = "um";  // Default to micrometers
     string_type m_assembly_gds;
+    string_type m_assembly_gds_source;  // verbatim ${VAR}/relative path from the file
     string_type m_io_technology;  // wire_bond, flipped_bump, tsv_bump (informative)
     string_type m_interconnect_adapter;  // ADK interconnect adapter (e.g. ihp_cupillar, vendorx_microbump)
     component_list_type m_components;

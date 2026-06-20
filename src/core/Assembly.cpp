@@ -9,6 +9,7 @@
 #include "LayerStackup.h"
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 #include <set>
 
 namespace chiplet {
@@ -51,6 +52,11 @@ const Assembly::string_type& Assembly::units() const
 const Assembly::string_type& Assembly::assembly_gds() const
 {
     return m_assembly_gds;
+}
+
+const Assembly::string_type& Assembly::assembly_gds_source() const
+{
+    return m_assembly_gds_source;
 }
 
 const Assembly::string_type& Assembly::io_technology() const
@@ -113,6 +119,11 @@ void Assembly::set_units(const string_type& units)
 void Assembly::set_assembly_gds(const string_type& path)
 {
     m_assembly_gds = path;
+}
+
+void Assembly::set_assembly_gds_source(const string_type& path)
+{
+    m_assembly_gds_source = path;
 }
 
 void Assembly::set_io_technology(const string_type& tech)
@@ -341,9 +352,17 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             const std::string& techId = c->technology();
             if (techId.empty()) break;
             std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
-            if (stackupYaml.empty()) break;
+            if (stackupYaml.empty()) {
+                std::cerr << "Assembly: no stackup config for interposer technology '"
+                          << techId << "'; using interposer thickness for z\n";
+                break;
+            }
             LayerStackup stackup;
-            if (!stackup.loadFromBlenderGDS(stackupYaml)) break;
+            if (!stackup.loadFromBlenderGDS(stackupYaml)) {
+                std::cerr << "Assembly: failed to load interposer stackup '"
+                          << stackupYaml << "'; using interposer thickness for z\n";
+                break;
+            }
             // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap or a
             // vendor's microbump), which the interconnect PDK owns rather than
             // the interposer stackup. Additive: it brings in bodies the
