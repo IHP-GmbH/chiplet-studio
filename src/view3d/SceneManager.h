@@ -25,9 +25,8 @@ public:
     Camera& camera() { return m_camera; }
     const Camera& camera() const { return m_camera; }
 
-    // Lighting
+    // Lighting (fixed direction set at construction)
     VECTOR3D lightDirection() const { return m_lightDirection; }
-    void setLightDirection(const VECTOR3D& dir);
 
     // Scene bounds
     void setSceneBounds(const AA_BOUNDING_BOX& bounds);

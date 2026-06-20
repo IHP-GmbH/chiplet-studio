@@ -143,14 +143,12 @@ set(VIEW3D_MATH_SOURCES
 )
 
 set(VIEW3D_SOURCES
-    src/view3d/AssemblyRenderer.cpp
     src/view3d/SceneManager.cpp
     src/view3d/Camera.cpp
     src/view3d/ShaderProgram.cpp
     src/view3d/ComponentMesh.cpp
     src/view3d/MeshBuilder.cpp
     src/view3d/AssemblyView.cpp
-    src/view3d/DitherPatterns.cpp
     src/view3d/GDSLayerExtractor.cpp
     src/view3d/GDSAnalyzer.cpp
     src/view3d/LayerMeshBuilder.cpp

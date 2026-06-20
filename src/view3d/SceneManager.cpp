@@ -18,12 +18,6 @@ SceneManager::SceneManager()
 
 SceneManager::~SceneManager() = default;
 
-void SceneManager::setLightDirection(const VECTOR3D& dir)
-{
-    m_lightDirection = dir;
-    m_lightDirection.Normalize();
-}
-
 void SceneManager::setSceneBounds(const AA_BOUNDING_BOX& bounds)
 {
     m_sceneBounds = bounds;

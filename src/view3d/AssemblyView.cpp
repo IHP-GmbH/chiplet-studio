@@ -7,10 +7,10 @@
 
 #include "AssemblyView.h"
 #include "MeshBuilder.h"
+#include "CoordFrame.h"
 #include "GDSLayerExtractor.h"
 #include "LayerMeshBuilder.h"
 #include "ShapeFilter.h"
-#include "view2d/KLayoutBridge.h"
 #include "core/GenericLayers.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -58,23 +58,9 @@ uniform vec3 lightDirection;
 uniform bool selected;
 uniform float Fcoef_half;
 
-// Dither pattern support
-uniform sampler2D patternTexture;
-uniform bool usePattern;
-uniform float patternScale;  // Typically 16.0 for 16x16 patterns
-
 out vec4 FragColor;
 
 void main() {
-    // Pattern test - discard fragments where pattern alpha is 0
-    if (usePattern) {
-        vec2 patternCoord = gl_FragCoord.xy / patternScale;
-        float patternAlpha = texture(patternTexture, patternCoord).a;
-        if (patternAlpha < 0.5) {
-            discard;
-        }
-    }
-
     vec3 norm = normalize(fragNormal);
     float ambient = 0.3;
     float diffuse = max(dot(norm, -lightDirection), 0.0) * 0.6;
@@ -106,18 +92,26 @@ AssemblyView::AssemblyView(QWidget* parent)
 
 AssemblyView::~AssemblyView()
 {
-    makeCurrent();
+    // makeCurrent() needs a valid context and surface; during application
+    // shutdown the surface may already be gone, in which case the driver has
+    // freed our GL objects with the context and calling glDelete* is unsafe.
+    // Guard the GL teardown on a valid context.
+    const bool haveGL = context() && context()->isValid();
+    if (haveGL) {
+        makeCurrent();
+    }
     m_meshes.clear();
     m_layerGeometry.clear();
     m_polygonCache.clear();
     m_areaStats.clear();
-    m_gridMesh.release();
-    m_ditherPatterns.cleanup();
-    // Delete the GL program while the context is still current. The member
-    // ShaderProgram destructor otherwise runs after doneCurrent() and calls
-    // glDeleteProgram with no current context.
-    m_componentShader.destroy();
-    doneCurrent();
+    if (haveGL) {
+        m_gridMesh.release();
+        // Delete the GL program while the context is still current. The member
+        // ShaderProgram destructor otherwise runs after doneCurrent() and calls
+        // glDeleteProgram with no current context.
+        m_componentShader.destroy();
+        doneCurrent();
+    }
 }
 
 
@@ -132,7 +126,6 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_layerVisibilityOverride.clear();
     m_shapeFilterByComponent.clear();
     m_pendingFilterComponent.clear();
-    m_debugPrinted = false;
 
     if (!assembly) {
         if (m_initialized) {
@@ -346,12 +339,6 @@ void AssemblyView::fitToComponent(const QString& componentId)
     }
 }
 
-void AssemblyView::resetCamera()
-{
-    m_scene.camera().reset();
-    update();
-}
-
 void AssemblyView::initializeGL()
 {
     initializeOpenGLFunctions();
@@ -380,9 +367,6 @@ void AssemblyView::initializeGL()
     m_gridMesh = MeshBuilder::buildPlaneMesh(100.0f);
     m_gridMesh.upload();
 
-    // Initialize dither patterns
-    m_ditherPatterns.initialize();
-
     m_initialized = true;
 
     // Build meshes if assembly was set before initialization
@@ -407,38 +391,16 @@ void AssemblyView::resizeGL(int w, int h)
 
 void AssemblyView::paintGL()
 {
-    // Start frame timing
-    if (m_frameCount == 0) {
-        m_frameTimer.start();
-    }
-
-    m_drawCallCount = 0;
-
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     if (!m_initialized) {
         return;
     }
 
-    // Render grid (renderGrid/renderComponents build their own matrices from
-    // the camera internally).
+    // renderGrid/renderComponents build their own matrices from the camera
+    // internally.
     renderGrid();
-    m_drawCallCount++;
-
-    // Render components
     renderComponents();
-
-    // Update FPS counter
-    m_frameCount++;
-    if (m_frameTimer.elapsed() >= 1000) {
-        m_fps = m_frameCount * 1000.0f / m_frameTimer.elapsed();
-        m_frameCount = 0;
-        m_frameTimer.restart();
-
-        if (m_showDebugStats) {
-            qDebug() << "FPS:" << m_fps << "Draw calls:" << m_drawCallCount;
-        }
-    }
 }
 
 void AssemblyView::loadLayerProperties()
@@ -541,9 +503,10 @@ void AssemblyView::buildMeshes()
             // sits in assembly space". BoxMode follows the same convention here.
             // buildBox() centers along X and Y but treats offsetZ as the +Z face,
             // so add h/2 to land the box centered on -pos.y in 3D Z.
-            float offsetX = static_cast<float>(pos.x / 1000.0);
-            float offsetY = static_cast<float>(pos.z / 1000.0);     // Elevation
-            float offsetZ = static_cast<float>(-pos.y / 1000.0) + h / 2.0f;
+            const ScenePosition scenePos = sceneFromChiplet(pos);
+            float offsetX = scenePos.x;
+            float offsetY = scenePos.y;     // Elevation
+            float offsetZ = scenePos.z + h / 2.0f;
 
             mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
             mesh.setColor(MeshBuilder::colorForComponent(*comp, lyp));
@@ -613,11 +576,6 @@ void AssemblyView::ensureBVH()
     }
     m_bvh->build(boxes, indices);
     m_bvhDirty = false;
-
-    if (m_showDebugStats) {
-        qDebug() << "BVH built:" << m_bvh->nodeCount() << "nodes,"
-                 << m_bvh->leafCount() << "leaves, depth" << m_bvh->maxDepth();
-    }
 }
 
 void AssemblyView::renderComponents()
@@ -697,9 +655,6 @@ void AssemblyView::setupShaderUniforms()
     m_componentShader.setUniformMat3("normalMatrix", normalMat);
     m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
     m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
-
-    m_componentShader.setUniformBool("usePattern", false);
-    m_componentShader.setUniformFloat("patternScale", 16.0f);
 }
 
 void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
@@ -761,7 +716,6 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
                 m_componentShader.setUniformVec4("objectColor",
                     QVector4D(lc.redF(), lc.greenF(), lc.blueF(), 1.0f));
                 layer.mesh.render();
-                m_drawCallCount++;
             }
         } else {
             // Solid mode or Detailed without GDS: render box mesh.
@@ -797,7 +751,6 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             m_componentShader.setUniformBool("selected", isSelected);
 
             meshIt->second.render();
-            m_drawCallCount++;
         }
 
         if (isFlipped) glFrontFace(GL_CCW);
@@ -827,7 +780,6 @@ void AssemblyView::renderTransparentPass(const std::vector<QString>& ids)
         m_componentShader.setUniformBool("selected", isSelected);
 
         meshIt->second.render();
-        m_drawCallCount++;
     }
 
     m_componentShader.release();
@@ -857,7 +809,6 @@ void AssemblyView::renderWireframePass(const std::vector<QString>& ids)
         m_componentShader.setUniformBool("selected", isSelected);
 
         meshIt->second.render();
-        m_drawCallCount++;
     }
 
     m_componentShader.release();
@@ -876,13 +827,14 @@ VECTOR3D AssemblyView::getComponentCenter(const QString& id) const
     const auto& pos = comp->position();
     const auto& dims = comp->dimensions();
 
-    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D -Z, chiplet Z -> 3D Y
-    // Convert from um to mm
-    return VECTOR3D(
-        static_cast<float>((pos.x + dims.width / 2.0) / 1000.0),
-        static_cast<float>((pos.z + dims.thickness / 2.0) / 1000.0),
-        static_cast<float>(-(pos.y + dims.height / 2.0) / 1000.0)
-    );
+    // Centre of the component: transform (pos + dims/2) through the shared
+    // chiplet->scene mapping (see CoordFrame.h / coord_frame_contract.md).
+    Position3D center;
+    center.x = pos.x + dims.width / 2.0;
+    center.y = pos.y + dims.height / 2.0;
+    center.z = pos.z + dims.thickness / 2.0;
+    const ScenePosition scenePos = sceneFromChiplet(center);
+    return VECTOR3D(scenePos.x, scenePos.y, scenePos.z);
 }
 
 void AssemblyView::sortBackToFront(std::vector<QString>& ids)
@@ -979,8 +931,6 @@ void AssemblyView::renderGrid()
     // Solid white/light gray color for base plane
     m_componentShader.setUniformVec4("objectColor", QVector4D(0.95f, 0.95f, 0.95f, 1.0f));
     m_componentShader.setUniformBool("selected", false);
-
-    m_componentShader.setUniformBool("usePattern", false);
 
     m_gridMesh.render();
 
@@ -1099,8 +1049,7 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         return;
     }
 
-    // Check if we have a KLayoutBridge instance (for already-loaded layouts)
-    // For simplicity, extract directly from file
+    // Extract the layer geometry directly from the GDS file.
     qDebug() << "Building layer geometry for" << compId << "from" << QString::fromStdString(layoutPath);
 
     // Get or create stackup for technology
@@ -1306,10 +1255,8 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z -> 3D Y
     const auto& pos = comp.position();
     geometry.transform.setToIdentity();
-    geometry.transform.translate(
-        static_cast<float>(pos.x / 1000.0),
-        static_cast<float>(pos.z / 1000.0),    // Chiplet Z -> 3D Y (vertical)
-        static_cast<float>(-pos.y / 1000.0));  // Chiplet Y -> 3D -Z (negated)
+    const ScenePosition scenePos = sceneFromChiplet(pos);
+    geometry.transform.translate(scenePos.x, scenePos.y, scenePos.z);
     // Flip-chip: mirror X for face-down dies
     if (comp.orientation() == Orientation::FaceDown) {
         geometry.transform.scale(-1.0f, 1.0f, 1.0f);
