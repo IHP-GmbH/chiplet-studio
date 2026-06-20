@@ -59,6 +59,34 @@ TEST_F(TessellationTest, QuadPolygon) {
     }
 }
 
+TEST_F(TessellationTest, ConcaveQuadLegacyNoInvertedTriangle) {
+    // A CCW "dart" quad with a single reflex vertex at index 1. Only the
+    // diagonal incident to the reflex vertex (1-3) is interior; an 0-2 split
+    // routes the diagonal outside through the notch and emits a back-facing
+    // triangle. Guards the F24 quad-split regression on the legacy/fallback path.
+    LayerMeshBuilder::setTessellatorMode(LayerMeshBuilder::TessellatorMode::Legacy);
+
+    SimplePolygon poly;
+    poly.points = {{0, 0}, {2, 1}, {4, 0}, {2, 4}};  // reflex at index 1
+
+    auto tris = LayerMeshBuilder::triangulatePolygon(poly);
+    ASSERT_EQ(tris.size(), 6u);
+
+    auto signedArea = [&](int a, int b, int c) {
+        const auto& p0 = poly.points[a];
+        const auto& p1 = poly.points[b];
+        const auto& p2 = poly.points[c];
+        return (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+    };
+
+    // Both emitted triangles must be wound CCW (positive area); a negative area
+    // is an inverted, back-facing triangle.
+    for (size_t i = 0; i < tris.size(); i += 3) {
+        double a = signedArea(tris[i], tris[i + 1], tris[i + 2]);
+        EXPECT_GT(a, 0.0) << "triangle " << (i / 3) << " is inverted (area " << a << ")";
+    }
+}
+
 TEST_F(TessellationTest, QuadPolygonClockwise) {
     // Clockwise quad (negative area)
     SimplePolygon poly;

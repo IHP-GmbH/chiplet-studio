@@ -9,7 +9,6 @@
 #include "core/GenericLayers.h"
 #include <cmath>
 #include <algorithm>
-#include <iostream>
 #include <limits>
 #include <QDebug>
 
@@ -261,11 +260,6 @@ Component3DGeometry LayerMeshBuilder::build(
         // of the same layer share the same physical z position)
         if (!elev) {
             elev = stackup.findByLayer(key.layer);
-            if (elev) {
-                std::cerr << "LayerMeshBuilder: Layer " << key.layer << "/" << key.datatype
-                          << " mapped to " << elev->name << " via layer-number fallback"
-                          << " (z=" << elev->z_bottom << ")" << std::endl;
-            }
         }
 
         // If neither exact-key nor layer-only lookup found this layer in
@@ -356,13 +350,6 @@ Component3DGeometry LayerMeshBuilder::build(
         [](const LayerMesh& a, const LayerMesh& b) {
             return a.z_bottom < b.z_bottom;
         });
-
-    if (flipZ) {
-        std::cerr << "LayerMeshBuilder: flipZ beolTop=" << beolTop << std::endl;
-    }
-    std::cerr << "LayerMeshBuilder: Built " << result.layers.size()
-              << " layer meshes, " << result.totalTriangles() << " triangles"
-              << std::endl;
 
     return result;
 }
@@ -491,6 +478,12 @@ void LayerMeshBuilder::addSideWalls(
     size_t n = poly.points.size();
     if (n < 3) return;
 
+    // The raw perpendicular below points outward only for a counter-clockwise
+    // GDS hull (verified against an axis-aligned square). The GDS->3D mapping
+    // negates Y, so for a clockwise hull (area < 0) it points inward and lights
+    // the wall from the wrong side; flip it by the winding sign in that case.
+    const float winding = (poly.area() < 0.0) ? -1.0f : 1.0f;
+
     for (size_t i = 0; i < n; ++i) {
         size_t j = (i + 1) % n;
 
@@ -505,8 +498,8 @@ void LayerMeshBuilder::addSideWalls(
         if (len < 1e-10) continue;
 
         // Normal perpendicular to edge in X-Z plane (Y is up, Z is negated)
-        float nx = static_cast<float>(dy / len);
-        float nz = static_cast<float>(dx / len);
+        float nx = static_cast<float>(winding * dy / len);
+        float nz = static_cast<float>(winding * dx / len);
 
         GLuint base_idx = static_cast<GLuint>(vertices.size());
 
@@ -573,10 +566,14 @@ std::vector<int> LayerMeshBuilder::triangulatePolygon(const SimplePolygon& poly)
     if (s_tessellatorMode == TessellatorMode::GDS3D) {
         auto result = triangulateWithGDS3D(poly);
 
-        // Fallback if GDS3D returns empty result for valid polygon
-        if (result.empty() && poly.points.size() >= 3) {
-            qWarning() << "GDS3D tessellation failed for polygon with"
-                       << poly.points.size() << "vertices, falling back to legacy ear-clipping";
+        // Fall back for a valid polygon when GDS3D returns an empty OR malformed
+        // index list (size not a multiple of 3 cannot form whole triangles and
+        // would render torn geometry); empty-only let partial results through.
+        if (poly.points.size() >= 3 &&
+            (result.empty() || result.size() % 3 != 0)) {
+            qWarning() << "GDS3D tessellation returned" << result.size()
+                       << "indices for polygon with" << poly.points.size()
+                       << "vertices, falling back to legacy ear-clipping";
             return triangulatePolygonLegacy(poly);
         }
         return result;
@@ -623,9 +620,21 @@ std::vector<int> LayerMeshBuilder::triangulatePolygonLegacy(const SimplePolygon&
         return toOriginal({0, 1, 2});
     }
 
-    // Simple case: quad
+    // Simple case: quad. pts is normalized to CCW above. For a concave
+    // (single-reflex) quad only the diagonal incident to the reflex vertex is
+    // interior, so a fixed 0-2 split inverts a triangle. Pick the diagonal whose
+    // BOTH sub-triangles stay CCW (positive signed area); this is correct for
+    // every reflex position and for convex quads (where either diagonal works).
     if (n == 4) {
-        return toOriginal({0, 1, 2, 0, 2, 3});
+        auto signedArea2 = [&](int a, int b, int c) {
+            return (pts[b].x - pts[a].x) * (pts[c].y - pts[a].y) -
+                   (pts[b].y - pts[a].y) * (pts[c].x - pts[a].x);
+        };
+        bool diag02 = signedArea2(0, 1, 2) > 0.0 && signedArea2(0, 2, 3) > 0.0;
+        if (diag02) {
+            return toOriginal({0, 1, 2, 0, 2, 3});
+        }
+        return toOriginal({1, 2, 3, 1, 3, 0});
     }
 
     // Build active vertex list
