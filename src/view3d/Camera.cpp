@@ -183,12 +183,6 @@ void Camera::setDistance(float distance)
     updateClipPlanes();
 }
 
-void Camera::setClipPlanes(float nearPlane, float farPlane)
-{
-    m_near = nearPlane;
-    m_far = farPlane;
-}
-
 void Camera::updateClipPlanes()
 {
     // With logarithmic depth buffer, precision is uniform regardless of

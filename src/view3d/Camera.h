@@ -52,10 +52,8 @@ public:
     void setTarget(const VECTOR3D& target);
     void setDistance(float distance);
     void setFov(float fov) { m_fov = fov; }
-    void setClipPlanes(float nearPlane, float farPlane);
 
 private:
-    void updatePosition();
     void updateClipPlanes();
     void clampPitch();
 

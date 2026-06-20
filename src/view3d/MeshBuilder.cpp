@@ -6,6 +6,7 @@
  */
 
 #include "MeshBuilder.h"
+#include "CoordFrame.h"
 #include <cmath>
 
 namespace chiplet {
@@ -53,9 +54,10 @@ ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp,
     float w = static_cast<float>(dims.width / 1000.0);
     float h = static_cast<float>(dims.height / 1000.0);
     float d = static_cast<float>(dims.thickness / 1000.0);
-    float x = static_cast<float>(pos.x / 1000.0);
-    float y = static_cast<float>(pos.z / 1000.0);   // Chiplet Z elevation -> 3D Y (vertical)
-    float z = static_cast<float>(-pos.y / 1000.0);   // Chiplet Y -> 3D -Z (horizontal, negated for correct orientation)
+    const ScenePosition scenePos = sceneFromChiplet(pos);
+    float x = scenePos.x;
+    float y = scenePos.y;   // Chiplet Z elevation -> 3D Y (vertical)
+    float z = scenePos.z;   // Chiplet Y -> 3D -Z (horizontal, negated for correct orientation)
 
     // Build box with dimensions: (width, thickness, height) for (3D X, 3D Y, 3D Z)
     // w = chiplet width -> 3D X, d = chiplet thickness -> 3D Y (vertical), h = chiplet height -> 3D Z
@@ -150,45 +152,6 @@ ComponentMesh MeshBuilder::buildBox(float width, float height, float depth,
 
     mesh.setVertices(vertices);
     mesh.setIndices(indices);
-
-    return mesh;
-}
-
-ComponentMesh MeshBuilder::buildGridMesh(float size, float spacing)
-{
-    ComponentMesh mesh;
-    std::vector<Vertex> vertices;
-    std::vector<GLuint> indices;
-
-    float halfSize = size * 0.5f;
-    int numLines = static_cast<int>(size / spacing) + 1;
-    GLuint idx = 0;
-
-    // Grid lines parallel to X axis
-    for (int i = 0; i < numLines; ++i) {
-        float z = -halfSize + i * spacing;
-
-        vertices.push_back({{-halfSize, 0, z}, {0, 1, 0}});
-        vertices.push_back({{halfSize, 0, z}, {0, 1, 0}});
-
-        indices.push_back(idx++);
-        indices.push_back(idx++);
-    }
-
-    // Grid lines parallel to Z axis
-    for (int i = 0; i < numLines; ++i) {
-        float x = -halfSize + i * spacing;
-
-        vertices.push_back({{x, 0, -halfSize}, {0, 1, 0}});
-        vertices.push_back({{x, 0, halfSize}, {0, 1, 0}});
-
-        indices.push_back(idx++);
-        indices.push_back(idx++);
-    }
-
-    mesh.setVertices(vertices);
-    mesh.setIndices(indices);
-    mesh.setColor(QColor(100, 100, 100, 100));
 
     return mesh;
 }

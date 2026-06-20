@@ -11,7 +11,6 @@
 #include <QOpenGLWidget>
 #include <QOpenGLExtraFunctions>
 #include <QMatrix4x4>
-#include <QElapsedTimer>
 #include <QRubberBand>
 #include <map>
 #include <vector>
@@ -21,7 +20,6 @@
 #include "ShaderProgram.h"
 #include "ComponentMesh.h"
 #include "SceneManager.h"
-#include "DitherPatterns.h"
 #include "math/BVH.h"
 #include "core/Assembly.h"
 #include "core/LayerStackup.h"
@@ -65,7 +63,6 @@ public:
     // Camera control
     void fitToAssembly();
     void fitToComponent(const QString& componentId);
-    void resetCamera();
 
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
@@ -149,9 +146,6 @@ private:
     bool m_initialized = false;
     bool m_needsRebuild = false;
 
-    // Dither patterns for layer fill styles
-    DitherPatterns m_ditherPatterns;
-
     // Layer geometry for 2.5D rendering (component_id -> geometry)
     std::map<QString, Component3DGeometry> m_layerGeometry;
 
@@ -189,20 +183,6 @@ private:
     std::vector<QString> m_meshIndexToId;  // Maps BVH indices to component IDs
 
     void ensureBVH();
-
-    // Performance metrics
-    QElapsedTimer m_frameTimer;
-    int m_frameCount = 0;
-    float m_fps = 0.0f;
-    int m_drawCallCount = 0;
-    bool m_showDebugStats = false;
-    bool m_debugPrinted = false;  // Reset per assembly load
-
-public:
-    // Performance accessors
-    float fps() const { return m_fps; }
-    int drawCallCount() const { return m_drawCallCount; }
-    void setShowDebugStats(bool show) { m_showDebugStats = show; }
 };
 
 } // namespace chiplet

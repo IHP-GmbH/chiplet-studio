@@ -52,25 +52,11 @@ public:
     std::vector<GDSCellInfo> analyzeCells(const std::string& gdsPath);
 
     /**
-     * Get names of all cells in GDS file (fast, names only)
-     * @param gdsPath Path to GDS file
-     * @return Vector of cell names
-     */
-    std::vector<std::string> listAllCells(const std::string& gdsPath);
-
-    /**
      * Detect if GDS is "flat" (all cells are top candidates)
      * @param gdsPath Path to GDS file
      * @return true if all cells are top candidates (flat GDS)
      */
     bool isFlatGDS(const std::string& gdsPath);
-
-    /**
-     * Get top cell candidates (cells not instantiated by others)
-     * @param gdsPath Path to GDS file
-     * @return Vector of cell names that are top candidates
-     */
-    std::vector<std::string> getTopCellCandidates(const std::string& gdsPath);
 
     // Get last error message
     const std::string& lastError() const { return m_lastError; }

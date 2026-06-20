@@ -27,6 +27,7 @@
 #include "core/Component.h"
 #include "core/IOPad.h"
 #include "formats/ChipletFormat.h"
+#include "view3d/CoordFrame.h"
 
 namespace chiplet {
 namespace {
@@ -79,6 +80,22 @@ WorldPosition componentWorldPosition(const Component& c)
 {
     const auto& p = c.position();
     return WorldPosition{p.x / 1000.0, p.z / 1000.0, -p.y / 1000.0};
+}
+
+// The render paths share one chiplet->scene transform (view3d/CoordFrame.h).
+// Pin it here against literal expected values (NOT the helper's own formula, so
+// the check is not tautological) so it can never drift from the documented
+// mapping. The numbers match component U_A in the synthetic fixture below.
+TEST(CoordFrameHelper, MatchesContractMapping)
+{
+    Position3D p;
+    p.x = 250.0;  // um
+    p.y = 250.0;
+    p.z = 50.0;
+    ScenePosition s = sceneFromChiplet(p);
+    EXPECT_FLOAT_EQ(s.x, 0.25f);    // chiplet X -> scene X
+    EXPECT_FLOAT_EQ(s.y, 0.05f);    // chiplet Z (elevation) -> scene Y (up)
+    EXPECT_FLOAT_EQ(s.z, -0.25f);   // chiplet Y -> scene -Z
 }
 
 // ------------------------------------------------------------------

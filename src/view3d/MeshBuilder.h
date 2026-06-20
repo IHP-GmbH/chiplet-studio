@@ -34,9 +34,6 @@ public:
     static ComponentMesh buildBox(float width, float height, float depth,
                                   float offsetX = 0, float offsetY = 0, float offsetZ = 0);
 
-    // Generate a reference grid on the XZ plane (lines)
-    static ComponentMesh buildGridMesh(float size, float spacing);
-
     // Generate a solid plane on the XZ plane (for substrate/base)
     // With optional center position and Y offset
     static ComponentMesh buildPlaneMesh(float size,

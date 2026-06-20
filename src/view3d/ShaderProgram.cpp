@@ -6,8 +6,8 @@
  */
 
 #include "ShaderProgram.h"
-#include <QFile>
 #include <QDebug>
+#include <QOpenGLContext>
 
 namespace chiplet {
 
@@ -17,7 +17,10 @@ ShaderProgram::ShaderProgram()
 
 ShaderProgram::~ShaderProgram()
 {
-    if (m_programId != 0 && m_initialized) {
+    // glDeleteProgram needs a current context. If the owner is destroyed after
+    // its context (no current context), the driver already freed the program;
+    // calling glDeleteProgram then is undefined. Guard on the current context.
+    if (m_programId != 0 && m_initialized && QOpenGLContext::currentContext()) {
         glDeleteProgram(m_programId);
     }
 }
@@ -56,18 +59,6 @@ bool ShaderProgram::loadFromSource(const QString& vertexSource, const QString& f
     return success;
 }
 
-bool ShaderProgram::loadFromResource(const QString& vertexPath, const QString& fragmentPath)
-{
-    QString vertexSource = readResource(vertexPath);
-    QString fragmentSource = readResource(fragmentPath);
-
-    if (vertexSource.isEmpty() || fragmentSource.isEmpty()) {
-        return false;
-    }
-
-    return loadFromSource(vertexSource, fragmentSource);
-}
-
 void ShaderProgram::bind()
 {
     if (m_programId != 0) {
@@ -82,7 +73,7 @@ void ShaderProgram::release()
 
 void ShaderProgram::destroy()
 {
-    if (m_programId != 0 && m_initialized) {
+    if (m_programId != 0 && m_initialized && QOpenGLContext::currentContext()) {
         glDeleteProgram(m_programId);
     }
     m_programId = 0;
@@ -129,27 +120,11 @@ void ShaderProgram::setUniformFloat(const QString& name, float value)
     }
 }
 
-void ShaderProgram::setUniformInt(const QString& name, int value)
-{
-    int loc = uniformLocation(name);
-    if (loc >= 0) {
-        glUniform1i(loc, value);
-    }
-}
-
 void ShaderProgram::setUniformBool(const QString& name, bool value)
 {
     int loc = uniformLocation(name);
     if (loc >= 0) {
         glUniform1i(loc, value ? 1 : 0);
-    }
-}
-
-void ShaderProgram::setUniformColor(const QString& name, const QColor& color)
-{
-    int loc = uniformLocation(name);
-    if (loc >= 0) {
-        glUniform4f(loc, color.redF(), color.greenF(), color.blueF(), color.alphaF());
     }
 }
 
@@ -162,11 +137,6 @@ int ShaderProgram::uniformLocation(const QString& name)
     int loc = glGetUniformLocation(m_programId, name.toUtf8().constData());
     m_uniformCache[name] = loc;
     return loc;
-}
-
-int ShaderProgram::attributeLocation(const QString& name)
-{
-    return glGetAttribLocation(m_programId, name.toUtf8().constData());
 }
 
 GLuint ShaderProgram::compileShader(GLenum type, const QString& source)
@@ -229,16 +199,6 @@ bool ShaderProgram::linkProgram(GLuint vertShader, GLuint fragShader)
     }
 
     return true;
-}
-
-QString ShaderProgram::readResource(const QString& path)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "Failed to open shader resource:" << path;
-        return QString();
-    }
-    return QString::fromUtf8(file.readAll());
 }
 
 } // namespace chiplet

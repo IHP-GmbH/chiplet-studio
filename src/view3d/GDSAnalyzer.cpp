@@ -96,33 +96,6 @@ std::vector<GDSCellInfo> GDSAnalyzer::analyzeCells(const std::string& gdsPath)
     return result;
 }
 
-std::vector<std::string> GDSAnalyzer::listAllCells(const std::string& gdsPath)
-{
-    std::vector<std::string> result;
-    m_lastError.clear();
-
-    try {
-        tl::InputStream stream(gdsPath);
-        db::Reader reader(stream);
-
-        db::Layout layout;
-        reader.read(layout);
-
-        for (auto it = layout.begin(); it != layout.end(); ++it) {
-            result.push_back(layout.cell_name(it->cell_index()));
-        }
-
-    } catch (const tl::Exception& e) {
-        m_lastError = std::string("KLayout error: ") + e.msg();
-        std::cerr << "GDSAnalyzer: " << m_lastError << std::endl;
-    } catch (const std::exception& e) {
-        m_lastError = std::string("Error: ") + e.what();
-        std::cerr << "GDSAnalyzer: " << m_lastError << std::endl;
-    }
-
-    return result;
-}
-
 bool GDSAnalyzer::isFlatGDS(const std::string& gdsPath)
 {
     auto cells = analyzeCells(gdsPath);
@@ -141,21 +114,6 @@ bool GDSAnalyzer::isFlatGDS(const std::string& gdsPath)
     return true;
 }
 
-std::vector<std::string> GDSAnalyzer::getTopCellCandidates(const std::string& gdsPath)
-{
-    std::vector<std::string> result;
-
-    auto cells = analyzeCells(gdsPath);
-
-    for (const auto& cell : cells) {
-        if (cell.isTopCandidate) {
-            result.push_back(cell.name);
-        }
-    }
-
-    return result;
-}
-
 #else
 // Stub implementations when KLayout is not available
 
@@ -166,23 +124,10 @@ std::vector<GDSCellInfo> GDSAnalyzer::analyzeCells(const std::string& /*gdsPath*
     return {};
 }
 
-std::vector<std::string> GDSAnalyzer::listAllCells(const std::string& /*gdsPath*/)
-{
-    m_lastError = "KLayout not available";
-    std::cerr << "GDSAnalyzer: " << m_lastError << std::endl;
-    return {};
-}
-
 bool GDSAnalyzer::isFlatGDS(const std::string& /*gdsPath*/)
 {
     m_lastError = "KLayout not available";
     return false;
-}
-
-std::vector<std::string> GDSAnalyzer::getTopCellCandidates(const std::string& /*gdsPath*/)
-{
-    m_lastError = "KLayout not available";
-    return {};
 }
 
 #endif // HAVE_KLAYOUT
