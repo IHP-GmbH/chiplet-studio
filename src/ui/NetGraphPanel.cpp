@@ -271,6 +271,9 @@ void NetGraphPanel::setAssembly(Assembly* assembly)
 
     clearGraph();
     buildGraph();
+    // Honor the current NetClass filter checkboxes on the freshly built graph;
+    // otherwise a reload would show all edges regardless of the user's filter.
+    applyFilters();
     m_stack->setCurrentIndex(1);
 
     // Fit the view to the graph
@@ -327,7 +330,6 @@ void NetGraphPanel::clearGraph()
     m_scene->clear();
     m_nodeMap.clear();
     m_highlightedComponent.clear();
-    m_legendFrame = nullptr;
 }
 
 void NetGraphPanel::buildGraph()
@@ -467,6 +469,8 @@ void NetGraphPanel::createEdges()
             QPointF p2 = centerOf(netComponents[1]);
             QString tooltip = buildTooltip(netComponents[0], netComponents[1]);
             auto* edge = new NetEdge(p1, p2, nc, tooltip);
+            edge->setData(ROLE_EDGE_COMP1, netComponents[0]);
+            edge->setData(ROLE_EDGE_COMP2, netComponents[1]);
             m_scene->addItem(edge);
         } else {
             // Multi-drop: star topology with hub at centroid
@@ -502,6 +506,7 @@ void NetGraphPanel::createEdges()
                     }
                 }
                 auto* edge = new NetEdge(p, centroid, nc, tip.trimmed());
+                edge->setData(ROLE_EDGE_COMP1, comp);  // other end is the hub
                 m_scene->addItem(edge);
             }
         }
@@ -605,19 +610,15 @@ void NetGraphPanel::highlightComponent(const QString& componentId)
         node->setHighlighted(true);
     }
 
-    // Highlight connected edges: find all edges touching this node's center
-    QPointF nodeCenter = it->second->sceneBoundingRect().center();
+    // Highlight connected edges by netlist relationship (the endpoint component
+    // ids stored on each edge), not by pixel proximity which misfires when nodes
+    // overlap or sit close together.
     for (auto* item : m_scene->items()) {
         if (item->data(ROLE_ITEM_TYPE).toInt() == TYPE_EDGE) {
             auto* edge = dynamic_cast<NetEdge*>(item);
             if (!edge) continue;
-            QLineF line = edge->line();
-            QPointF ep1 = edge->mapToScene(line.p1());
-            QPointF ep2 = edge->mapToScene(line.p2());
-            // Check if either endpoint is near this node's center
-            double d1 = QLineF(ep1, nodeCenter).length();
-            double d2 = QLineF(ep2, nodeCenter).length();
-            if (d1 < NODE_WIDTH || d2 < NODE_WIDTH) {
+            if (edge->data(ROLE_EDGE_COMP1).toString() == componentId ||
+                edge->data(ROLE_EDGE_COMP2).toString() == componentId) {
                 edge->setHighlighted(true);
             }
         }

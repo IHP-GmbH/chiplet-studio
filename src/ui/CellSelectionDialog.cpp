@@ -78,6 +78,9 @@ void CellSelectionDialog::setupUI(const std::vector<GDSCellInfo>& cells)
     for (const auto& cell : cells) {
         auto* item = new QListWidgetItem(m_cellList);
         item->setText(QString::fromStdString(cell.name));
+        // Keep the canonical name decoupled from the display text so a name that
+        // legitimately ends in " [top]" is not corrupted on read-back.
+        item->setData(Qt::UserRole, QString::fromStdString(cell.name));
         item->setToolTip(formatCellInfo(cell));
 
         if (m_allowMultiple) {
@@ -129,11 +132,11 @@ QString CellSelectionDialog::formatCellInfo(const GDSCellInfo& cell) const
     // Format area in appropriate units
     double area = cell.boundingBoxArea;
     if (area > 1e6) {
-        info += tr("Area: %.2f mm2").arg(area / 1e6);
+        info += tr("Area: %1 mm2").arg(area / 1e6, 0, 'f', 2);
     } else if (area > 1e3) {
-        info += tr("Area: %.2f um2").arg(area);
+        info += tr("Area: %1 um2").arg(area, 0, 'f', 2);
     } else {
-        info += tr("Area: %.2f nm2").arg(area * 1e6);
+        info += tr("Area: %1 nm2").arg(area * 1e6, 0, 'f', 2);
     }
 
     return info;
@@ -144,26 +147,18 @@ QStringList CellSelectionDialog::selectedCells() const
     QStringList result;
 
     if (m_allowMultiple) {
-        // Return all checked items
+        // Return all checked items (canonical name from UserRole, not the
+        // display text which may carry a " [top]" suffix).
         for (int i = 0; i < m_cellList->count(); ++i) {
             QListWidgetItem* item = m_cellList->item(i);
             if (item->checkState() == Qt::Checked) {
-                // Remove " [top]" suffix if present
-                QString name = item->text();
-                if (name.endsWith(" [top]")) {
-                    name = name.left(name.length() - 6);
-                }
-                result.append(name);
+                result.append(item->data(Qt::UserRole).toString());
             }
         }
     } else {
         // Return selected items
         for (QListWidgetItem* item : m_cellList->selectedItems()) {
-            QString name = item->text();
-            if (name.endsWith(" [top]")) {
-                name = name.left(name.length() - 6);
-            }
-            result.append(name);
+            result.append(item->data(Qt::UserRole).toString());
         }
     }
 

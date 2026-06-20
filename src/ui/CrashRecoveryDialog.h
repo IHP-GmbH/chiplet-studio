@@ -29,7 +29,8 @@ class Assembly;
  * CrashRecoveryDialog presents recovery options after a crash.
  *
  * Usage:
- *   if (CrashRecoveryDialog::check_and_show(directory, assembly)) {
+ *   if (CrashRecoveryDialog::check_and_recover(directory, assembly)
+ *           == CrashRecoveryDialog::Result::Recovered) {
  *       // User chose to recover, assembly has been modified
  *   }
  */
@@ -81,12 +82,10 @@ public:
 private slots:
     void onRecover();
     void onDiscard();
-    void onViewDetails();
 
 private:
     void setupUI();
     void loadJournalInfo();
-    QString formatTimestamp(const std::string& timestamp) const;
 
     std::filesystem::path m_journalPath;
     std::vector<CommandPtr> m_commands;
