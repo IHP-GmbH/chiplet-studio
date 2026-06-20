@@ -17,6 +17,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Set Python path to find the module
 export PYTHONPATH="${PROJECT_DIR}/build/python:${PYTHONPATH}"
+export CHIPLET_FIXTURES="${SCRIPT_DIR}/fixtures"
 
 echo "=== Chiplet Studio Python Binding Tests ==="
 echo ""
@@ -223,8 +224,63 @@ except Exception as e:
     sys.exit(1)
 
 print("")
+print("Test 11: Technology handles re-resolve and do not double-free (F2)...")
+try:
+    import gc
+    fixtures = os.environ["CHIPLET_FIXTURES"]
+    tasm = cs.load_assembly(os.path.join(fixtures, "with_technologies.chiplet"))
+    # Plural getter: before the lifetime-safe handle fix this returned
+    # assembly-owned raw pointers that Python took ownership of and double-freed
+    # on garbage collection.
+    techs = tasm.technologies()
+    tech_ids = sorted(t.id for t in techs)
+    assert "test_tech" in tech_ids, tech_ids
+    assert "intm4tm2" in tech_ids, tech_ids
+    # Singular getter returns a handle; a missing id returns None.
+    one = tasm.technology("test_tech")
+    assert one is not None and one.id == "test_tech"
+    assert one.description == "Test technology"
+    assert tasm.technology("does_not_exist") is None
+    # Drop the list and force GC: a double-free would crash the interpreter here.
+    del techs, one
+    gc.collect()
+    print("  PASS")
+except Exception as e:
+    print(f"  FAIL: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+print("")
+print("Test 12: Interface handles re-resolve, endpoints returned by value (F2/F3)...")
+try:
+    import gc
+    fixtures = os.environ["CHIPLET_FIXTURES"]
+    iasm = cs.load_assembly(os.path.join(fixtures, "with_interfaces.chiplet"))
+    ifaces = iasm.interfaces()
+    iface_ids = sorted(i.id for i in ifaces)
+    assert "die0_to_interposer" in iface_ids, iface_ids
+    one = iasm.interface("die0_to_interposer")
+    assert one is not None and one.id == "die0_to_interposer"
+    # Endpoints/physical are returned BY VALUE (F3), so copies stay valid even
+    # after the source handles are dropped.
+    frm = one.from_endpoint
+    phys = one.physical
+    assert iasm.interface("does_not_exist") is None
+    del ifaces, one
+    gc.collect()
+    _ = frm.component
+    _ = phys.pitch
+    print("  PASS")
+except Exception as e:
+    print(f"  FAIL: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+print("")
 print("=" * 50)
-print("All 10 tests passed!")
+print("All 12 tests passed!")
 print("=" * 50)
 EOF
 
