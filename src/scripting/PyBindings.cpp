@@ -93,6 +93,65 @@ ComponentHandle makeComponentHandle(const AssemblyHandle& a, const std::string& 
     return h;
 }
 
+// Interface and Technology are owned by the Assembly (unique_ptr lists), exactly
+// like Component, so they need the same re-resolve-by-id discipline. Without it,
+// asm.interface(id)/technology(id) dangle when the GUI reloads, and the plural
+// getters previously returned Assembly-owned raw pointers that pybind would take
+// ownership of and double-free on garbage collection.
+struct InterfaceHandle {
+    std::shared_ptr<Assembly> sp;
+    Assembly* borrowed = nullptr;
+    std::string id;
+
+    Assembly* assembly() const {
+        if (sp) return sp.get();
+        if (borrowed && borrowed == g_scriptAssembly) return borrowed;
+        throw std::runtime_error("Interface's assembly is no longer valid");
+    }
+    Interface& ref() const {
+        Interface* i = assembly()->interface(id);
+        if (!i) {
+            throw std::runtime_error("Interface '" + id + "' no longer exists");
+        }
+        return *i;
+    }
+};
+
+struct TechnologyHandle {
+    std::shared_ptr<Assembly> sp;
+    Assembly* borrowed = nullptr;
+    std::string id;
+
+    Assembly* assembly() const {
+        if (sp) return sp.get();
+        if (borrowed && borrowed == g_scriptAssembly) return borrowed;
+        throw std::runtime_error("Technology's assembly is no longer valid");
+    }
+    Technology& ref() const {
+        Technology* t = assembly()->technology(id);
+        if (!t) {
+            throw std::runtime_error("Technology '" + id + "' no longer exists");
+        }
+        return *t;
+    }
+};
+
+InterfaceHandle makeInterfaceHandle(const AssemblyHandle& a, const std::string& id) {
+    InterfaceHandle h;
+    h.sp = a.sp;
+    h.borrowed = a.borrowed;
+    h.id = id;
+    return h;
+}
+
+TechnologyHandle makeTechnologyHandle(const AssemblyHandle& a, const std::string& id) {
+    TechnologyHandle h;
+    h.sp = a.sp;
+    h.borrowed = a.borrowed;
+    h.id = id;
+    return h;
+}
+
 } // namespace
 
 PYBIND11_MODULE(chiplet_studio, m) {
@@ -208,14 +267,14 @@ PYBIND11_MODULE(chiplet_studio, m) {
             return "<Component '" + c.id() + "' type=" + typeStr + ">";
         });
 
-    // Technology class
-    py::class_<Technology>(m, "Technology")
-        .def_property_readonly("id", &Technology::id)
-        .def_property_readonly("description", &Technology::description)
-        .def_property_readonly("layer_properties_path", &Technology::layer_properties_path)
-        .def_property_readonly("dbu", &Technology::dbu)
-        .def("__repr__", [](const Technology& t) {
-            return "<Technology '" + t.id() + "'>";
+    // Technology class (handle that re-resolves by ID; see TechnologyHandle)
+    py::class_<TechnologyHandle>(m, "Technology")
+        .def_property_readonly("id", [](const TechnologyHandle& h) { return h.ref().id(); })
+        .def_property_readonly("description", [](const TechnologyHandle& h) { return h.ref().description(); })
+        .def_property_readonly("layer_properties_path", [](const TechnologyHandle& h) { return h.ref().layer_properties_path(); })
+        .def_property_readonly("dbu", [](const TechnologyHandle& h) { return h.ref().dbu(); })
+        .def("__repr__", [](const TechnologyHandle& h) {
+            return "<Technology '" + h.ref().id() + "'>";
         });
 
     // Assembly class (AssemblyHandle: owns via shared_ptr, or borrows the active
@@ -257,29 +316,35 @@ PYBIND11_MODULE(chiplet_studio, m) {
             }
             return result;
         }, "Get all components")
-        // Interface access (returned objects are owned by the assembly; keep the
-        // assembly handle alive for as long as Python keeps them)
-        .def("interface", [](const AssemblyHandle& h, const std::string& id) {
-            return h.ref().interface(id);
-        }, py::return_value_policy::reference_internal, py::arg("id"), "Get interface by ID")
+        // Interface access (handles re-resolve by ID; never hand out raw
+        // assembly-owned pointers, so Python can neither dangle nor double-free)
+        .def("interface", [](const AssemblyHandle& h, const std::string& id) -> py::object {
+            if (!h.ref().interface(id)) {
+                return py::none();
+            }
+            return py::cast(makeInterfaceHandle(h, id));
+        }, py::arg("id"), "Get interface by ID (None if it does not exist)")
         .def("interfaces", [](const AssemblyHandle& h) {
-            std::vector<Interface*> result;
+            std::vector<InterfaceHandle> result;
             for (const auto& i : h.ref().interfaces()) {
-                result.push_back(i.get());
+                result.push_back(makeInterfaceHandle(h, i->id()));
             }
             return result;
-        }, py::keep_alive<0, 1>(), "Get all interfaces")
+        }, "Get all interfaces")
         // Technology access
-        .def("technology", [](const AssemblyHandle& h, const std::string& id) {
-            return h.ref().technology(id);
-        }, py::return_value_policy::reference_internal, py::arg("id"), "Get technology by ID")
+        .def("technology", [](const AssemblyHandle& h, const std::string& id) -> py::object {
+            if (!h.ref().technology(id)) {
+                return py::none();
+            }
+            return py::cast(makeTechnologyHandle(h, id));
+        }, py::arg("id"), "Get technology by ID (None if it does not exist)")
         .def("technologies", [](const AssemblyHandle& h) {
-            std::vector<Technology*> result;
+            std::vector<TechnologyHandle> result;
             for (const auto& t : h.ref().technologies()) {
-                result.push_back(t.get());
+                result.push_back(makeTechnologyHandle(h, t->id()));
             }
             return result;
-        }, py::keep_alive<0, 1>(), "Get all technologies")
+        }, "Get all technologies")
         // Component creation
         .def("create_component", [](AssemblyHandle& h, const std::string& id,
                                     const std::string& typeStr,
@@ -344,18 +409,16 @@ PYBIND11_MODULE(chiplet_studio, m) {
                    " height=" + std::to_string(p.height) + ">";
         });
 
-    // Interface class
-    py::class_<Interface>(m, "Interface")
-        .def_property_readonly("id", &Interface::id)
-        .def_property_readonly("type", &Interface::type)
-        .def_property_readonly("from_endpoint", &Interface::from,
-             py::return_value_policy::reference)
-        .def_property_readonly("to_endpoint", &Interface::to,
-             py::return_value_policy::reference)
-        .def_property_readonly("physical", &Interface::physical,
-             py::return_value_policy::reference)
-        .def("__repr__", [](const Interface& i) {
-            return "<Interface '" + i.id() + "'>";
+    // Interface class (handle that re-resolves by ID; endpoints/physical are
+    // returned BY VALUE so a held copy never dangles into a freed Interface)
+    py::class_<InterfaceHandle>(m, "Interface")
+        .def_property_readonly("id", [](const InterfaceHandle& h) { return h.ref().id(); })
+        .def_property_readonly("type", [](const InterfaceHandle& h) { return h.ref().type(); })
+        .def_property_readonly("from_endpoint", [](const InterfaceHandle& h) { return h.ref().from(); })
+        .def_property_readonly("to_endpoint", [](const InterfaceHandle& h) { return h.ref().to(); })
+        .def_property_readonly("physical", [](const InterfaceHandle& h) { return h.ref().physical(); })
+        .def("__repr__", [](const InterfaceHandle& h) {
+            return "<Interface '" + h.ref().id() + "'>";
         });
 
     // StepStatus enum
@@ -387,8 +450,10 @@ PYBIND11_MODULE(chiplet_studio, m) {
             return "<FlowStep '" + s.id + "' status=" + step_status_to_string(s.status) + ">";
         });
 
-    // FlowEngine class (QObject, non-copyable)
-    py::class_<FlowEngine, std::unique_ptr<FlowEngine, py::nodelete>>(m, "FlowEngine")
+    // FlowEngine class (QObject, non-copyable). Python constructs it with no Qt
+    // parent via init<>(), so Python owns it: use the default unique_ptr holder
+    // (py::nodelete would leak every Python-created engine).
+    py::class_<FlowEngine>(m, "FlowEngine")
         .def(py::init<>())
         .def("add_step", &FlowEngine::add_step, py::arg("step"))
         .def("remove_step", &FlowEngine::remove_step, py::arg("id"))

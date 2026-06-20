@@ -28,7 +28,6 @@ namespace py = pybind11;
 
 #include "core/Assembly.h"
 #include "core/CommandProcessor.h"
-#include "core/commands/CmdMoveComponent.h"
 #include <QDebug>
 #include <mutex>
 
@@ -37,10 +36,6 @@ namespace chiplet {
 // Global assembly pointer for Python script access
 // Declared extern in PyBindings.cpp to enable get_current_assembly()
 Assembly* g_scriptAssembly = nullptr;
-CommandProcessor* g_scriptProcessor = nullptr;
-
-// Move callback for undoable operations from Python
-static std::function<void(const std::string&, double, double, double)> g_scriptMoveCallback;
 
 #ifdef HAVE_PYTHON
 // Singleton Python interpreter management
@@ -206,9 +201,7 @@ void ScriptEngine::shutdown()
         // Clear this instance's context (but NOT the interpreter)
         if (m_impl->assembly == g_scriptAssembly) {
             g_scriptAssembly = nullptr;
-            g_scriptProcessor = nullptr;
         }
-        g_scriptMoveCallback = nullptr;
 
         // Restore sys.stdout/stderr to the originals BEFORE dropping our redirect
         // objects. The redirects wrap a py::cpp_function capturing `this`; since
@@ -254,8 +247,6 @@ void ScriptEngine::set_assembly(Assembly* assembly, CommandProcessor* processor)
 #ifdef HAVE_PYTHON
     if (m_impl->engineInitialized) {
         g_scriptAssembly = assembly;
-        g_scriptProcessor = processor;
-        setup_move_callback();
     }
 #endif
 }
@@ -267,7 +258,6 @@ void ScriptEngine::clear_assembly()
 
 #ifdef HAVE_PYTHON
     g_scriptAssembly = nullptr;
-    g_scriptMoveCallback = nullptr;
 #endif
 }
 
@@ -457,33 +447,6 @@ class OutputRedirect:
     } catch (const std::exception& e) {
         qWarning() << "Failed to set up stdout redirect:" << e.what();
     }
-#endif
-}
-
-void ScriptEngine::setup_move_callback()
-{
-#ifdef HAVE_PYTHON
-    if (!m_impl->processor || !m_impl->assembly) {
-        g_scriptMoveCallback = nullptr;
-        return;
-    }
-
-    // Create callback that creates undoable move commands
-    g_scriptMoveCallback = [this](const std::string& componentId, double dx, double dy, double dz) {
-        if (!m_impl->processor || !m_impl->assembly) return;
-
-        Component* comp = m_impl->assembly->component(componentId);
-        if (!comp) return;
-
-        Position3D oldPos = comp->position();
-        Position3D newPos = oldPos;
-        newPos.x += dx;
-        newPos.y += dy;
-        newPos.z += dz;
-
-        auto cmd = std::make_unique<CmdMoveComponent>(componentId, oldPos, newPos);
-        m_impl->processor->execute(std::move(cmd));
-    };
 #endif
 }
 
