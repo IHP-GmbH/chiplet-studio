@@ -153,6 +153,10 @@ private:
     std::vector<CommandPtr> m_undoStack;
     std::vector<CommandPtr> m_redoStack;
 
+    // Per-instance edge trackers for can_undo/redo_changed (see emit_stack_signals).
+    bool m_lastCanUndo = false;
+    bool m_lastCanRedo = false;
+
     void emit_stack_signals();
     void trim_undo_stack();
 };

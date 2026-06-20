@@ -88,12 +88,25 @@ Netlist::~Netlist() = default;
 
 void Netlist::add_net(const Net& net)
 {
+    // Replace in place on a duplicate name, exactly like Assembly::add_component:
+    // a blind push_back would leave the old net orphaned in m_nets while
+    // m_net_index pointed at the new one, desyncing net_count() from net(name).
+    auto it = m_net_index.find(net.name());
+    if (it != m_net_index.end()) {
+        m_nets[it->second] = net;
+        return;
+    }
     m_net_index[net.name()] = m_nets.size();
     m_nets.push_back(net);
 }
 
 void Netlist::add_net(Net&& net)
 {
+    auto it = m_net_index.find(net.name());
+    if (it != m_net_index.end()) {
+        m_nets[it->second] = std::move(net);
+        return;
+    }
     m_net_index[net.name()] = m_nets.size();
     m_nets.push_back(std::move(net));
 }
