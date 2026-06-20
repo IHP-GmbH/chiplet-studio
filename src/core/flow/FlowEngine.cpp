@@ -7,6 +7,7 @@
 
 #include "FlowEngine.h"
 #include <QCoreApplication>
+#include <QDebug>
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
@@ -194,6 +195,20 @@ bool FlowEngine::run_all()
     if (sorted.empty() && !m_steps.empty())
         return false;  // Circular dependency
 
+    // Surface dependencies that name unknown step ids: topological_sort silently
+    // drops them, so without this a typo'd depends_on would lose the intended
+    // ordering constraint with no feedback to the user.
+    {
+        std::unordered_set<std::string> ids;
+        for (const auto& s : m_steps)
+            ids.insert(s.id);
+        for (const auto& s : m_steps)
+            for (const auto& dep : s.depends_on)
+                if (!ids.count(dep))
+                    qWarning("FlowEngine: step '%s' depends on unknown step '%s' (ignored)",
+                             s.id.c_str(), dep.c_str());
+    }
+
     // Reset all steps
     for (auto& s : m_steps) {
         s.status = StepStatus::Pending;
@@ -234,17 +249,35 @@ bool FlowEngine::run_step(const std::string& id)
 
 void FlowEngine::cancel()
 {
+    if (!m_running)
+        return;  // nothing in flight
+
     m_cancelled = true;
 
-    if (m_process && m_process->state() != QProcess::NotRunning)
-        m_process->kill();
-
-    // Mark remaining queued steps as skipped
+    // Mark everything still queued after the current step as skipped.
     for (size_t i = m_currentIndex + 1; i < m_executionQueue.size(); ++i) {
         FlowStep* s = step(m_executionQueue[i]);
         if (s)
             s->status = StepStatus::Skipped;
     }
+
+    if (m_process && m_process->state() != QProcess::NotRunning) {
+        // A process is in flight: killing it fires finished/errorOccurred, whose
+        // handler finalizes the run (sets m_running=false and emits
+        // flow_finished). m_cancelled stops the queue from advancing.
+        m_process->kill();
+        return;
+    }
+
+    // No process is driving completion (cancelled between steps): finalize here
+    // so the engine is not left permanently "running" with no flow_finished.
+    if (m_currentIndex < m_executionQueue.size()) {
+        FlowStep* current = step(m_executionQueue[m_currentIndex]);
+        if (current && current->status == StepStatus::Running)
+            current->status = StepStatus::Skipped;
+    }
+    m_running = false;
+    emit flow_finished(false);
 }
 
 bool FlowEngine::is_running() const

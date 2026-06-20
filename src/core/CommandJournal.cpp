@@ -10,6 +10,7 @@
 #include <QDebug>
 
 #include <chrono>
+#include <ctime>
 #include <iomanip>
 #include <sstream>
 
@@ -57,11 +58,15 @@ void CommandJournal::record(const Command& cmd)
     }
 
     try {
-        // Get current timestamp in ISO 8601 format
+        // Get current timestamp in ISO 8601 format. Use gmtime_r, not gmtime:
+        // gmtime returns a pointer to a shared static tm that would race if a
+        // command is ever recorded off the GUI thread.
         auto now = std::chrono::system_clock::now();
-        auto time_t = std::chrono::system_clock::to_time_t(now);
+        std::time_t time_t_now = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_buf{};
+        gmtime_r(&time_t_now, &tm_buf);
         std::stringstream ss;
-        ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%dT%H:%M:%SZ");
+        ss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%SZ");
 
         // Create journal entry
         nlohmann::json entry;

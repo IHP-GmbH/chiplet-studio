@@ -55,6 +55,8 @@ public:
     NetClass net_class() const;
 
     // Setters
+    // NOTE: if this Net is owned by a Netlist, renaming it invalidates the
+    // Netlist's name index; call Netlist::rebuild_index() afterwards.
     void set_name(const string_type& name);
     void set_net_class(NetClass nc);
 

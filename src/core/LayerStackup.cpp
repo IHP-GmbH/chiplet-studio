@@ -147,7 +147,10 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
     try {
         YAML::Node root = YAML::LoadFile(path);
 
-        clear();
+        // Parse into a temporary and only commit on success. Clearing *this up
+        // front would wipe a valid stackup if a later node conversion threw or
+        // the file contained no layers.
+        LayerStackup parsed;
 
         // BlenderGDS format: top-level keys are layer names
         // Each has: index, type, z, height, optional purpose
@@ -160,10 +163,10 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
                 // documentation in LayerStackup.h). Unknown scalars are
                 // ignored, as before.
                 if (name == "z_reference") {
-                    m_zReference = node.as<std::string>("");
+                    parsed.m_zReference = node.as<std::string>("");
                 } else if (name == "attachment_surface_z") {
-                    m_attachmentSurfaceZ = node.as<double>(0.0);
-                    m_hasAttachmentSurfaceZ = true;
+                    parsed.m_attachmentSurfaceZ = node.as<double>(0.0);
+                    parsed.m_hasAttachmentSurfaceZ = true;
                 }
                 continue;
             }
@@ -173,10 +176,14 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
             double z = node["z"].as<double>(0.0);
             double height = node["height"].as<double>(1.0);
 
-            addLayer(index, type, z, height, name);
+            parsed.addLayer(index, type, z, height, name);
         }
 
-        return !empty();
+        if (parsed.empty()) {
+            return false;
+        }
+        *this = std::move(parsed);
+        return true;
 
     } catch (const std::exception&) {
         return false;
@@ -432,8 +439,7 @@ std::string stackupPath(const std::string& techId)
     std::string lower = techId;
     for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-    if (lower.find("sg13g2") != std::string::npos ||
-        (lower.find("ihp") != std::string::npos && lower.find("sg13g2") != std::string::npos)) {
+    if (lower.find("sg13g2") != std::string::npos) {
         return stackupDir + "ihp-sg13g2.yaml";
     }
     if (lower.find("sg13cmos5l") != std::string::npos ||

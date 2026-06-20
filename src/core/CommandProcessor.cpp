@@ -50,7 +50,14 @@ bool CommandProcessor::execute(CommandPtr cmd)
             m_journal->record(*cmd);
         }
         m_undoStack.back()->merge_with(*cmd);
+
+        // A merged edit still branches history just like a freshly pushed
+        // command: clear the redo stack and emit the stack signals, otherwise a
+        // post-undo move would leave a stale redo entry and the UI Undo/Redo
+        // state would not refresh.
+        m_redoStack.clear();
         emit command_executed(QString::fromStdString(m_undoStack.back()->description()));
+        emit_stack_signals();
         return true;
     }
 
@@ -112,14 +119,22 @@ void CommandProcessor::undo()
     CommandPtr cmd = std::move(m_undoStack.back());
     m_undoStack.pop_back();
 
-    // Execute undo
+    // Execute undo. If it throws, the command was not undone, so restore it to
+    // the undo stack instead of advancing it to redo; otherwise a failed undo
+    // would be reported as success and a later redo would re-apply a command
+    // that never reverted.
     try {
         cmd->undo(*m_assembly);
     } catch (const std::exception& e) {
         qWarning("Command undo failed: %s", e.what());
-        // Still push to redo stack for potential retry
+        m_undoStack.push_back(std::move(cmd));
+        emit_stack_signals();
+        return;
     } catch (...) {
         qWarning("Command undo failed with unknown error");
+        m_undoStack.push_back(std::move(cmd));
+        emit_stack_signals();
+        return;
     }
 
     // Push to redo stack
@@ -138,14 +153,20 @@ void CommandProcessor::redo()
     CommandPtr cmd = std::move(m_redoStack.back());
     m_redoStack.pop_back();
 
-    // Execute redo
+    // Execute redo. If it throws, the command was not re-applied, so restore it
+    // to the redo stack instead of advancing it to undo (see undo() above).
     try {
         cmd->redo(*m_assembly);
     } catch (const std::exception& e) {
         qWarning("Command redo failed: %s", e.what());
-        // Still push to undo stack for potential retry
+        m_redoStack.push_back(std::move(cmd));
+        emit_stack_signals();
+        return;
     } catch (...) {
         qWarning("Command redo failed with unknown error");
+        m_redoStack.push_back(std::move(cmd));
+        emit_stack_signals();
+        return;
     }
 
     // Push to undo stack
@@ -182,6 +203,8 @@ void CommandProcessor::clear()
 
     m_undoStack.clear();
     m_redoStack.clear();
+    m_lastCanUndo = false;
+    m_lastCanRedo = false;
 
     if (hadUndo) {
         emit can_undo_changed(false);
@@ -199,19 +222,20 @@ void CommandProcessor::set_journal(CommandJournal* journal)
 
 void CommandProcessor::emit_stack_signals()
 {
-    static bool s_lastCanUndo = false;
-    static bool s_lastCanRedo = false;
-
+    // These trackers MUST be per-instance: a function-local static would be
+    // shared across every CommandProcessor, so loading a new assembly (a fresh
+    // processor) could skip a can_undo/redo_changed(false) edge because the
+    // static still held the previous processor's state, desyncing the toolbar.
     bool currentCanUndo = can_undo();
     bool currentCanRedo = can_redo();
 
-    if (currentCanUndo != s_lastCanUndo) {
-        s_lastCanUndo = currentCanUndo;
+    if (currentCanUndo != m_lastCanUndo) {
+        m_lastCanUndo = currentCanUndo;
         emit can_undo_changed(currentCanUndo);
     }
 
-    if (currentCanRedo != s_lastCanRedo) {
-        s_lastCanRedo = currentCanRedo;
+    if (currentCanRedo != m_lastCanRedo) {
+        m_lastCanRedo = currentCanRedo;
         emit can_redo_changed(currentCanRedo);
     }
 
