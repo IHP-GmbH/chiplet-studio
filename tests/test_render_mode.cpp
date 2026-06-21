@@ -277,8 +277,9 @@ std::string renderModeFixturePath(const std::string& filename)
 // Locate the canonical wire-bond demo .chiplet so the integration
 // test below can pin the post-Gate-7 invariant "U1 (flip_chip) loads
 // with render_mode == Detailed" on the real demo, not just synthetics.
-// Resolution order: env var (set by CI/Docker), workspace-relative
-// fallback, then GTEST_SKIP so the test stays portable.
+// Resolution order: env var (set by CI/Docker), then the bundled
+// examples/ copy in the adk-tools umbrella (both umbrella-root depths
+// tried, image vs dev), then GTEST_SKIP so the test stays portable.
 std::optional<std::string> locateWirebondDemoChiplet()
 {
     if (const char* env = std::getenv("WIREBOND_DEMO_CHIPLET")) {
@@ -286,13 +287,17 @@ std::optional<std::string> locateWirebondDemoChiplet()
         if (std::filesystem::exists(p))
             return p.string();
     }
-    std::filesystem::path fixtures(FIXTURES_DIR);
-    std::filesystem::path candidate = fixtures.parent_path()
-        .parent_path().parent_path()
-        / "kicad_designs" / "interposer_wire_bonding_demo"
-        / "interposer_wire_bonding_demo.chiplet";
-    if (std::filesystem::exists(candidate))
-        return candidate.string();
+    const std::filesystem::path rel =
+        std::filesystem::path("examples") / "interposer_wire_bonding_demo"
+        / "outputs" / "interposer_wire_bonding_demo.chiplet";
+    const std::filesystem::path studioDir =
+        std::filesystem::path(FIXTURES_DIR).parent_path().parent_path();
+    for (const std::filesystem::path& umbrella :
+         {studioDir.parent_path(), studioDir.parent_path().parent_path()}) {
+        std::filesystem::path candidate = umbrella / rel;
+        if (std::filesystem::exists(candidate))
+            return candidate.string();
+    }
     return std::nullopt;
 }
 

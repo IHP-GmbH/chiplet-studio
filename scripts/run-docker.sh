@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Default working directory (where .chiplet files are)
-DEFAULT_WORK_DIR="/home/montanares/git/heterogenic_chip_design_project/kicad_designs/kicad_interposer_hyperlynx_to_gds/chiplet_files"
+DEFAULT_WORK_DIR="/home/montanares/git/heterogenic_chip_design_project/adk-tools/examples/interposer_wire_bonding_demo/outputs"
 WORK_DIR="${1:-$DEFAULT_WORK_DIR}"
 
 # Docker image (pre-built with all dependencies)

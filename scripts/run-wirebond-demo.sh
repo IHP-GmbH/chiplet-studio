@@ -3,13 +3,16 @@
 # wire-bonding demo project preloaded.
 #
 # Mounts the project root at the same absolute path inside the container so the
-# absolute paths in the .chiplet (LYP files, GDS files referenced from
-# kicad_designs/, gds_to_kicad/, interposer/) resolve correctly.
+# absolute paths in the .chiplet (LYP files, GDS files referenced from the
+# bundled examples/ and the PDK roots) resolve correctly.
 #
 # Paths are derived from the script location:
 #   scripts/        -> this script
 #   ..              -> chiplet-studio dir
-#   ../..           -> project root (heterogenic_chip_design_project)
+#   ../..           -> project root: holds the adk-tools umbrella (bundled demo
+#                      under adk-tools/examples/) and the sibling PDK checkouts
+#                      (interposer/, interconnect_pdk/, gds_to_kicad/) the
+#                      .chiplet's ${...PDK_ROOT} refs resolve against
 # Override by exporting PROJECT_ROOT and/or CHIPLET_FILE, or pass a .chiplet as $1.
 #
 # Requires:
@@ -23,12 +26,15 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHIPLET_STUDIO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Project root holds both the adk-tools umbrella (bundled demo under
+# adk-tools/examples/) and the sibling PDK checkouts the .chiplet resolves
+# against; mounted whole so all of them are visible in the container.
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$CHIPLET_STUDIO_DIR/.." && pwd)}"
 
 # PDK roots -> fixed container paths (defines PDK_MOUNTS)
 source "$SCRIPT_DIR/pdk-env.sh"
 
-DEFAULT_CHIPLET="${PROJECT_ROOT}/kicad_designs/interposer_wire_bonding_demo/interposer_wire_bonding_demo.chiplet"
+DEFAULT_CHIPLET="${PROJECT_ROOT}/adk-tools/examples/interposer_wire_bonding_demo/outputs/interposer_wire_bonding_demo.chiplet"
 CHIPLET_FILE="${1:-${CHIPLET_FILE:-$DEFAULT_CHIPLET}}"
 
 if [ ! -f "$CHIPLET_FILE" ]; then

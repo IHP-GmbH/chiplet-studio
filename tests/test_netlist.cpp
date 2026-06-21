@@ -4,7 +4,6 @@
 
 #include <gtest/gtest.h>
 #include <filesystem>
-#include <fstream>
 #include "formats/ChipletFormat.h"
 #include "core/Netlist.h"
 
@@ -192,46 +191,14 @@ TEST(NetlistTests, BackwardCompatNoNetlist)
     EXPECT_TRUE(assembly->netlist().empty());
     EXPECT_EQ(assembly->netlist().net_count(), 0u);
 }
-
-TEST(NetlistTests, RealWorldChipletDemo)
-{
-    // Path to the B0 output chiplet_demo.chiplet
-    std::string demoPath =
-        std::string(FIXTURES_DIR) + "/../../../../kicad_designs/"
-        "kicad_interposer_hyperlynx_to_gds/chiplet_files/chiplet_demo.chiplet";
-
-    if (!std::filesystem::exists(demoPath)) {
-        GTEST_SKIP() << "chiplet_demo.chiplet not found at expected path";
-    }
-
-    ChipletFormat format;
-    auto assembly = format.load(demoPath);
-    ASSERT_NE(assembly, nullptr);
-
-    const Netlist& nl = assembly->netlist();
-    EXPECT_FALSE(nl.empty());
-    EXPECT_EQ(nl.net_count(), 5u);
-
-    // VDD is power
-    const Net* vdd = nl.net("VDD");
-    ASSERT_NE(vdd, nullptr);
-    EXPECT_EQ(vdd->net_class(), NetClass::Power);
-
-    // GND is ground
-    const Net* gnd = nl.net("GND");
-    ASSERT_NE(gnd, nullptr);
-    EXPECT_EQ(gnd->net_class(), NetClass::Ground);
-    EXPECT_EQ(gnd->connection_count(), 4u);
-
-    // Signals
-    ASSERT_NE(nl.net("Aout_SIG"), nullptr);
-    EXPECT_EQ(nl.net("Aout_SIG")->net_class(), NetClass::Signal);
-    ASSERT_NE(nl.net("VINN"), nullptr);
-    ASSERT_NE(nl.net("VOUT"), nullptr);
-
-    // External netlist path
-    EXPECT_EQ(nl.external_netlist_path(), "chiplet_demo_netlist.csv");
-}
+// NOTE: the former RealWorldChipletDemo integration test was removed here.
+// It loaded chiplet_demo.chiplet from the kicad_interposer_hyperlynx_to_gds
+// repo (a sibling of the old kicad_designs/ layout); that repo and its B0
+// output were retired, so the fixture is permanently gone and the test only
+// ever GTEST_SKIP'd. Its assertions (5 nets, VDD/GND classes, the
+// chiplet_demo_netlist.csv ref) are specific to that removed file and cannot
+// be met by any bundled demo. The synthetic NetlistTests above cover the
+// parser; a new real-file check should resolve via $WIREBOND_DEMO_CHIPLET.
 
 } // namespace
 } // namespace chiplet
