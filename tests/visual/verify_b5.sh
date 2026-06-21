@@ -4,7 +4,7 @@ set -euo pipefail
 
 HETERO_PROJECT="${HOME}/git/heterogenic_chip_design_project"
 KLAYOUT_LIBS="$HETERO_PROJECT/chiplet-studio/extern/klayout/bin-release"
-CHIPLET_FILE="$HETERO_PROJECT/kicad_designs/kicad_interposer_hyperlynx_to_gds/chiplet_files/chiplet_demo.chiplet"
+CHIPLET_FILE="$HETERO_PROJECT/adk-tools/examples/interposer_wire_bonding_demo/outputs/interposer_wire_bonding_demo.chiplet"
 
 echo "============================================"
 echo "  B5 Net Graph - Visual Verification"

@@ -37,12 +37,14 @@ std::string fixturePath(const std::string& filename)
     return std::string(FIXTURES_DIR) + "/" + filename;
 }
 
-// Locate the canonical wire-bond demo .chiplet. The chiplet lives in a
-// sibling repo (kicad_designs), so it is not bundled with chiplet-studio
-// test fixtures. Resolution order:
-//   1. $WIREBOND_DEMO_CHIPLET (absolute or relative)
-//   2. <FIXTURES_DIR>/../../../kicad_designs/interposer_wire_bonding_demo/
-//      interposer_wire_bonding_demo.chiplet (default workspace layout)
+// Locate the canonical wire-bond demo .chiplet. The demo is not bundled with
+// the chiplet-studio test fixtures; it ships in the adk-tools umbrella under
+// examples/interposer_wire_bonding_demo/outputs/. Resolution order:
+//   1. $WIREBOND_DEMO_CHIPLET (absolute or relative; set by the CI/Docker gate)
+//   2. the bundled examples/ copy, relative to the chiplet-studio dir. The
+//      depth to the umbrella root differs between the baked image
+//      (chiplet-studio/..  == /opt/adk-tools) and a dev checkout
+//      (chiplet-studio/../.. == adk-tools), so both roots are tried.
 // Returns an empty optional when nothing exists on disk; callers
 // GTEST_SKIP with a message that points to the env var.
 std::optional<std::string> locateWirebondDemoChiplet()
@@ -54,15 +56,19 @@ std::optional<std::string> locateWirebondDemoChiplet()
         }
     }
 
-    std::filesystem::path fixtures(FIXTURES_DIR);
-    std::filesystem::path candidate = fixtures.parent_path()  // tests/
-                                          .parent_path()      // chiplet-studio/
-                                          .parent_path()      // workspace/
-                                          / "kicad_designs"
-                                          / "interposer_wire_bonding_demo"
-                                          / "interposer_wire_bonding_demo.chiplet";
-    if (std::filesystem::exists(candidate)) {
-        return candidate.string();
+    const std::filesystem::path rel =
+        std::filesystem::path("examples") / "interposer_wire_bonding_demo"
+        / "outputs" / "interposer_wire_bonding_demo.chiplet";
+    const std::filesystem::path studioDir =
+        std::filesystem::path(FIXTURES_DIR).parent_path()  // tests/
+                                           .parent_path(); // chiplet-studio/
+    for (const std::filesystem::path& umbrella :
+         {studioDir.parent_path(),                  // baked image: /opt/adk-tools
+          studioDir.parent_path().parent_path()}) { // dev tree: adk-tools/tools/.. == adk-tools
+        std::filesystem::path candidate = umbrella / rel;
+        if (std::filesystem::exists(candidate)) {
+            return candidate.string();
+        }
     }
     return std::nullopt;
 }

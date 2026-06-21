@@ -38,5 +38,5 @@ docker run --rm \
     chiplet-studio-build bash -c \
     "export LD_LIBRARY_PATH=$KLAYOUT_LIBS:$KLAYOUT_LIBS/db_plugins && \
      $HETERO_PROJECT/chiplet-studio/build/chiplet-studio \
-     $HETERO_PROJECT/kicad_designs/kicad_interposer_hyperlynx_to_gds/chiplet_files/chiplet_demo.chiplet"
+     $HETERO_PROJECT/adk-tools/examples/interposer_wire_bonding_demo/outputs/interposer_wire_bonding_demo.chiplet"
 ```
