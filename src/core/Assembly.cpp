@@ -7,9 +7,10 @@
 
 #include "Assembly.h"
 #include "LayerStackup.h"
+#include "Logger.h"
+#include <QDebug>
 #include <algorithm>
 #include <filesystem>
-#include <iostream>
 #include <set>
 
 namespace chiplet {
@@ -353,14 +354,14 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             if (techId.empty()) break;
             std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
             if (stackupYaml.empty()) {
-                std::cerr << "Assembly: no stackup config for interposer technology '"
-                          << techId << "'; using interposer thickness for z\n";
+                qCWarning(lcStackup) << "no stackup config for interposer technology"
+                                     << techId.c_str() << "; using interposer thickness for z";
                 break;
             }
             LayerStackup stackup;
             if (!stackup.loadFromBlenderGDS(stackupYaml)) {
-                std::cerr << "Assembly: failed to load interposer stackup '"
-                          << stackupYaml << "'; using interposer thickness for z\n";
+                qCWarning(lcStackup) << "failed to load interposer stackup"
+                                     << stackupYaml.c_str() << "; using interposer thickness for z";
                 break;
             }
             // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap or a

@@ -44,6 +44,9 @@ qrc_*.cpp
 # Crash-recovery autosave (generated at runtime)
 *.autosave.chiplet
 
+# Session logs (timestamped, written in the invocation directory at runtime)
+chiplet-studio_*.log
+
 # OS
 .DS_Store
 Thumbs.db

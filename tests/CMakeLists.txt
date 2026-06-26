@@ -82,6 +82,7 @@ target_link_libraries(chiplet_tests
 
 # Link core sources (we need them for testing)
 target_sources(chiplet_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Assembly.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Component.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Interface.cpp
