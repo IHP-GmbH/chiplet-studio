@@ -31,6 +31,7 @@ namespace py = pybind11;
 #include "core/CommandJournal.h"
 #include "core/Assembly.h"
 #include "core/LayerStackup.h"
+#include "core/Logger.h"
 
 #include <filesystem>
 #include <memory>
@@ -54,6 +55,11 @@ bool initPythonEarly()
 
 int main(int argc, char *argv[])
 {
+    // Redirect this session's diagnostics to a timestamped log file in the
+    // invocation directory before anything else can print, so launching from a
+    // shell does not spam the terminal. See chiplet::Logger for the env knobs.
+    chiplet::Logger::init(argc, argv, QStringLiteral("0.1.0"));
+
 #ifdef HAVE_PYTHON
     // Initialize Python BEFORE Qt to avoid initialization conflicts
     // The CHIPLET_NO_PYTHON env var can disable this for Docker environments
@@ -172,5 +178,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    return app.exec();
+    const int rc = app.exec();
+    chiplet::Logger::shutdown();
+    return rc;
 }

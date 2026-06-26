@@ -6,7 +6,8 @@
  */
 
 #include "GDSLayerExtractor.h"
-#include <iostream>
+#include "core/Logger.h"
+#include <QDebug>
 #include <cmath>
 
 #ifdef HAVE_KLAYOUT
@@ -99,14 +100,14 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         // Use first top cell
         auto top_it = layout->begin_top_down();
         if (top_it == layout->end_top_cells()) {
-            std::cerr << "GDSLayerExtractor: No cells in layout" << std::endl;
+            qCWarning(lcGds) << "No cells in layout";
             return result;
         }
         cell_index = *top_it;
     } else {
         auto found = layout->cell_by_name(cell_name.c_str());
         if (!found.first) {
-            std::cerr << "GDSLayerExtractor: Cell not found: " << cell_name << std::endl;
+            qCWarning(lcGds) << "Cell not found:" << cell_name.c_str();
             return result;
         }
         cell_index = found.second;
@@ -194,9 +195,9 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         }
     }
 
-    std::cerr << "GDSLayerExtractor: Extracted " << m_lastLayerCount << " layers, "
-              << m_lastPolygonCount << " polygons, "
-              << m_lastPointCount << " points" << std::endl;
+    qCDebug(lcGds) << "Extracted" << m_lastLayerCount << "layers,"
+                   << m_lastPolygonCount << "polygons,"
+                   << m_lastPointCount << "points";
 
     return result;
 }
@@ -232,12 +233,10 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFile(
         return extract(&layout, cell_name, {});
 
     } catch (const tl::Exception& e) {
-        std::cerr << "GDSLayerExtractor: Error loading " << gds_path
-                  << ": " << e.msg() << std::endl;
+        qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.msg().c_str();
         return result;
     } catch (const std::exception& e) {
-        std::cerr << "GDSLayerExtractor: Error loading " << gds_path
-                  << ": " << e.what() << std::endl;
+        qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.what();
         return result;
     }
 }
@@ -299,20 +298,18 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
             m_lastPointCount += layer_data.totalPoints();
         }
 
-        std::cerr << "GDSLayerExtractor: Extracted from " << cell_names.size() << " cells: "
-                  << m_lastLayerCount << " layers, "
-                  << m_lastPolygonCount << " polygons, "
-                  << m_lastPointCount << " points" << std::endl;
+        qCDebug(lcGds) << "Extracted from" << cell_names.size() << "cells:"
+                       << m_lastLayerCount << "layers,"
+                       << m_lastPolygonCount << "polygons,"
+                       << m_lastPointCount << "points";
 
         return result;
 
     } catch (const tl::Exception& e) {
-        std::cerr << "GDSLayerExtractor: Error loading " << gds_path
-                  << ": " << e.msg() << std::endl;
+        qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.msg().c_str();
         return result;
     } catch (const std::exception& e) {
-        std::cerr << "GDSLayerExtractor: Error loading " << gds_path
-                  << ": " << e.what() << std::endl;
+        qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.what();
         return result;
     }
 }
@@ -358,9 +355,9 @@ GDSBoundingBox GDSLayerExtractor::extractBoundingBox(
         }
 
     } catch (const tl::Exception& e) {
-        std::cerr << "GDSLayerExtractor::extractBoundingBox: " << e.msg() << std::endl;
+        qCWarning(lcGds) << "extractBoundingBox:" << e.msg().c_str();
     } catch (const std::exception& e) {
-        std::cerr << "GDSLayerExtractor::extractBoundingBox: " << e.what() << std::endl;
+        qCWarning(lcGds) << "extractBoundingBox:" << e.what();
     }
 
     return bbox;
@@ -380,7 +377,7 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFile(
     const std::string& /*gds_path*/,
     const std::string& /*cell_name*/)
 {
-    std::cerr << "GDSLayerExtractor: KLayout not available" << std::endl;
+    qCWarning(lcGds) << "KLayout not available";
     return {};
 }
 
@@ -388,7 +385,7 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
     const std::string& /*gds_path*/,
     const std::vector<std::string>& /*cell_names*/)
 {
-    std::cerr << "GDSLayerExtractor: KLayout not available" << std::endl;
+    qCWarning(lcGds) << "KLayout not available";
     return {};
 }
 

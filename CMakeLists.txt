@@ -107,6 +107,7 @@ include_directories(
 
 # Source files
 set(CORE_SOURCES
+    src/core/Logger.cpp
     src/core/Assembly.cpp
     src/core/Component.cpp
     src/core/Interface.cpp

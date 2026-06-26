@@ -6,7 +6,8 @@
  */
 
 #include "GDSAnalyzer.h"
-#include <iostream>
+#include "core/Logger.h"
+#include <QDebug>
 #include <algorithm>
 #include <set>
 
@@ -87,10 +88,10 @@ std::vector<GDSCellInfo> GDSAnalyzer::analyzeCells(const std::string& gdsPath)
 
     } catch (const tl::Exception& e) {
         m_lastError = std::string("KLayout error: ") + e.msg();
-        std::cerr << "GDSAnalyzer: " << m_lastError << std::endl;
+        qCWarning(lcGds) << "GDSAnalyzer:" << m_lastError.c_str();
     } catch (const std::exception& e) {
         m_lastError = std::string("Error: ") + e.what();
-        std::cerr << "GDSAnalyzer: " << m_lastError << std::endl;
+        qCWarning(lcGds) << "GDSAnalyzer:" << m_lastError.c_str();
     }
 
     return result;
@@ -120,7 +121,7 @@ bool GDSAnalyzer::isFlatGDS(const std::string& gdsPath)
 std::vector<GDSCellInfo> GDSAnalyzer::analyzeCells(const std::string& /*gdsPath*/)
 {
     m_lastError = "KLayout not available";
-    std::cerr << "GDSAnalyzer: " << m_lastError << std::endl;
+    qCWarning(lcGds) << "GDSAnalyzer:" << m_lastError.c_str();
     return {};
 }
 
