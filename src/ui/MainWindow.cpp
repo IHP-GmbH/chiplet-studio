@@ -13,11 +13,14 @@
 #include "FlowPanel.h"
 #include "NetGraphPanel.h"
 #include "CellSelectionDialog.h"
+#include "ImportGdsDialog.h"
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
 #include "view3d/AssemblyView.h"
 #include "view3d/GDSAnalyzer.h"
+#include "view3d/GDSLayerExtractor.h"
 #include "formats/ChipletFormat.h"
+#include "formats/ChipletSynth.h"
 #include "core/Technology.h"
 #include "core/LayerStackup.h"
 #include "core/commands/CmdMoveComponent.h"
@@ -41,6 +44,8 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QFileInfo>
+#include <QSaveFile>
+#include <QUuid>
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
 #include <QScreen>
@@ -88,6 +93,12 @@ void MainWindow::setupMenus()
     QAction* saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, &MainWindow::onFileSave);
+
+    fileMenu->addSeparator();
+
+    QAction* importGdsAction = fileMenu->addAction("&Import GDS...");
+    importGdsAction->setShortcut(QKeySequence("Ctrl+I"));
+    connect(importGdsAction, &QAction::triggered, this, &MainWindow::onImportGds);
 
     fileMenu->addSeparator();
 
@@ -524,6 +535,101 @@ void MainWindow::onFileOpen()
 
     // Single async-load pipeline (also used by the CLI and Reload paths).
     openFile(path);
+}
+
+namespace {
+// Atomic text write (QSaveFile writes to a temp then renames on commit).
+// Returns false if the directory is not writable, so the caller can fall back.
+bool writeTextFile(const QString& path, const std::string& content)
+{
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        return false;
+    }
+    const QByteArray bytes = QByteArray::fromStdString(content);
+    if (f.write(bytes) != bytes.size()) {
+        f.cancelWriting();
+        return false;
+    }
+    return f.commit();
+}
+}  // namespace
+
+void MainWindow::onImportGds()
+{
+    ImportGdsDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QString gdsPath = dlg.gdsPath();
+
+    // Detect the top cell. analyzeCells() sorts top candidates first, then by
+    // bounding-box area descending, so cells.front() is the right pick whether
+    // the GDS is hierarchical (one candidate) or flat (largest by area).
+    GDSAnalyzer analyzer;
+    auto cells = analyzer.analyzeCells(gdsPath.toStdString());
+    if (cells.empty()) {
+        QMessageBox::critical(this, tr("Import GDS"),
+            tr("Could not read cells from the GDS:\n%1")
+                .arg(QString::fromStdString(analyzer.lastError())));
+        return;
+    }
+    const std::string topCell = cells.front().name;
+
+    // Bounding box (micrometers). Falls back to a default footprint if KLayout
+    // cannot measure it, so the synthesized die is never zero-sized.
+    const GDSBoundingBox bbox =
+        GDSLayerExtractor::extractBoundingBox(gdsPath.toStdString(), topCell);
+
+    SingleGdsImportSpec spec;
+    spec.gdsPath = QFileInfo(gdsPath).absoluteFilePath().toStdString();
+    spec.topCell = topCell;
+    if (bbox.is_valid()) {
+        spec.widthUm = bbox.width();
+        spec.heightUm = bbox.height();
+    }
+    spec.thicknessUm = dlg.thicknessUm();
+    spec.techId = dlg.techId().toStdString();        // "" => custom
+    spec.customLyp = dlg.customLyp().toStdString();
+    spec.customStackup = dlg.customStackup().toStdString();
+
+    const std::string yaml = synthesizeSingleGdsChiplet(spec);
+
+    // Write the synthesized .chiplet next to the GDS so it is reusable and can
+    // be re-opened directly. The GDS path inside it is absolute, so the file's
+    // location does not affect resolution.
+    QFileInfo gdsInfo(gdsPath);
+    QString outPath =
+        gdsInfo.absoluteDir().filePath(gdsInfo.completeBaseName() + ".chiplet");
+
+    if (QFileInfo::exists(outPath)) {
+        const auto choice = QMessageBox::question(this, tr("Import GDS"),
+            tr("%1 already exists. Overwrite it?").arg(outPath),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (choice != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    if (!writeTextFile(outPath, yaml)) {
+        // The GDS folder may be read-only (e.g. inside a PDK checkout). Fall
+        // back to a temp file so the import still works, and say where it went.
+        const QString tempPath = QDir::temp().filePath(
+            QStringLiteral("chiplet_import_%1.chiplet")
+                .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        if (!writeTextFile(tempPath, yaml)) {
+            QMessageBox::critical(this, tr("Import GDS"),
+                tr("Could not write the synthesized .chiplet file."));
+            return;
+        }
+        statusBar()->showMessage(
+            tr("GDS folder not writable; imported to %1").arg(tempPath), 6000);
+        outPath = tempPath;
+    }
+
+    // Load through the existing async pipeline (wires views + cell selection).
+    openFile(outPath);
 }
 
 void MainWindow::onAssemblyLoadFinished()

@@ -54,6 +54,26 @@ const Technology::string_type& Technology::layer_properties_source() const
     return m_layerPropertiesSource;
 }
 
+void Technology::set_stackup_path(const string_type& path)
+{
+    m_stackupPath = path;
+}
+
+const Technology::string_type& Technology::stackup_path() const
+{
+    return m_stackupPath;
+}
+
+void Technology::set_stackup_source(const string_type& path)
+{
+    m_stackupSource = path;
+}
+
+const Technology::string_type& Technology::stackup_source() const
+{
+    return m_stackupSource;
+}
+
 void Technology::set_dbu(double dbu)
 {
     m_dbu = dbu;

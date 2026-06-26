@@ -352,7 +352,16 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             if (c->type() != ComponentType::Interposer) continue;
             const std::string& techId = c->technology();
             if (techId.empty()) break;
-            std::string stackupYaml = BlenderGDSConfigs::stackupPath(techId);
+            // An explicit stackup on the technology wins over the built-in
+            // BlenderGDSConfigs lookup, so z-mounting matches the render path
+            // (AssemblyView Priority -1) for unsupported PDKs.
+            std::string stackupYaml;
+            const Technology* itech = technology(techId);
+            if (itech && !itech->stackup_path().empty()) {
+                stackupYaml = itech->stackup_path();
+            } else {
+                stackupYaml = BlenderGDSConfigs::stackupPath(techId);
+            }
             if (stackupYaml.empty()) {
                 qCWarning(lcStackup) << "no stackup config for interposer technology"
                                      << techId.c_str() << "; using interposer thickness for z";

@@ -89,6 +89,7 @@ struct Technology {
     std::string id;              // map key in the YAML
     std::string description;
     std::string layer_properties;  // verbatim path to the .lyp
+    std::string stackup;           // optional verbatim path to a stackup YAML
     double dbu = 0.001;
     bool has_dbu = false;        // whether dbu was present in the file
 };

@@ -130,6 +130,7 @@ set(FLOW_SOURCES
 
 set(FORMAT_SOURCES
     src/formats/ChipletFormat.cpp
+    src/formats/ChipletSynth.cpp
     src/formats/chiplet_format_io/src/chiplet_format_io.cpp
 )
 
@@ -174,6 +175,7 @@ set(UI_SOURCES
     src/ui/UnitConverter.cpp
     src/ui/CrashRecoveryDialog.cpp
     src/ui/CellSelectionDialog.cpp
+    src/ui/ImportGdsDialog.cpp
     src/ui/ScriptConsole.cpp
     src/ui/FlowPanel.cpp
     src/ui/NetGraphPanel.cpp
