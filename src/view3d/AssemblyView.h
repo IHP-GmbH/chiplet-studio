@@ -12,6 +12,8 @@
 #include <QOpenGLExtraFunctions>
 #include <QMatrix4x4>
 #include <QRubberBand>
+#include <QImage>
+#include <QSize>
 #include <map>
 #include <vector>
 #include <memory>
@@ -76,6 +78,15 @@ public:
     // Base plane visibility
     bool basePlaneVisible() const { return m_basePlaneVisible; }
     void setBasePlaneVisible(bool visible);
+
+    // Offscreen high-resolution capture of the current 3D view. Renders the
+    // scene into a (optionally multisampled) framebuffer at the requested pixel
+    // size, independent of the widget's on-screen size, and returns the resolved
+    // image. samples > 0 enables MSAA; transparentBackground clears to a 0-alpha
+    // background instead of the usual dark clear color. Returns a null QImage if
+    // the GL context is not ready or the framebuffer is unsupported. Must be
+    // called from the GUI thread (it makes the widget's GL context current).
+    QImage renderToImage(const QSize& size, bool transparentBackground, int samples);
 
 signals:
     void componentClicked(const QString& componentId);
@@ -145,6 +156,13 @@ private:
     // State
     bool m_initialized = false;
     bool m_needsRebuild = false;
+
+    // Offscreen render-size override: when both > 0 the render path uses these
+    // dimensions for the aspect ratio and viewport instead of the widget size.
+    // Set only for the duration of renderToImage(); 0 means "use the widget".
+    int m_renderWidth = 0;
+    int m_renderHeight = 0;
+    float currentAspect() const;
 
     // Layer geometry for 2.5D rendering (component_id -> geometry)
     std::map<QString, Component3DGeometry> m_layerGeometry;

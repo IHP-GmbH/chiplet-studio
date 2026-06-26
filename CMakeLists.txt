@@ -176,6 +176,7 @@ set(UI_SOURCES
     src/ui/CrashRecoveryDialog.cpp
     src/ui/CellSelectionDialog.cpp
     src/ui/ImportGdsDialog.cpp
+    src/ui/ExportPngDialog.cpp
     src/ui/ScriptConsole.cpp
     src/ui/FlowPanel.cpp
     src/ui/NetGraphPanel.cpp
