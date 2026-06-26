@@ -14,6 +14,7 @@
 #include "NetGraphPanel.h"
 #include "CellSelectionDialog.h"
 #include "ImportGdsDialog.h"
+#include "ExportPngDialog.h"
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
 #include "view3d/AssemblyView.h"
@@ -49,6 +50,7 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
 #include <QScreen>
+#include <QImage>
 
 namespace chiplet {
 
@@ -99,6 +101,10 @@ void MainWindow::setupMenus()
     QAction* importGdsAction = fileMenu->addAction("&Import GDS...");
     importGdsAction->setShortcut(QKeySequence("Ctrl+I"));
     connect(importGdsAction, &QAction::triggered, this, &MainWindow::onImportGds);
+
+    QAction* exportPngAction = fileMenu->addAction("&Export PNG...");
+    exportPngAction->setShortcut(QKeySequence("Ctrl+E"));
+    connect(exportPngAction, &QAction::triggered, this, &MainWindow::onExportPng);
 
     fileMenu->addSeparator();
 
@@ -630,6 +636,74 @@ void MainWindow::onImportGds()
 
     // Load through the existing async pipeline (wires views + cell selection).
     openFile(outPath);
+}
+
+void MainWindow::onExportPng()
+{
+    if (!m_assemblyView) {
+        return;
+    }
+
+    // Seed the dialog with the live framebuffer size (device pixels) so the
+    // default export matches what is currently on screen.
+    const qreal dpr = m_assemblyView->devicePixelRatioF();
+    const QSize viewSize(qMax(1, static_cast<int>(m_assemblyView->width() * dpr)),
+                         qMax(1, static_cast<int>(m_assemblyView->height() * dpr)));
+
+    ExportPngDialog dlg(viewSize, this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QSize size = dlg.outputSize();
+    QImage image = m_assemblyView->renderToImage(
+        size, dlg.transparentBackground(), dlg.samples());
+    if (image.isNull()) {
+        QMessageBox::critical(this, tr("Export PNG"),
+            tr("Could not render the view at %1 x %2.\n"
+               "Try a smaller size or turn off anti-aliasing.")
+                .arg(size.width())
+                .arg(size.height()));
+        return;
+    }
+
+    // Write the chosen DPI into the PNG metadata (stored as dots per meter).
+    const int dpm = qRound(dlg.dpi() / 0.0254);
+    image.setDotsPerMeterX(dpm);
+    image.setDotsPerMeterY(dpm);
+
+    // Default name from the assembly, in the directory of the current file.
+    QString defaultName = QStringLiteral("chiplet_view.png");
+    if (m_assembly && !m_assembly->name().empty()) {
+        defaultName = QString::fromStdString(m_assembly->name()) + ".png";
+    }
+    QString startDir = QDir::homePath();
+    if (!m_currentFilePath.isEmpty()) {
+        startDir = QFileInfo(m_currentFilePath).absolutePath();
+    }
+
+    QString path = QFileDialog::getSaveFileName(
+        this, tr("Export PNG"), QDir(startDir).filePath(defaultName),
+        tr("PNG Image (*.png)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".png");
+    }
+
+    if (!image.save(path, "PNG")) {
+        QMessageBox::critical(this, tr("Export PNG"),
+            tr("Could not write the PNG file:\n%1").arg(path));
+        return;
+    }
+
+    statusBar()->showMessage(
+        tr("Exported %1 x %2 PNG to %3")
+            .arg(image.width())
+            .arg(image.height())
+            .arg(path),
+        6000);
 }
 
 void MainWindow::onAssemblyLoadFinished()

@@ -16,6 +16,8 @@
 #include <QWheelEvent>
 #include <QTimer>
 #include <QDebug>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLFramebufferObjectFormat>
 #include <set>
 #include <cmath>
 #include <algorithm>
@@ -403,6 +405,86 @@ void AssemblyView::paintGL()
     renderComponents();
 }
 
+QImage AssemblyView::renderToImage(const QSize& size, bool transparentBackground,
+                                   int samples)
+{
+    if (!m_initialized || size.width() <= 0 || size.height() <= 0) {
+        return QImage();
+    }
+
+    makeCurrent();
+
+    QOpenGLFramebufferObjectFormat format;
+    format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    if (samples > 0) {
+        format.setSamples(samples);
+    }
+
+    auto fbo = std::make_unique<QOpenGLFramebufferObject>(size, format);
+    if (!fbo->isValid() && samples > 0) {
+        // Multisampling may be unsupported at this resolution; fall back to a
+        // plain framebuffer so the capture still succeeds (supersampling from a
+        // large size already gives most of the quality).
+        QOpenGLFramebufferObjectFormat plain;
+        plain.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+        fbo = std::make_unique<QOpenGLFramebufferObject>(size, plain);
+    }
+    if (!fbo->isValid() || !fbo->bind()) {
+        qWarning() << "AssemblyView::renderToImage: framebuffer unsupported at"
+                   << size << "with" << samples << "samples";
+        doneCurrent();
+        return QImage();
+    }
+
+    // Drive the projection aspect and the viewport from the target size so the
+    // capture is correct at any resolution, not just multiples of the widget.
+    m_renderWidth = size.width();
+    m_renderHeight = size.height();
+    glViewport(0, 0, size.width(), size.height());
+
+    if (transparentBackground) {
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    try {
+        renderGrid();
+        renderComponents();
+    } catch (const std::exception& e) {
+        qWarning() << "AssemblyView::renderToImage: render exception:" << e.what();
+    } catch (...) {
+        qWarning() << "AssemblyView::renderToImage: unknown render exception";
+    }
+
+    QImage image = fbo->toImage();  // resolves MSAA and flips vertically
+
+    fbo->release();
+
+    // Restore everything the offscreen pass changed before the normal on-screen
+    // paint path runs again.
+    m_renderWidth = 0;
+    m_renderHeight = 0;
+    if (transparentBackground) {
+        glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
+    }
+    const qreal dpr = devicePixelRatioF();
+    glViewport(0, 0, static_cast<int>(width() * dpr),
+               static_cast<int>(height() * dpr));
+
+    doneCurrent();
+
+    // The widget's own framebuffer was not the bound target; force a clean
+    // repaint of the on-screen view.
+    update();
+
+    if (!image.isNull()) {
+        image = image.convertToFormat(transparentBackground
+                                          ? QImage::Format_ARGB32
+                                          : QImage::Format_RGB32);
+    }
+    return image;
+}
+
 void AssemblyView::loadLayerProperties()
 {
     m_layerProps.clear();
@@ -631,9 +713,19 @@ void AssemblyView::renderComponents()
     glDepthMask(GL_TRUE);
 }
 
+float AssemblyView::currentAspect() const
+{
+    // Offscreen capture overrides the size so the projection aspect matches the
+    // target framebuffer; otherwise use the on-screen widget size (unchanged
+    // behavior). Guard against a zero height during early layout.
+    const int w = (m_renderWidth > 0) ? m_renderWidth : width();
+    const int h = (m_renderHeight > 0) ? m_renderHeight : height();
+    return (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f;
+}
+
 void AssemblyView::setupShaderUniforms()
 {
-    float aspect = static_cast<float>(width()) / height();
+    float aspect = currentAspect();
     MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
     MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
     VECTOR3D lightDir = m_scene.lightDirection();
@@ -688,7 +780,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
         if (isDetailedMode && m_layerGeometry.count(id)) {
             auto& geometry = m_layerGeometry[id];
 
-            float aspect = static_cast<float>(width()) / height();
+            float aspect = currentAspect();
             MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
             MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
             QMatrix4x4 view, projection;
@@ -723,7 +815,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             // component overwrote them, otherwise this box renders with the
             // wrong transform.
             if (!baseMatricesActive) {
-                float aspect = static_cast<float>(width()) / height();
+                float aspect = currentAspect();
                 MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
                 MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
                 QMatrix4x4 view, projection;
@@ -899,7 +991,7 @@ void AssemblyView::renderGrid()
         return;
     }
 
-    float aspect = static_cast<float>(width()) / height();
+    float aspect = currentAspect();
     MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
     MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
     VECTOR3D lightDir = m_scene.lightDirection();
