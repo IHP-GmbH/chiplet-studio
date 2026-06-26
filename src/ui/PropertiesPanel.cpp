@@ -22,6 +22,7 @@
 #include <QTreeWidgetItem>
 #include <QHeaderView>
 #include <QMenu>
+#include <QInputDialog>
 #include <QPixmap>
 #include <QIcon>
 #include <QFileInfo>
@@ -222,6 +223,11 @@ void PropertiesPanel::setAssembly(Assembly* assembly)
 void PropertiesPanel::setLayerVisibilityResolver(std::function<bool(const QString&, int, int)> resolver)
 {
     m_layerVisibilityResolver = std::move(resolver);
+}
+
+void PropertiesPanel::setLayerOpacityResolver(std::function<float(const QString&, int, int)> resolver)
+{
+    m_layerOpacityResolver = std::move(resolver);
 }
 
 void PropertiesPanel::clearSelection()
@@ -876,6 +882,26 @@ void PropertiesPanel::onLayerContextMenu(const QPoint& pos)
         QAction* only = menu.addAction("Show only this");
         connect(only, &QAction::triggered, this, [this, layer, datatype]() {
             showOnlyLayer(layer, datatype);
+        });
+
+        QAction* opacity = menu.addAction("Transparency...");
+        connect(opacity, &QAction::triggered, this, [this, layer, datatype]() {
+            if (!is_valid_id(m_selectedComponentId)) {
+                return;
+            }
+            const QString compId = QString::fromStdString(m_selectedComponentId);
+            const double current = m_layerOpacityResolver
+                ? m_layerOpacityResolver(compId, layer, datatype)
+                : 1.0;
+            bool ok = false;
+            const double value = QInputDialog::getDouble(
+                this, tr("Layer Transparency"),
+                tr("Opacity (0.00 = invisible, 1.00 = solid):"),
+                current, 0.0, 1.0, 2, &ok);
+            if (ok) {
+                emit layerOpacityChanged(compId, layer, datatype,
+                                         static_cast<float>(value));
+            }
         });
 
         menu.addSeparator();
