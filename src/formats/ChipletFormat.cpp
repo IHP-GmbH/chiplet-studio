@@ -451,6 +451,15 @@ std::unique_ptr<Technology> ChipletFormat::build_technology(
         }
     }
 
+    // Explicit stackup YAML: resolve through the SAME ${VAR}/relative chain as
+    // layer_properties (resolve_path => expand_path_vars -> absolute passthrough
+    // -> m_basePath / p, i.e. relative to the .chiplet dir). Keep the verbatim
+    // source so the writer round-trips the original string.
+    if (!tech.stackup.empty()) {
+        out->set_stackup_path(resolve_path(tech.stackup));
+        out->set_stackup_source(tech.stackup);
+    }
+
     if (tech.has_dbu) {
         out->set_dbu(tech.dbu);
     }
@@ -486,6 +495,13 @@ static void emit_technology_fields(YAML::Emitter& out, const Technology& tech)
             << (tech.layer_properties_source().empty()
                     ? tech.layer_properties_path()
                     : tech.layer_properties_source());
+    }
+
+    if (!tech.stackup_path().empty()) {
+        out << YAML::Key << "stackup" << YAML::Value
+            << (tech.stackup_source().empty()
+                    ? tech.stackup_path()
+                    : tech.stackup_source());
     }
 
     out << YAML::Key << "dbu" << YAML::Value << tech.dbu();

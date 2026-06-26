@@ -80,6 +80,7 @@ private slots:
     void onFileReload();
     void onFileSave();
     void onFileNew();
+    void onImportGds();
 
     // 2D drill-down
     void onComponentDrillDown(const QString& componentId);

@@ -68,6 +68,18 @@ public:
     void set_layer_properties_source(const string_type& path);
     const string_type& layer_properties_source() const;
 
+    // Explicit stackup YAML path (BlenderGDS format). When set, it overrides
+    // the built-in BlenderGDSConfigs::stackupPath(techId) lookup so an
+    // unsupported PDK can ship its own stackup. The path() variant is the
+    // resolved absolute path for consumption; the source() variant keeps the
+    // verbatim ${VAR}/relative string for round-trip writing (same pattern as
+    // layer_properties).
+    void set_stackup_path(const string_type& path);
+    const string_type& stackup_path() const;
+
+    void set_stackup_source(const string_type& path);
+    const string_type& stackup_source() const;
+
     void set_dbu(double dbu);
     double dbu() const;
 
@@ -137,6 +149,8 @@ private:
     string_type m_description;
     string_type m_layerPropertiesPath;
     string_type m_layerPropertiesSource;  // verbatim ${VAR}/relative path from the file
+    string_type m_stackupPath;            // resolved absolute stackup YAML path
+    string_type m_stackupSource;          // verbatim ${VAR}/relative path from the file
     double m_dbu = 0.001;  // Default: 1nm
 
     // GDS3D process definition

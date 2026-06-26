@@ -1064,6 +1064,31 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     } else {
         bool usedStackup = false;
 
+        // Priority -1: explicit stackup YAML declared on the technology
+        // (technologies.<id>.stackup in the .chiplet). This lets an unsupported
+        // PDK ship its own stackup; it wins over the built-in
+        // BlenderGDSConfigs::stackupPath(techId) lookup. Same BlenderGDS loader,
+        // so the merge/color paths below behave identically. Fail-soft: a load
+        // failure falls through to the built-in lookup.
+        if (!usedStackup && m_assembly && !techId.empty()) {
+            Technology* tech = m_assembly->technology(techId);
+            if (tech && !tech->stackup_path().empty()) {
+                LayerStackup customStackup;
+                if (customStackup.loadFromBlenderGDS(tech->stackup_path())) {
+                    stackup = customStackup;
+                    usedStackup = true;
+                    qDebug() << "Using explicit stackup for" << QString::fromStdString(techId)
+                             << "from" << QString::fromStdString(tech->stackup_path())
+                             << "with" << stackup.layerCount() << "layers";
+                } else {
+                    qWarning() << "Explicit stackup failed to load for"
+                               << QString::fromStdString(techId) << ":"
+                               << QString::fromStdString(tech->stackup_path())
+                               << "- falling back to built-in lookup";
+                }
+            }
+        }
+
         // Priority 0: BlenderGDS YAML stackup (accurate physical dimensions)
         if (!usedStackup && !techId.empty()) {
             std::string bgdsPath = BlenderGDSConfigs::stackupPath(techId);

@@ -54,6 +54,7 @@ add_executable(chiplet_tests
     test_coord_frame_contract.cpp
     test_blackbox_stackup.cpp
     test_path_contract.cpp
+    test_chiplet_synth.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -97,6 +98,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/commands/CmdRenameComponent.cpp
     ${CMAKE_SOURCE_DIR}/src/core/commands/CmdSetRenderMode.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/ChipletFormat.cpp
+    ${CMAKE_SOURCE_DIR}/src/formats/ChipletSynth.cpp
     ${CMAKE_SOURCE_DIR}/src/formats/chiplet_format_io/src/chiplet_format_io.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayoutBridge.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp
