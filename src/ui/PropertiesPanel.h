@@ -98,6 +98,13 @@ public:
      */
     void setLayerVisibilityResolver(std::function<bool(const QString&, int, int)> resolver);
 
+    /**
+     * Install a resolver that reports a layer's current opacity
+     * (componentId, layer, datatype) -> opacity (0.0..1.0). Used to seed the
+     * Transparency dialog with the value already applied in the 3D view.
+     */
+    void setLayerOpacityResolver(std::function<float(const QString&, int, int)> resolver);
+
     // Bulk visibility ops for the layer tree. Each flips the check state via
     // setCheckState, which fans out to layerVisibilityChanged once per row that
     // actually changed. Operate on the rows currently visible after the search
@@ -120,6 +127,13 @@ signals:
      * matching LayerMesh visibility. Not emitted while the list repopulates.
      */
     void layerVisibilityChanged(const QString& componentId, int layer, int datatype, bool visible);
+
+    /**
+     * Emitted when the user sets a layer's opacity via the context menu. Carries
+     * the selected component and the GDS layer/datatype so the 3D view can route
+     * the value into the matching LayerMesh. 0.0 = invisible, 1.0 = solid.
+     */
+    void layerOpacityChanged(const QString& componentId, int layer, int datatype, float opacity);
 
 private slots:
     void onUnitChanged(int index);
@@ -208,6 +222,7 @@ private:
     bool m_blockLayerSync = false;        // suppress itemChanged emits while populating
     ComponentID m_layersForComponent;     // component the layer tree is currently built for
     std::function<bool(const QString&, int, int)> m_layerVisibilityResolver;  // seeds checkbox state
+    std::function<float(const QString&, int, int)> m_layerOpacityResolver;    // seeds transparency dialog
 
     // Value labels - Array
     QLabel* m_arrayPatternLabel = nullptr;

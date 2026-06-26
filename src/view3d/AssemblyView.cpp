@@ -126,6 +126,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_polygonCache.clear();
     m_areaStats.clear();
     m_layerVisibilityOverride.clear();
+    m_layerOpacityOverride.clear();
     m_shapeFilterByComponent.clear();
     m_pendingFilterComponent.clear();
 
@@ -248,20 +249,86 @@ bool AssemblyView::isLayerVisible(const QString& componentId, int layer, int dat
     return true;  // No override, no geometry: visible by default
 }
 
-void AssemblyView::applyLayerVisibilityOverrides(const QString& componentId)
+void AssemblyView::setLayerOpacity(const QString& componentId, int layer, int datatype, float opacity)
 {
-    auto co = m_layerVisibilityOverride.find(componentId);
-    if (co == m_layerVisibilityOverride.end()) {
+    if (componentId.isEmpty()) {
         return;
     }
+
+    opacity = std::clamp(opacity, 0.0f, 1.0f);
+
+    // Record the intent first so it survives geometry rebuilds (e.g. shape filter)
+    // and can be read back by the Properties panel, even if no geometry exists yet.
+    m_layerOpacityOverride[componentId][LayerKey(layer, datatype)] = opacity;
+
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return;  // No built geometry yet; override applies when it is built
+    }
+
+    bool changed = false;
+    for (LayerMesh& mesh : it->second.layers) {
+        if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+            if (mesh.opacity != opacity) {
+                mesh.opacity = opacity;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        update();
+    }
+}
+
+float AssemblyView::layerOpacity(const QString& componentId, int layer, int datatype) const
+{
+    // User intent wins (set even when the component has no built geometry).
+    auto co = m_layerOpacityOverride.find(componentId);
+    if (co != m_layerOpacityOverride.end()) {
+        auto lo = co->second.find(LayerKey(layer, datatype));
+        if (lo != co->second.end()) {
+            return lo->second;
+        }
+    }
+
+    auto it = m_layerGeometry.find(componentId);
+    if (it != m_layerGeometry.end()) {
+        for (const LayerMesh& mesh : it->second.layers) {
+            if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+                return mesh.opacity;
+            }
+        }
+    }
+    return 1.0f;  // No override, no geometry: fully solid by default
+}
+
+void AssemblyView::applyLayerOverrides(const QString& componentId)
+{
     auto it = m_layerGeometry.find(componentId);
     if (it == m_layerGeometry.end()) {
         return;
     }
+
+    // Visibility and opacity are independent overrides; apply whichever exist.
+    auto vis = m_layerVisibilityOverride.find(componentId);
+    auto opa = m_layerOpacityOverride.find(componentId);
+    if (vis == m_layerVisibilityOverride.end() && opa == m_layerOpacityOverride.end()) {
+        return;
+    }
+
     for (LayerMesh& mesh : it->second.layers) {
-        auto lo = co->second.find(mesh.key);
-        if (lo != co->second.end()) {
-            mesh.visible = lo->second;
+        if (vis != m_layerVisibilityOverride.end()) {
+            auto lo = vis->second.find(mesh.key);
+            if (lo != vis->second.end()) {
+                mesh.visible = lo->second;
+            }
+        }
+        if (opa != m_layerOpacityOverride.end()) {
+            auto lo = opa->second.find(mesh.key);
+            if (lo != opa->second.end()) {
+                mesh.opacity = lo->second;
+            }
         }
     }
 }
@@ -804,6 +871,7 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             for (auto& layer : geometry.layers) {
                 if (!layer.visible) continue;
                 if (hideSubstrate && layer.name == "Substrate") continue;
+                if (layer.opacity < 1.0f) continue;  // deferred to the transparent pass
                 QColor lc = layer.color;
                 m_componentShader.setUniformVec4("objectColor",
                     QVector4D(lc.redF(), lc.greenF(), lc.blueF(), 1.0f));
@@ -853,7 +921,15 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
 
 void AssemblyView::renderTransparentPass(const std::vector<QString>& ids)
 {
-    if (ids.empty()) return;
+    // Two sources of transparent geometry:
+    //   (1) whole components in Transparent render mode (box meshes, fixed alpha);
+    //   (2) individual layers of Detailed components whose per-layer opacity the
+    //       user dropped below 1.0 (see setLayerOpacity).
+    // Nothing to draw if there are no transparent components and no built layer
+    // geometry that could hold a translucent layer.
+    if (ids.empty() && m_layerGeometry.empty()) {
+        return;
+    }
 
     // Disable face culling so both sides of transparent geometry are visible
     glDisable(GL_CULL_FACE);
@@ -861,6 +937,7 @@ void AssemblyView::renderTransparentPass(const std::vector<QString>& ids)
     m_componentShader.bind();
     setupShaderUniforms();
 
+    // (1) Component-level transparent box meshes (unchanged behavior).
     for (const QString& id : ids) {
         auto meshIt = m_meshes.find(id);
         if (meshIt == m_meshes.end()) continue;
@@ -874,10 +951,63 @@ void AssemblyView::renderTransparentPass(const std::vector<QString>& ids)
         meshIt->second.render();
     }
 
+    // (2) Per-layer translucent layers of Detailed components.
+    renderTranslucentLayers();
+
     m_componentShader.release();
 
     // Restore face culling
     glEnable(GL_CULL_FACE);
+}
+
+void AssemblyView::renderTranslucentLayers()
+{
+    if (!m_assembly) return;
+
+    // The shader is already bound, cull is disabled and depth write is OFF
+    // (set by renderComponents before the transparent pass). Solid (opacity 1.0)
+    // layers of these same components already drew in the opaque pass and laid
+    // down depth, so they correctly occlude the translucent layers behind them.
+    for (auto& [id, geometry] : m_layerGeometry) {
+        if (!isComponentVisible(id)) continue;
+
+        Component* comp = m_assembly->component(id.toStdString());
+        if (!comp) continue;
+
+        RenderMode mode = comp->render_mode();
+        bool isDetailed = (mode == RenderMode::Detailed)
+                       || (mode == RenderMode::DetailedNoSubstrate);
+        if (!isDetailed) continue;
+        bool hideSubstrate = (mode == RenderMode::DetailedNoSubstrate);
+
+        // Bind this component's transform (same math as the opaque Detailed path).
+        float aspect = currentAspect();
+        MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
+        MATRIX4X4 projMat = m_scene.camera().projectionMatrix(aspect);
+        QMatrix4x4 view, projection;
+        for (int i = 0; i < 16; ++i) {
+            view.data()[i] = viewMat.GetEntry(i);
+            projection.data()[i] = projMat.GetEntry(i);
+        }
+        QMatrix4x4 model = geometry.transform;
+        QMatrix4x4 modelView = view * model;
+
+        m_componentShader.setUniformMat4("modelViewProjection", projection * modelView);
+        m_componentShader.setUniformMat4("modelView", modelView);
+        m_componentShader.setUniformMat4("model", model);
+        m_componentShader.setUniformMat3("normalMatrix", modelView.normalMatrix());
+        m_componentShader.setUniformBool("selected", id == m_selectedComponent);
+
+        for (auto& layer : geometry.layers) {
+            if (!layer.visible) continue;
+            if (layer.opacity >= 1.0f) continue;  // solid layers stayed in the opaque pass
+            if (hideSubstrate && layer.name == "Substrate") continue;
+            QColor lc = layer.color;
+            m_componentShader.setUniformVec4("objectColor",
+                QVector4D(lc.redF(), lc.greenF(), lc.blueF(), layer.opacity));
+            layer.mesh.render();
+        }
+    }
 }
 
 void AssemblyView::renderWireframePass(const std::vector<QString>& ids)
@@ -1385,7 +1515,7 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     }
 
     m_layerGeometry[compId] = std::move(geometry);
-    applyLayerVisibilityOverrides(compId);
+    applyLayerOverrides(compId);
 
     qDebug() << "Built layer geometry for" << compId << ":"
              << m_layerGeometry[compId].layerCount() << "layers,"
@@ -1540,7 +1670,7 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
     }
 
     m_layerGeometry[compId] = std::move(geometry);
-    applyLayerVisibilityOverrides(compId);
+    applyLayerOverrides(compId);
 #else
     Q_UNUSED(compId);
 #endif

@@ -376,6 +376,17 @@ void MainWindow::setupPanels()
                                   : true;
         });
 
+    // Properties panel per-layer opacity -> 3D View
+    connect(m_propertiesPanel, &PropertiesPanel::layerOpacityChanged,
+            m_assemblyView, &AssemblyView::setLayerOpacity);
+
+    // Seed the Transparency dialog with the 3D view's current per-layer opacity.
+    m_propertiesPanel->setLayerOpacityResolver(
+        [this](const QString& componentId, int layer, int datatype) {
+            return m_assemblyView ? m_assemblyView->layerOpacity(componentId, layer, datatype)
+                                  : 1.0f;
+        });
+
     // 3D View double-click for drill-down (if signal exists)
     connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);

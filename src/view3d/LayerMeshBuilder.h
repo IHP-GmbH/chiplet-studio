@@ -32,6 +32,7 @@ struct LayerMesh {
     double z_bottom = 0.0;
     double z_top = 0.0;
     bool visible = true;
+    float opacity = 1.0f;   // 1.0 = solid; < 1.0 routes the layer into the transparent pass
     float metallic = 0.0f;
     float roughness = 0.5f;
 

@@ -62,6 +62,13 @@ public:
     void setLayerVisible(const QString& componentId, int layer, int datatype, bool visible);
     bool isLayerVisible(const QString& componentId, int layer, int datatype) const;
 
+    // Per-layer opacity within a component (0.0..1.0; 1.0 = solid, the default).
+    // A layer whose opacity is < 1.0 is forced into the depth-sorted transparent
+    // pass so it blends instead of writing depth. Mirrors the visibility override:
+    // intent is recorded even before geometry is built and survives rebuilds.
+    void setLayerOpacity(const QString& componentId, int layer, int datatype, float opacity);
+    float layerOpacity(const QString& componentId, int layer, int datatype) const;
+
     // Camera control
     void fitToAssembly();
     void fitToComponent(const QString& componentId);
@@ -128,6 +135,11 @@ private:
     // checkboxes. Absent entry = visible by default.
     std::map<QString, std::map<LayerKey, bool>> m_layerVisibilityOverride;
 
+    // Per-component, per-layer user opacity intent (0.0..1.0). Same lifecycle as
+    // m_layerVisibilityOverride (records intent, survives rebuilds, seeds the
+    // Properties panel). Absent entry = 1.0 (fully solid).
+    std::map<QString, std::map<LayerKey, float>> m_layerOpacityOverride;
+
     // Layer properties cache (technology_id -> LayerPropertiesFile)
     std::map<std::string, LayerPropertiesFile> m_layerProps;
 
@@ -183,13 +195,16 @@ private:
 
     // Helper to build layer geometry for a component
     void buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp);
-    void applyLayerVisibilityOverrides(const QString& componentId);
+    void applyLayerOverrides(const QString& componentId);
     void applyShapeFilter();
     void rebuildFilteredGeometry(const QString& compId);
 
     // Multi-pass rendering helpers
     void renderOpaquePass(const std::vector<QString>& ids);
     void renderTransparentPass(const std::vector<QString>& ids);
+    // Per-layer translucent layers (opacity < 1.0) of Detailed components, drawn
+    // inside the transparent pass after the component-level transparent meshes.
+    void renderTranslucentLayers();
     void renderWireframePass(const std::vector<QString>& ids);
     void sortBackToFront(std::vector<QString>& ids);
     VECTOR3D getComponentCenter(const QString& id) const;
