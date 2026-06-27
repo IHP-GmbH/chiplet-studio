@@ -181,6 +181,11 @@ private:
 
     // Layer stackup cache (technology_id -> stackup)
     std::map<std::string, LayerStackup> m_stackups;
+    // Whether the cached stackup came from a real PDK source (explicit
+    // technology.stackup, BlenderGDS config, techfile, or a predefined PDK) as
+    // opposed to the generic Priority-4 fallback. Gates the black-box stackup
+    // augmentation: a real PDK stackup must NOT be augmented with stacked slabs.
+    std::map<std::string, bool> m_stackupModeled;
 
     // Shape filter: polygon cache and area statistics per component.
     // m_shapeFilterByComponent stores the user's chosen percent per component
