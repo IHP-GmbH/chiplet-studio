@@ -586,6 +586,7 @@ void AssemblyView::buildMeshes()
     m_meshes.clear();
     m_layerGeometry.clear();
     m_stackups.clear();
+    m_stackupModeled.clear();
 
     if (!m_assembly) {
         m_needsRebuild = false;
@@ -1280,11 +1281,15 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     LayerColorScheme colorScheme;
     bool hasColorScheme = false;
 
+    // True when the stackup is a real PDK stackup (not the generic fallback);
+    // gates the black-box augmentation below.
+    bool usedStackup = false;
     auto stackupIt = m_stackups.find(techId);
     if (stackupIt != m_stackups.end()) {
         stackup = stackupIt->second;
+        auto modeledIt = m_stackupModeled.find(techId);
+        usedStackup = (modeledIt != m_stackupModeled.end()) && modeledIt->second;
     } else {
-        bool usedStackup = false;
 
         // Priority -1: explicit stackup YAML declared on the technology
         // (technologies.<id>.stackup in the .chiplet). This lets an unsupported
@@ -1414,6 +1419,7 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         }
 
         m_stackups[techId] = stackup;
+        m_stackupModeled[techId] = usedStackup;
     }
 
     // Load BlenderGDS color scheme if available
@@ -1473,7 +1479,13 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     // them and the component would render empty in 3D. Augment a LOCAL copy of
     // the stackup (the cached one is untouched) so the die body + pads render
     // with sensible height and role-based colors. See augmentStackupForBlackBox.
-    if (!lyp) {
+    //
+    // Only for a genuine black box: when a real PDK stackup was resolved
+    // (usedStackup -- e.g. a supported-PDK import that carries no .lyp), the
+    // die's real layers already render at correct elevations and unmodeled
+    // auxiliary layers (fillers, text, recognition) must be skipped, NOT turned
+    // into stacked full-thickness slabs that explode the stack vertically.
+    if (!lyp && !usedStackup) {
         augmentStackupForBlackBox(stackup, polygons, comp);
     }
 
