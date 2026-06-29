@@ -55,6 +55,7 @@ add_executable(chiplet_tests
     test_blackbox_stackup.cpp
     test_path_contract.cpp
     test_chiplet_synth.cpp
+    test_stackup_order_golden.cpp
 )
 
 target_include_directories(chiplet_tests PRIVATE
@@ -187,7 +188,8 @@ endif()
 # Fixture path for tests (absolute path, works regardless of CWD)
 target_compile_definitions(chiplet_tests PRIVATE
     FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-    CONFIGS_DIR="${CMAKE_SOURCE_DIR}/configs")
+    CONFIGS_DIR="${CMAKE_SOURCE_DIR}/configs"
+    STACKUP_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/stackup_order")
 
 # Copy test fixtures to build directory
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
