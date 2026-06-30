@@ -105,6 +105,19 @@ public:
      */
     void setLayerOpacityResolver(std::function<float(const QString&, int, int)> resolver);
 
+    // A render layer as reported by the 3D view (layer/datatype + name).
+    struct RenderedLayerInfo { int layer; int datatype; QString name; };
+
+    /**
+     * Install a resolver that lists a component's built render layers
+     * (componentId) -> [{layer, datatype, name}, ...]. Used as the source for
+     * the layer tree when the component's technology ships no .lyp (e.g. a
+     * supported-PDK Import GDS), so per-layer show/hide and transparency still
+     * work. When the .lyp is present it takes precedence and this is unused.
+     */
+    void setLayerListResolver(
+        std::function<std::vector<RenderedLayerInfo>(const QString&)> resolver);
+
     // Bulk visibility ops for the layer tree. Each flips the check state via
     // setCheckState, which fans out to layerVisibilityChanged once per row that
     // actually changed. Operate on the rows currently visible after the search
@@ -162,6 +175,9 @@ private:
     QLabel* createValueLabel(const QString& text = "-");
     QGroupBox* createCollapsibleGroup(const QString& title);
     void loadLayerProperties();
+    // Fallback layer-tree population from the 3D view's rendered layers, used
+    // when the technology has no .lyp. Assumes m_blockLayerSync is set.
+    void populateLayersFromRenderer();
 
     // Type conversion
     QString typeToString(ComponentType type) const;
@@ -223,6 +239,7 @@ private:
     ComponentID m_layersForComponent;     // component the layer tree is currently built for
     std::function<bool(const QString&, int, int)> m_layerVisibilityResolver;  // seeds checkbox state
     std::function<float(const QString&, int, int)> m_layerOpacityResolver;    // seeds transparency dialog
+    std::function<std::vector<RenderedLayerInfo>(const QString&)> m_layerListResolver;  // layer list when no .lyp
 
     // Value labels - Array
     QLabel* m_arrayPatternLabel = nullptr;

@@ -39,6 +39,7 @@
 #include <QSlider>
 #include <QLabel>
 #include <QDoubleSpinBox>
+#include <QSignalBlocker>
 #include <QProgressDialog>
 #include <QTimer>
 #include <QStatusBar>
@@ -387,6 +388,18 @@ void MainWindow::setupPanels()
                                   : 1.0f;
         });
 
+    // Layer list for technologies with no .lyp (e.g. Import GDS): list the
+    // layers the 3D view rendered from the resolved PDK stackup.
+    m_propertiesPanel->setLayerListResolver(
+        [this](const QString& componentId) {
+            std::vector<PropertiesPanel::RenderedLayerInfo> out;
+            if (!m_assemblyView) return out;
+            for (const auto& e : m_assemblyView->componentLayers(componentId)) {
+                out.push_back({e.layer, e.datatype, e.name});
+            }
+            return out;
+        });
+
     // 3D View double-click for drill-down (if signal exists)
     connect(m_assemblyView, &AssemblyView::componentDoubleClicked,
             this, &MainWindow::onComponentDrillDown);
@@ -442,6 +455,7 @@ void MainWindow::detachAssemblyFromViews()
     if (m_drillDownPanel) {
         m_drillDownPanel->clearContext();
     }
+    updateLayerZSpacingControls();  // no assembly => Layer-Z controls greyed out
 }
 
 void MainWindow::onFileNew()
@@ -457,6 +471,8 @@ void MainWindow::onFileNew()
     if (m_netGraphPanel) {
         m_netGraphPanel->setAssembly(m_assembly.get());
     }
+
+    updateLayerZSpacingControls();  // empty assembly: still greyed (no single die)
 
     setWindowTitle("Chiplet Studio - Untitled");
 
@@ -782,6 +798,8 @@ void MainWindow::onAssemblyLoadFinished()
         m_netGraphPanel->setAssembly(m_assembly.get());
     }
 
+    updateLayerZSpacingControls();  // enable Layer-Z only if this is a lone die
+
     setWindowTitle(QString("Chiplet Studio - %1").arg(
         QString::fromStdString(m_assembly->name())));
 
@@ -998,6 +1016,8 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
         m_netGraphPanel->setAssembly(m_assembly.get());
     }
 
+    updateLayerZSpacingControls();  // enable Layer-Z only if this is a lone die
+
     setWindowTitle(QString("Chiplet Studio - %1 [Recovered]").arg(
         QString::fromStdString(m_assembly->name())));
 
@@ -1017,6 +1037,37 @@ void MainWindow::setupViewModeToolbar()
 {
     QToolBar* renderToolbar = addToolBar("View Mode");
     renderToolbar->setMovable(false);
+
+    // Layer Z spacing (visualization-only): spread Detailed-mode stackup layers
+    // apart in Z to inspect the 3D stackup. 1.00x = physical/default; Reset Z
+    // returns to default. Does not change the saved model. Enabled only for a
+    // single imported die (a multi-component assembly would interleave the fans),
+    // so the controls are greyed out otherwise by updateLayerZSpacingControls().
+    m_layerZLabel = new QLabel("Layer Z:", this);
+    renderToolbar->addWidget(m_layerZLabel);
+    m_layerZSpacingSpin = new QDoubleSpinBox(this);
+    m_layerZSpacingSpin->setRange(1.0, AssemblyView::kMaxLayerZSpacing);
+    m_layerZSpacingSpin->setDecimals(1);
+    m_layerZSpacingSpin->setSingleStep(0.5);
+    m_layerZSpacingSpin->setValue(1.0);
+    m_layerZSpacingSpin->setSuffix("x");
+    m_layerZSpacingSpin->setToolTip(
+        "Visualization-only Z exaggeration for Detailed-mode stackups "
+        "(1.0x = physical). Spreads layers apart without changing the model. "
+        "Available only for a single imported GDS.");
+    renderToolbar->addWidget(m_layerZSpacingSpin);
+    connect(m_layerZSpacingSpin,
+            qOverload<double>(&QDoubleSpinBox::valueChanged),
+            this, [this](double v) {
+        if (m_assemblyView) m_assemblyView->setLayerZSpacing(static_cast<float>(v));
+    });
+    m_layerZResetAction = renderToolbar->addAction("Reset Z", this, [this]() {
+        if (m_layerZSpacingSpin) m_layerZSpacingSpin->setValue(1.0);
+    });
+    m_layerZResetAction->setToolTip("Reset layer Z spacing to default (1.0x)");
+
+    // Start greyed out: no single-die assembly is loaded yet.
+    updateLayerZSpacingControls();
 
     // Push the filter cluster to the top-right corner: an expanding spacer eats
     // the free width so the control sits flush right, sized at about a quarter
@@ -1056,6 +1107,23 @@ void MainWindow::setupViewModeToolbar()
         if (compId.isEmpty()) return;  // slider should already be disabled
         m_assemblyView->setShapeFilterPercent(compId, percent);
     });
+}
+
+void MainWindow::updateLayerZSpacingControls()
+{
+    const bool applicable =
+        m_assemblyView && m_assemblyView->layerZSpacingApplicable();
+
+    // setAssembly resets the view's factor to 1.0; mirror that on the spin so it
+    // never shows a stale spread after switching assemblies. Block the signal so
+    // resetting the widget does not bounce back through setLayerZSpacing.
+    if (m_layerZSpacingSpin) {
+        const QSignalBlocker block(m_layerZSpacingSpin);
+        m_layerZSpacingSpin->setValue(1.0);
+        m_layerZSpacingSpin->setEnabled(applicable);
+    }
+    if (m_layerZLabel) m_layerZLabel->setEnabled(applicable);
+    if (m_layerZResetAction) m_layerZResetAction->setEnabled(applicable);
 }
 
 void MainWindow::setupScriptConsole()
