@@ -868,6 +868,23 @@ QString MainWindow::resolveAssemblyGdsPath() const
         }
     }
 
+    // 3. Lone-layout fallback: no interposer and no explicit assembly GDS, but a
+    //    single component carries a layout. This is exactly what File > Import
+    //    GDS produces (one synthesized die), so show that layout in the 2D panel
+    //    instead of leaving it empty. Gated on a single layout-bearing component
+    //    so it never has to guess which GDS represents the assembly.
+    QString loneLayout;
+    int layoutCount = 0;
+    for (const auto& comp : m_assembly->components()) {
+        if (!comp->layout_path().empty()) {
+            ++layoutCount;
+            loneLayout = QString::fromStdString(comp->layout_path());
+        }
+    }
+    if (layoutCount == 1 && QFile::exists(loneLayout)) {
+        return loneLayout;
+    }
+
     return {};
 }
 
