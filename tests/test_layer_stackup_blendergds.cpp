@@ -71,33 +71,29 @@ TEST(BlenderGDSStackup, LoadSky130) {
     EXPECT_NEAR(met1->z_bottom, 1.38, 0.01);
 }
 
-// Color scheme loading tests
-
-TEST(BlenderGDSColorScheme, LoadRealistic) {
-    std::string path = std::string(CONFIGS_DIR) + "/stackups/colors/ihp-sg13g2/realistic.yaml";
+// Color scheme loading. Post-cleanup the only bundled scheme is the generic
+// black-box one (the per-PDK "realistic"/"fancy"/"marketing" schemes were
+// removed; layer color now comes from the technology's .lyp). This still
+// exercises LayerColorScheme::loadFromYAML + find against a kept artifact.
+TEST(BlenderGDSColorScheme, LoadGenericBlackbox) {
+    std::string path = std::string(CONFIGS_DIR) + "/stackups/colors/generic/blackbox.yaml";
     if (!fileExists(path)) {
-        GTEST_SKIP() << "BlenderGDS color scheme not found: " << path;
+        GTEST_SKIP() << "Generic black-box color scheme not found: " << path;
     }
 
     LayerColorScheme scheme;
     ASSERT_TRUE(scheme.loadFromYAML(path));
-    EXPECT_EQ(scheme.name, "Realistic");
     EXPECT_FALSE(scheme.layers.empty());
 
-    // Check Metal1 color
-    const LayerColorEntry* metal1 = scheme.find("Metal1");
-    ASSERT_NE(metal1, nullptr);
-    EXPECT_NEAR(metal1->color[0], 0.63f, 0.01f);  // R
-    EXPECT_NEAR(metal1->color[1], 0.64f, 0.01f);  // G
-    EXPECT_NEAR(metal1->color[2], 0.65f, 0.01f);  // B
-    EXPECT_NEAR(metal1->color[3], 1.0f, 0.01f);   // A
-    EXPECT_NEAR(metal1->metallic, 0.8f, 0.01f);
-    EXPECT_NEAR(metal1->roughness, 0.3f, 0.01f);
+    // Keyed by the canonical black-box roles, not PDK layer names.
+    const LayerColorEntry* outline = scheme.find("outline");
+    ASSERT_NE(outline, nullptr);
+    const LayerColorEntry* pad = scheme.find("pad");
+    ASSERT_NE(pad, nullptr);
 
-    // Check that non-metallic layer has default values
-    const LayerColorEntry* activ = scheme.find("Activ");
-    ASSERT_NE(activ, nullptr);
-    EXPECT_NEAR(activ->metallic, 0.0f, 0.01f);  // No metallic specified
+    // outline is the blue die body; pad is yellow.
+    EXPECT_GT(outline->color[2], outline->color[0]);  // more blue than red
+    EXPECT_GT(pad->color[0], pad->color[2]);          // more red than blue
 }
 
 // Config path resolution tests
@@ -124,25 +120,10 @@ TEST(BlenderGDSConfigs, ResolveStackupPath) {
     EXPECT_NE(path.find("ihp-sg13g2.yaml"), std::string::npos);
 }
 
-TEST(BlenderGDSConfigs, ResolveColorSchemePath) {
-    BlenderGDSConfigs::setConfigsDir(CONFIGS_DIR);
-
-    std::string path = BlenderGDSConfigs::colorSchemePath("sg13g2", "realistic");
-    EXPECT_FALSE(path.empty());
-    EXPECT_NE(path.find("ihp-sg13g2/realistic.yaml"), std::string::npos);
-
-    path = BlenderGDSConfigs::colorSchemePath("sky130", "fancy");
-    EXPECT_FALSE(path.empty());
-    EXPECT_NE(path.find("sky130/fancy.yaml"), std::string::npos);
-}
-
 TEST(BlenderGDSConfigs, UnknownTechReturnsEmpty) {
     BlenderGDSConfigs::setConfigsDir(CONFIGS_DIR);
 
     std::string path = BlenderGDSConfigs::stackupPath("unknown_tech_xyz");
-    EXPECT_TRUE(path.empty());
-
-    path = BlenderGDSConfigs::colorSchemePath("unknown_tech_xyz");
     EXPECT_TRUE(path.empty());
 }
 

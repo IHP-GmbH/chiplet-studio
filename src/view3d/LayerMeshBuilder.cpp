@@ -274,9 +274,12 @@ Component3DGeometry LayerMeshBuilder::build(
         (void)default_layer_thickness;
 
         // Color priority chain:
-        // 0: BlenderGDS color scheme (if provided and layer found)
-        // 1: .lyp file (existing behavior)
-        // 2: Default fallback
+        // 0: color scheme by layer name. Post-cleanup the only scheme passed is
+        //    the generic black-box one (outline/pad roles) for a no-.lyp die;
+        //    the per-PDK "realistic" schemes were removed (color = the .lyp).
+        // 1: PDK .lyp fill color -- the default color source for supported PDKs.
+        // 2: hardcoded role fallback (blue body / yellow pads) when the generic
+        //    scheme file is absent, then a deterministic hashed color.
         QColor color(128, 128, 128, 200);  // Default gray
         float metallic = 0.0f;
         float roughness = 0.5f;
