@@ -1482,20 +1482,13 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
         m_stackupModeled[techId] = usedStackup;
     }
 
-    // Load BlenderGDS color scheme if available
-    if (!techId.empty()) {
-        std::string csPath = BlenderGDSConfigs::colorSchemePath(techId, "realistic");
-        if (!csPath.empty() && colorScheme.loadFromYAML(csPath)) {
-            hasColorScheme = true;
-            qDebug() << "Loaded BlenderGDS color scheme" << QString::fromStdString(colorScheme.name)
-                     << "for" << QString::fromStdString(techId)
-                     << "with" << colorScheme.layers.size() << "layer colors";
-        }
-    }
-    // Black-box (no .lyp): fall back to the generic pad/outline color scheme
-    // (ships blue body + yellow pads; user-editable). LayerMeshBuilder also
-    // carries a hardcoded blue/yellow fallback if this file is missing.
-    if (!hasColorScheme && !lyp) {
+    // Layer color comes from the technology's .lyp (the single color source for
+    // supported PDKs; resolved per layer in LayerMeshBuilder). The only scheme
+    // we still load is the generic black-box fallback for a no-.lyp die: it
+    // ships the blue body + yellow pads keyed by the canonical outline/pad
+    // roles (user-editable). LayerMeshBuilder also carries a hardcoded
+    // blue/yellow fallback if this file is missing.
+    if (!lyp) {
         std::string gp = BlenderGDSConfigs::genericColorSchemePath();
         if (!gp.empty() && colorScheme.loadFromYAML(gp)) {
             hasColorScheme = true;
@@ -1698,16 +1691,11 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
         augmentStackupForBlackBox(stackup, polygons, *comp);
     }
 
-    // Get color scheme
+    // Color: the .lyp when present, else the generic black-box scheme (see the
+    // matching block in buildLayerGeometry). No per-PDK realistic scheme.
     LayerColorScheme colorScheme;
     bool hasColorScheme = false;
-    if (!techId.empty()) {
-        std::string csPath = BlenderGDSConfigs::colorSchemePath(techId, "realistic");
-        if (!csPath.empty() && colorScheme.loadFromYAML(csPath)) {
-            hasColorScheme = true;
-        }
-    }
-    if (!hasColorScheme && !lyp) {
+    if (!lyp) {
         std::string gp = BlenderGDSConfigs::genericColorSchemePath();
         if (!gp.empty() && colorScheme.loadFromYAML(gp)) {
             hasColorScheme = true;

@@ -540,36 +540,6 @@ std::string interconnectStackupFragmentPath(const std::string& adapter)
     return "";
 }
 
-std::string colorSchemePath(const std::string& techId, const std::string& scheme)
-{
-    std::string base = getConfigsDir();
-    if (base.empty()) return "";
-
-    std::string colorsDir = base + "/stackups/colors/";
-
-    // Map techId patterns to subdirectory
-    std::string lower = techId;
-    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    std::string pdkDir;
-    if (lower.find("sg13g2") != std::string::npos) {
-        pdkDir = "ihp-sg13g2";
-    } else if (lower.find("sg13cmos5l") != std::string::npos ||
-               lower.find("sg13cmos") != std::string::npos) {
-        pdkDir = "ihp-sg13cmos5l";
-    } else if (lower.find("sky130") != std::string::npos) {
-        pdkDir = "sky130";
-    } else if (lower.find("gf180") != std::string::npos) {
-        pdkDir = "gf180mcu";
-    } else if (lower.find("ihp") != std::string::npos) {
-        pdkDir = "ihp-sg13g2";
-    } else {
-        return "";
-    }
-
-    return colorsDir + pdkDir + "/" + scheme + ".yaml";
-}
-
 std::string genericColorSchemePath(const std::string& scheme)
 {
     std::string base = getConfigsDir();

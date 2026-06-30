@@ -203,10 +203,6 @@ std::string stackupPath(const std::string& techId);
 // the configs dir. Empty when unresolvable -- callers skip the merge.
 std::string interconnectStackupFragmentPath(const std::string& adapter);
 
-// Resolve color scheme YAML path
-std::string colorSchemePath(const std::string& techId,
-                            const std::string& scheme = "realistic");
-
 // Resolve the bundled KLayout layer-properties (.lyp) for a supported PDK,
 // shipped under pdks/<pdk>/<file>.lyp (sibling of the configs dir). Lets an
 // Import GDS of a supported PDK carry the real PDK layer table (names, colors,
