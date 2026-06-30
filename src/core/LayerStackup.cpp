@@ -553,55 +553,13 @@ std::string genericColorSchemePath(const std::string& scheme)
 
 namespace Stackups {
 
-LayerStackup createSG13G2()
-{
-    LayerStackup stackup;
-
-    // IHP SG13G2 approximate layer stackup (simplified)
-    // Based on typical BiCMOS process layers
-
-    // Substrate and wells
-    stackup.addLayer(1, 0, 0.0, 0.3, "NWell");
-    stackup.addLayer(2, 0, 0.0, 0.3, "ThickGateOx");
-
-    // Active and poly
-    stackup.addLayer(6, 0, 0.3, 0.1, "Activ");
-    stackup.addLayer(5, 0, 0.4, 0.2, "GatPoly");
-
-    // Contacts and vias
-    stackup.addLayer(9, 0, 0.6, 0.3, "Cont");
-
-    // Metal layers (M1-M5)
-    stackup.addLayer(8, 0, 0.9, 0.4, "Metal1");
-    stackup.addLayer(19, 0, 1.3, 0.3, "Via1");
-    stackup.addLayer(10, 0, 1.6, 0.5, "Metal2");
-    stackup.addLayer(29, 0, 2.1, 0.3, "Via2");
-    stackup.addLayer(30, 0, 2.4, 0.5, "Metal3");
-    stackup.addLayer(49, 0, 2.9, 0.3, "Via3");
-    stackup.addLayer(50, 0, 3.2, 0.5, "Metal4");
-    stackup.addLayer(66, 0, 3.7, 0.5, "Via4");
-    stackup.addLayer(67, 0, 4.2, 0.8, "Metal5");
-
-    // Top metal
-    stackup.addLayer(125, 0, 5.0, 0.6, "TopVia1");
-    stackup.addLayer(126, 0, 5.6, 2.0, "TopMetal1");
-    stackup.addLayer(133, 0, 7.6, 1.0, "TopVia2");
-    stackup.addLayer(134, 0, 8.6, 3.0, "TopMetal2");
-
-    // Passivation
-    stackup.addLayer(89, 0, 11.6, 1.0, "Passiv");
-
-    return stackup;
-}
-
 LayerStackup createInterposer()
 {
     LayerStackup stackup;
 
     // IHP 130-nm IntM4TM2 aluminum BEOL interposer stackup - top metal layers
     // used for RDL routing. Layer numbers match the GDS layers actually present
-    // in interposer designs; heights from the SG13G2 process (um), same as
-    // createSG13G2() for these layers
+    // in interposer designs; heights from the SG13G2 process (um).
     stackup.addLayer(50, 0, 3.2, 0.5, "Metal4");
     stackup.addLayer(66, 0, 3.7, 0.5, "Via4");
     stackup.addLayer(67, 0, 4.2, 0.8, "Metal5");
