@@ -235,7 +235,7 @@ void DrillDownPanel::setupUI()
 }
 
 void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPath,
-                                     const Assembly& assembly)
+                                     const Assembly& assembly, bool interposerOnly)
 {
     // Only record the paths once the layout actually loads. Storing them up
     // front left m_assemblyGdsPath holding an invalid path when the GDS was
@@ -259,9 +259,13 @@ void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPa
         m_backButton->setToolTip("Show full assembly view");
         m_cellNavLabel->setVisible(false);
         m_cellCombo->setVisible(false);
-        m_contextLabel->setText(lypPath.isEmpty()
-                                ? "Assembly (black-box / default layers)"
-                                : "Assembly");
+        // When this is the interposer-only fallback (no merged assembly GDS),
+        // say so: the 2D shows the substrate, not the assembled dies.
+        QString base = interposerOnly ? "Interposer (no assembled GDS)" : "Assembly";
+        m_assemblyContextText = lypPath.isEmpty()
+                                ? base + " (black-box / default layers)"
+                                : base;
+        m_contextLabel->setText(m_assemblyContextText);
         populateLayerList();
     }
 }
@@ -292,7 +296,8 @@ void DrillDownPanel::returnToAssembly()
     m_backButton->setToolTip("Show full assembly view");
     m_cellNavLabel->setVisible(false);
     m_cellCombo->setVisible(false);
-    m_contextLabel->setText("Assembly");
+    m_contextLabel->setText(m_assemblyContextText.isEmpty()
+                            ? "Assembly" : m_assemblyContextText);
     m_componentId.clear();
     populateLayerList();
 }
@@ -355,6 +360,7 @@ void DrillDownPanel::reset()
     m_assemblyGdsPath.clear();
     m_assemblyLypPath.clear();
     m_assemblyTopCell.clear();
+    m_assemblyContextText.clear();
     if (m_view2d) {
         m_view2d->clearLayout();
     }

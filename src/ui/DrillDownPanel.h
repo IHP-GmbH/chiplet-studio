@@ -60,9 +60,12 @@ public:
 
     /**
      * @brief Load the assembly GDS for the default 2D view
+     * @param interposerOnly true when gdsPath is the interposer's own layout used
+     *        because no merged/complete assembly GDS was found; the panel then
+     *        labels the view so the user knows the dies are not included.
      */
     void setAssemblyGds(const QString& gdsPath, const QString& lypPath,
-                        const Assembly& assembly);
+                        const Assembly& assembly, bool interposerOnly = false);
 
     /**
      * @brief Return to assembly view from drill-down
@@ -193,6 +196,7 @@ private:
     QString m_assemblyGdsPath;
     QString m_assemblyLypPath;
     QString m_assemblyTopCell;
+    QString m_assemblyContextText;  // label shown in assembly mode (set on load)
     std::unique_ptr<CellComponentMapper> m_cellMapper;
 };
 
