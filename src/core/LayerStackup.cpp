@@ -466,6 +466,37 @@ std::string stackupPath(const std::string& techId)
     return "";
 }
 
+std::string pdkLayerPropertiesPath(const std::string& techId)
+{
+    std::string base = getConfigsDir();
+    if (base.empty()) return "";
+
+    std::string lower = techId;
+    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // techId -> bundled pdks/<dir>/<file>.lyp (only the PDKs that ship one).
+    std::string rel;
+    if (lower.find("sg13g2") != std::string::npos) {
+        rel = "ihp-sg13g2/sg13g2.lyp";
+    } else if (lower.find("sky130") != std::string::npos) {
+        rel = "sky130/sky130.lyp";
+    } else if (lower.find("intm4tm2") != std::string::npos) {
+        rel = "interposer/interposer.lyp";
+    } else {
+        return "";  // sg13cmos5l, gf180: no bundled .lyp
+    }
+
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    // pdks/ is a sibling of the configs dir in both the dev tree and the
+    // installed share/chiplet-studio layout.
+    fs::path cand = fs::path(base).parent_path() / "pdks" / rel;
+    if (fs::exists(cand, ec)) {
+        return cand.string();
+    }
+    return "";
+}
+
 std::string interconnectStackupFragmentPath(const std::string& adapter)
 {
     if (adapter.empty()) return "";

@@ -207,6 +207,13 @@ std::string interconnectStackupFragmentPath(const std::string& adapter);
 std::string colorSchemePath(const std::string& techId,
                             const std::string& scheme = "realistic");
 
+// Resolve the bundled KLayout layer-properties (.lyp) for a supported PDK,
+// shipped under pdks/<pdk>/<file>.lyp (sibling of the configs dir). Lets an
+// Import GDS of a supported PDK carry the real PDK layer table (names, colors,
+// dither) instead of only the stackup-derived layer list. Returns "" when the
+// PDK ships no bundled .lyp (e.g. sg13cmos5l, gf180) or the file is missing.
+std::string pdkLayerPropertiesPath(const std::string& techId);
+
 // Resolve the generic black-box color scheme path
 // (configs/stackups/colors/generic/<scheme>.yaml). Empty if no configs dir.
 std::string genericColorSchemePath(const std::string& scheme = "blackbox");

@@ -7,6 +7,8 @@
 
 #include "ImportGdsDialog.h"
 
+#include "core/LayerStackup.h"  // BlenderGDSConfigs::pdkLayerPropertiesPath
+
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -82,15 +84,24 @@ ImportGdsDialog::ImportGdsDialog(QWidget* parent)
 
     root->addLayout(form);
 
-    // Custom-PDK files, revealed only for the Custom selection.
-    m_customGroup = new QGroupBox(tr("Custom PDK files"), this);
-    QFormLayout* customForm = new QFormLayout(m_customGroup);
+    // Layer properties (.lyp): always available. For a supported PDK this is
+    // auto-filled with the bundled PDK .lyp so the import carries the real PDK
+    // layer table (names / colors / dither); the user can Browse to override
+    // (e.g. a .lyp from their own PDK_ROOT). Empty is valid (layer list then
+    // falls back to the stackup-derived layers).
+    QGroupBox* lypGroup = new QGroupBox(tr("Layer properties"), this);
+    QFormLayout* lypForm = new QFormLayout(lypGroup);
     QPushButton* lypBrowse = nullptr;
-    QWidget* lypRow = makePathRow(&m_lypEdit, m_customGroup, &lypBrowse);
-    m_lypEdit->setPlaceholderText(tr("optional .lyp (layer colors / names)"));
+    QWidget* lypRow = makePathRow(&m_lypEdit, lypGroup, &lypBrowse);
+    m_lypEdit->setPlaceholderText(tr(".lyp (layer colors / names); auto-filled for supported PDKs"));
     connect(lypBrowse, &QPushButton::clicked, this, &ImportGdsDialog::browseLyp);
-    customForm->addRow(tr("Layer props (.lyp):"), lypRow);
+    lypForm->addRow(tr("Layer props (.lyp):"), lypRow);
+    root->addWidget(lypGroup);
 
+    // Custom-PDK stackup, revealed only for the Custom selection (supported
+    // PDKs take their stackup from the bundled config by id).
+    m_customGroup = new QGroupBox(tr("Custom PDK stackup"), this);
+    QFormLayout* customForm = new QFormLayout(m_customGroup);
     QPushButton* stackupBrowse = nullptr;
     QWidget* stackupRow = makePathRow(&m_stackupEdit, m_customGroup, &stackupBrowse);
     m_stackupEdit->setPlaceholderText(tr("optional stackup YAML (z / thickness)"));
@@ -141,8 +152,24 @@ void ImportGdsDialog::browseStackup()
 void ImportGdsDialog::onTechChanged()
 {
     // Custom is the only entry with an empty technology id.
-    const bool custom = m_techCombo->currentData().toString().isEmpty();
+    const QString techId = m_techCombo->currentData().toString();
+    const bool custom = techId.isEmpty();
+
+    // Custom stackup field only matters for an unsupported PDK; supported PDKs
+    // resolve their stackup from the bundled config by id.
     m_customGroup->setVisible(custom);
+
+    // Auto-fill the .lyp with the supported PDK's bundled layer table (if one
+    // ships) so the import carries real layer names/colors out of the box; the
+    // user can still Browse to override. Switching technology re-resolves it.
+    if (!custom) {
+        const QString bundled = QString::fromStdString(
+            BlenderGDSConfigs::pdkLayerPropertiesPath(techId.toStdString()));
+        m_lypEdit->setText(bundled);  // empty if the PDK ships no .lyp
+    } else {
+        m_lypEdit->clear();
+    }
+
     adjustSize();
 }
 
