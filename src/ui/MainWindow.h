@@ -167,7 +167,10 @@ private:
     // New and crash-recovery paths so they all share the same safe ordering.
     void detachAssemblyFromViews();
     QString autoSavePath() const;
-    QString resolveAssemblyGdsPath() const;
+    // Resolve the GDS to show in the 2D panel. If interposerOnly is non-null it
+    // is set true when the result is the interposer's own layout used as a
+    // fallback (no merged/complete assembly GDS was found), false otherwise.
+    QString resolveAssemblyGdsPath(bool* interposerOnly = nullptr) const;
     void loadAssemblyGds();
 
     /**

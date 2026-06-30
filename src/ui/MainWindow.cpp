@@ -827,8 +827,9 @@ void MainWindow::onLoadCanceled()
     statusBar()->showMessage("Load canceled", 2000);
 }
 
-QString MainWindow::resolveAssemblyGdsPath() const
+QString MainWindow::resolveAssemblyGdsPath(bool* interposerOnly) const
 {
+    if (interposerOnly) *interposerOnly = false;
     if (!m_assembly) return {};
 
     // 1. Explicit assembly_gds field
@@ -863,6 +864,16 @@ QString MainWindow::resolveAssemblyGdsPath() const
                 return candidate2;
             }
 
+            // 2b. No merged/complete GDS on disk: fall back to the interposer's
+            //     own layout so the 2D panel shows the substrate instead of
+            //     nothing. It will not include the dies (KLayout2DView loads a
+            //     single GDS); the caller labels it accordingly.
+            QString interposerGds = QString::fromStdString(comp->layout_path());
+            if (QFile::exists(interposerGds)) {
+                if (interposerOnly) *interposerOnly = true;
+                return interposerGds;
+            }
+
             break;  // Only check first interposer
         }
     }
@@ -891,14 +902,15 @@ void MainWindow::loadAssemblyGds()
 {
     if (!m_assembly) return;
 
-    QString assemblyGds = resolveAssemblyGdsPath();
+    bool interposerOnly = false;
+    QString assemblyGds = resolveAssemblyGdsPath(&interposerOnly);
     if (assemblyGds.isEmpty()) return;
 
     // Defer loading to next event loop iteration so KLayout widget
     // initialization completes before we start loading layouts.
     // Without this, KLayout's hierarchy panel initialization
     // can trigger a menu assertion during first-time widget creation.
-    QTimer::singleShot(0, this, [this, assemblyGds]() {
+    QTimer::singleShot(0, this, [this, assemblyGds, interposerOnly]() {
         if (!m_assembly) return;
 
         // Find best LYP from technologies
@@ -910,7 +922,8 @@ void MainWindow::loadAssemblyGds()
             }
         }
 
-        m_drillDownPanel->setAssemblyGds(assemblyGds, lypPath, *m_assembly);
+        m_drillDownPanel->setAssemblyGds(assemblyGds, lypPath, *m_assembly,
+                                         interposerOnly);
         m_klayout2DDock->show();
         m_klayout2DDock->raise();
     });
