@@ -448,12 +448,11 @@ void MainWindow::detachAssemblyFromViews()
         m_scriptEngine->clear_assembly();  // nulls g_scriptAssembly
     }
     // Reset the 2D drill-down dock so it does not show geometry from the
-    // outgoing assembly.
-    if (m_klayout2DView) {
-        m_klayout2DView->clearLayout();
-    }
+    // outgoing assembly. reset() (not clearContext()) also forgets the stored
+    // assembly GDS, otherwise opening a project that has no 2D layout would keep
+    // the previous project's layout on screen.
     if (m_drillDownPanel) {
-        m_drillDownPanel->clearContext();
+        m_drillDownPanel->reset();
     }
     updateLayerZSpacingControls();  // no assembly => Layer-Z controls greyed out
 }

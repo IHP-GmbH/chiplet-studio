@@ -100,8 +100,20 @@ public:
 
     /**
      * @brief Clear context and reset to empty state
+     *
+     * Note: in DrillDown mode this returns to the still-loaded assembly GDS (it
+     * is the Back action). To forget the assembly GDS entirely, use reset().
      */
     void clearContext();
+
+    /**
+     * @brief Forget all loaded state (assembly GDS included) and go empty
+     *
+     * Unlike clearContext(), this does NOT reload the assembly GDS. Use it when
+     * switching to a different assembly so the panel does not keep showing the
+     * previous project's layout.
+     */
+    void reset();
 
     /**
      * @brief Whether the layer side panel is visible
