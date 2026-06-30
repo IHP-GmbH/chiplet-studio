@@ -1391,44 +1391,22 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
             }
         }
 
-        // Priority 1: Try to get stackup from Technology's process definition (techfile)
-        if (!usedStackup && m_assembly && !techId.empty()) {
-            Technology* tech = m_assembly->technology(techId);
-            if (tech && tech->has_process_def()) {
-                stackup = tech->createStackup();
-                usedStackup = true;
-                qDebug() << "Using techfile stackup for" << QString::fromStdString(techId)
-                         << "with" << stackup.layerCount() << "layers";
-            }
-        }
-
-        // Priority 2: Detect known technology names and use predefined stackups
-        if (!usedStackup && !techId.empty()) {
-            if (techId.find("sg13g2") != std::string::npos ||
-                techId.find("SG13G2") != std::string::npos ||
-                techId.find("ihp") != std::string::npos) {
-                stackup = Stackups::createSG13G2();
-                usedStackup = true;
-                qDebug() << "Using predefined SG13G2 stackup for" << QString::fromStdString(techId)
-                         << "with" << stackup.layerCount() << "layers";
-            }
-            else if (techId.find("intm4tm2") != std::string::npos ||
-                     techId.find("IntM4TM2") != std::string::npos) {
-                stackup = Stackups::createInterposer();
-                usedStackup = true;
-                qDebug() << "Using predefined interposer stackup for" << QString::fromStdString(techId)
-                         << "with" << stackup.layerCount() << "layers";
-            }
-        }
-
-        // Priority 3: Create stackup from .lyp file if available (fallback with default thickness)
+        // Priority 1: derive a stackup from the technology's .lyp (default
+        // thickness). A supported PDK never reaches this -- its bundled YAML
+        // resolves at Priority 0 -- but it lets an unsupported PDK that ships
+        // only a .lyp still render with sensible per-layer z.
         if (!usedStackup && lyp) {
             stackup = LayerStackup::fromLayerProperties(*lyp);
             qDebug() << "Using .lyp stackup for" << QString::fromStdString(techId)
                      << "with" << stackup.layerCount() << "layers (default thickness)";
         }
 
-        // Priority 4: Fall back to default interposer stackup
+        // Priority 2: generic last resort when there is neither a YAML stackup
+        // nor a .lyp -- a plain top-metal interposer stack so geometry still
+        // renders. (The former techfile and hardcoded-name rungs were removed:
+        // the bundled YAMLs at Priority 0 always won, so they were dead. The
+        // golden test test_stackup_order_golden.cpp guards that the surviving
+        // ladder still yields the exact same order for every bundled PDK.)
         if (!usedStackup && !lyp) {
             stackup = Stackups::createInterposer();
             qDebug() << "Using default interposer stackup for" << QString::fromStdString(techId);

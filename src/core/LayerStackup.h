@@ -177,10 +177,8 @@ struct LayerColorScheme {
  */
 namespace Stackups {
 
-// IHP SG13G2 130nm BiCMOS approximate stackup
-LayerStackup createSG13G2();
-
-// Generic interposer stackup
+// Generic interposer stackup (the ladder's last-resort fallback when a
+// technology ships neither a YAML stackup nor a .lyp)
 LayerStackup createInterposer();
 
 // Simple 2-metal stackup for testing

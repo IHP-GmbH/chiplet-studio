@@ -10,14 +10,15 @@
  * z_bottom. There is no explicit order index. For the bundled PDKs that order
  * comes from the BlenderGDS stackup YAML resolved at "Priority 0"
  * (BlenderGDSConfigs::stackupPath + LayerStackup::loadFromBlenderGDS inside
- * AssemblyView::buildLayerGeometry); the techfile (Priority 1) and hardcoded
- * (Priority 2) fallbacks are never reached while that YAML loads.
+ * AssemblyView::buildLayerGeometry); that bundled YAML owns the order for
+ * every supported PDK.
  *
  * These tests freeze the resolved order as a golden snapshot so any future
- * change to HOW the stackup is sourced (e.g. collapsing the redundant
- * techfile/hardcoded paths) is forced to keep the exact same layers, z,
- * thickness and names. The snapshot is the contract: it must not change
- * silently.
+ * change to HOW the stackup is sourced is forced to keep the exact same
+ * layers, z, thickness and names. The snapshot is the contract: it must not
+ * change silently. (Under this guard the redundant techfile and hardcoded-name
+ * rungs that used to sit below Priority 0 were removed; the ladder is now
+ * Priority -1 explicit YAML > 0 bundled YAML > 1 .lyp-derived > 2 generic.)
  *
  * Regenerate the goldens deliberately, then review the git diff:
  *   UPDATE_STACKUP_GOLDEN=1 ./chiplet_tests --gtest_filter='StackupOrderGolden.*'
