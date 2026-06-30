@@ -340,6 +340,30 @@ void DrillDownPanel::clearContext()
     }
 }
 
+void DrillDownPanel::reset()
+{
+    // Full reset for switching to a different assembly. clearContext() keeps the
+    // assembly GDS and reloads it (the drill-down Back action); here we forget it
+    // so a freshly opened project does not keep showing the previous layout.
+    m_componentId.clear();
+    m_cellCombo->clear();
+    m_cellLabel->setText("");
+    m_posLabel->setText("x: --  y: --");
+    m_layerFilter->clear();
+    m_layerTree->clear();
+
+    m_assemblyGdsPath.clear();
+    m_assemblyLypPath.clear();
+    m_assemblyTopCell.clear();
+    if (m_view2d) {
+        m_view2d->clearLayout();
+    }
+
+    m_panelMode = PanelMode::Empty;
+    m_contextLabel->setText("");
+    m_backButton->setVisible(true);
+}
+
 bool DrillDownPanel::isLayerPanelVisible() const
 {
     return m_layerPanelVisible;
