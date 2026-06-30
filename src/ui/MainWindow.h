@@ -97,6 +97,10 @@ private:
     void setupMenus();
     void setupPanels();
     void setupViewModeToolbar();
+    // Enable the Layer-Z spread controls only when the assembly is a single
+    // imported die (AssemblyView::layerZSpacingApplicable) and reset them to the
+    // 1.0x default; call after every assembly swap.
+    void updateLayerZSpacingControls();
     void setupScriptConsole();
     void setupFlowPanel();
     void setupNetGraphPanel();
@@ -136,6 +140,9 @@ private:
     // View mode toolbar
     QSlider* m_shapeFilterSlider = nullptr;
     QLabel* m_shapeFilterLabel = nullptr;
+    QDoubleSpinBox* m_layerZSpacingSpin = nullptr;  // visualization-only Z exaggeration
+    QLabel* m_layerZLabel = nullptr;                 // "Layer Z:" caption (greyed with the spin)
+    QAction* m_layerZResetAction = nullptr;          // "Reset Z" (greyed with the spin)
 
     // Async loading state
     struct LoadResult {

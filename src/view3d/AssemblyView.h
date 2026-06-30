@@ -69,6 +69,34 @@ public:
     void setLayerOpacity(const QString& componentId, int layer, int datatype, float opacity);
     float layerOpacity(const QString& componentId, int layer, int datatype) const;
 
+    // The built render layers of a component (layer/datatype + name), in stack
+    // order. Lets the UI list a die's layers for show/hide and transparency
+    // when the technology ships no .lyp (e.g. a supported-PDK Import GDS), where
+    // the layers come from the resolved PDK stackup rather than a properties
+    // file. Empty if the component has no built layer geometry.
+    struct LayerListEntry { int layer; int datatype; QString name; };
+    std::vector<LayerListEntry> componentLayers(const QString& componentId) const;
+
+    // Visualization-only Z exaggeration for Detailed-mode stackups: each layer's
+    // baked Z is spread by this factor (gaps grow, layer thickness unchanged) so
+    // the 3D stackup is easier to inspect. 1.0 = physical/default (no change);
+    // larger spreads the layers apart. Does not rebuild geometry or alter the
+    // saved model; purely a render-time transform. Reset by setting 1.0.
+    //
+    // Only meaningful for a single imported die: each layer is spread along its
+    // OWN local Z origin, so in a multi-component assembly (chiplets + interposer
+    // at different seating heights) the per-component fans interleave and overlap.
+    // The render path therefore applies the spread only when layerZSpacingApplicable()
+    // is true (exactly one component), and setAssembly resets the factor to 1.0.
+    void setLayerZSpacing(float factor);
+    float layerZSpacing() const { return m_layerZSpacing; }
+    static constexpr float kMaxLayerZSpacing = 50.0f;
+
+    // Whether the Layer-Z spread is meaningful for the current assembly: true
+    // only when it holds exactly one component (a single imported GDS). The UI
+    // greys the spacing control out otherwise. False when there is no assembly.
+    bool layerZSpacingApplicable() const;
+
     // Camera control
     void fitToAssembly();
     void fitToComponent(const QString& componentId);
@@ -139,6 +167,9 @@ private:
     // m_layerVisibilityOverride (records intent, survives rebuilds, seeds the
     // Properties panel). Absent entry = 1.0 (fully solid).
     std::map<QString, std::map<LayerKey, float>> m_layerOpacityOverride;
+
+    // Visualization-only Z exaggeration for Detailed stackups (1.0 = physical).
+    float m_layerZSpacing = 1.0f;
 
     // Layer properties cache (technology_id -> LayerPropertiesFile)
     std::map<std::string, LayerPropertiesFile> m_layerProps;

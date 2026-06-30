@@ -129,6 +129,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_layerOpacityOverride.clear();
     m_shapeFilterByComponent.clear();
     m_pendingFilterComponent.clear();
+    m_layerZSpacing = 1.0f;  // Z spread is per-import; never carry it across loads.
 
     if (!assembly) {
         if (m_initialized) {
@@ -301,6 +302,40 @@ float AssemblyView::layerOpacity(const QString& componentId, int layer, int data
         }
     }
     return 1.0f;  // No override, no geometry: fully solid by default
+}
+
+std::vector<AssemblyView::LayerListEntry>
+AssemblyView::componentLayers(const QString& componentId) const
+{
+    std::vector<LayerListEntry> entries;
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return entries;
+    }
+    entries.reserve(it->second.layers.size());
+    for (const LayerMesh& mesh : it->second.layers) {
+        entries.push_back({mesh.key.layer, mesh.key.datatype,
+                           QString::fromStdString(mesh.name)});
+    }
+    return entries;
+}
+
+void AssemblyView::setLayerZSpacing(float factor)
+{
+    factor = std::clamp(factor, 1.0f, kMaxLayerZSpacing);
+    if (factor == m_layerZSpacing) {
+        return;
+    }
+    m_layerZSpacing = factor;
+    update();
+}
+
+bool AssemblyView::layerZSpacingApplicable() const
+{
+    // Spreading each layer about its own local Z origin only reads correctly for
+    // a lone die; with several components seated at different heights the fans
+    // interleave. A single imported GDS synthesizes exactly one component.
+    return m_assembly && m_assembly->components().size() == 1;
 }
 
 void AssemblyView::applyLayerOverrides(const QString& componentId)
@@ -869,11 +904,24 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             m_componentShader.setUniformBool("selected", isSelected);
             baseMatricesActive = false;  // per-component transform now bound
 
+            const bool spreadZ = (m_layerZSpacing != 1.0f) && layerZSpacingApplicable();
             for (auto& layer : geometry.layers) {
                 if (!layer.visible) continue;
                 if (hideSubstrate && layer.name == "Substrate") continue;
                 if (layer.opacity < 1.0f) continue;  // deferred to the transparent pass
-                QColor lc = layer.color;
+                if (spreadZ) {
+                    // Spread this layer along world Y by (z_bottom * (factor-1)):
+                    // gaps grow, thickness is preserved. factor==1 leaves the
+                    // per-component matrices above untouched (byte-identical).
+                    QMatrix4x4 lmodel = model;
+                    lmodel.translate(0.0f, layer.z_bottom * (m_layerZSpacing - 1.0f), 0.0f);
+                    QMatrix4x4 lmv = view * lmodel;
+                    m_componentShader.setUniformMat4("modelViewProjection", projection * lmv);
+                    m_componentShader.setUniformMat4("modelView", lmv);
+                    m_componentShader.setUniformMat4("model", lmodel);
+                    m_componentShader.setUniformMat3("normalMatrix", lmv.normalMatrix());
+                }
+                const QColor& lc = layer.color;
                 m_componentShader.setUniformVec4("objectColor",
                     QVector4D(lc.redF(), lc.greenF(), lc.blueF(), 1.0f));
                 layer.mesh.render();
@@ -999,11 +1047,23 @@ void AssemblyView::renderTranslucentLayers()
         m_componentShader.setUniformMat3("normalMatrix", modelView.normalMatrix());
         m_componentShader.setUniformBool("selected", id == m_selectedComponent);
 
+        const bool spreadZ = (m_layerZSpacing != 1.0f) && layerZSpacingApplicable();
         for (auto& layer : geometry.layers) {
             if (!layer.visible) continue;
             if (layer.opacity >= 1.0f) continue;  // solid layers stayed in the opaque pass
             if (hideSubstrate && layer.name == "Substrate") continue;
-            QColor lc = layer.color;
+            if (spreadZ) {
+                // Match the opaque path's spread so a layer keeps its place
+                // whether it is solid or translucent.
+                QMatrix4x4 lmodel = model;
+                lmodel.translate(0.0f, layer.z_bottom * (m_layerZSpacing - 1.0f), 0.0f);
+                QMatrix4x4 lmv = view * lmodel;
+                m_componentShader.setUniformMat4("modelViewProjection", projection * lmv);
+                m_componentShader.setUniformMat4("modelView", lmv);
+                m_componentShader.setUniformMat4("model", lmodel);
+                m_componentShader.setUniformMat3("normalMatrix", lmv.normalMatrix());
+            }
+            const QColor& lc = layer.color;
             m_componentShader.setUniformVec4("objectColor",
                 QVector4D(lc.redF(), lc.greenF(), lc.blueF(), layer.opacity));
             layer.mesh.render();

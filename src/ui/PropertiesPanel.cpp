@@ -230,6 +230,12 @@ void PropertiesPanel::setLayerOpacityResolver(std::function<float(const QString&
     m_layerOpacityResolver = std::move(resolver);
 }
 
+void PropertiesPanel::setLayerListResolver(
+    std::function<std::vector<RenderedLayerInfo>(const QString&)> resolver)
+{
+    m_layerListResolver = std::move(resolver);
+}
+
 void PropertiesPanel::clearSelection()
 {
     m_showingInterconnect = false;  // the show*() views re-set it at the end
@@ -719,7 +725,10 @@ void PropertiesPanel::updateLayersGroup()
     m_layersForComponent = m_selectedComponentId;
 
     if (m_layerProps.layers().empty()) {
-        m_layersGroup->setTitle("Layers (0)");
+        // No .lyp for this technology (e.g. a supported-PDK Import GDS): fall
+        // back to the layers the 3D view actually rendered from the resolved
+        // stackup, so per-layer show/hide and transparency still work.
+        populateLayersFromRenderer();
         m_blockLayerSync = false;
         return;
     }
@@ -768,6 +777,50 @@ void PropertiesPanel::updateLayersGroup()
     }
 
     m_blockLayerSync = false;
+}
+
+void PropertiesPanel::populateLayersFromRenderer()
+{
+    // Source of last resort when the technology ships no .lyp: the layers the
+    // 3D view built from the resolved PDK stackup. Each row carries the
+    // layer/datatype in UserRole so the show/hide checkbox and the
+    // "Transparency..." context menu address the matching LayerMesh, exactly
+    // like the .lyp-backed rows.
+    if (!m_layerListResolver || !is_valid_id(m_selectedComponentId)) {
+        m_layersGroup->setTitle("Layers (0)");
+        return;
+    }
+
+    const QString compId = QString::fromStdString(m_selectedComponentId);
+    const std::vector<RenderedLayerInfo> layers = m_layerListResolver(compId);
+    if (layers.empty()) {
+        m_layersGroup->setTitle("Layers (0)");
+        return;
+    }
+
+    m_layersGroup->setTitle(QString("Layers (%1)").arg(layers.size()));
+    for (const auto& l : layers) {
+        QTreeWidgetItem* item = new QTreeWidgetItem();
+        item->setText(0, l.name.isEmpty()
+                         ? QString("Layer %1/%2").arg(l.layer).arg(l.datatype)
+                         : l.name);
+        item->setText(1, QString("%1/%2").arg(l.layer).arg(l.datatype));
+
+        bool visible = m_layerVisibilityResolver
+            ? m_layerVisibilityResolver(compId, l.layer, l.datatype)
+            : true;
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+        item->setData(0, Qt::UserRole, l.layer);
+        item->setData(0, Qt::UserRole + 1, l.datatype);
+
+        QString tooltip = QString("Layer: %1\nL/D: %2/%3\n(from PDK stackup; no .lyp)")
+            .arg(l.name).arg(l.layer).arg(l.datatype);
+        item->setToolTip(0, tooltip);
+        item->setToolTip(1, tooltip);
+
+        m_layerTree->addTopLevelItem(item);
+    }
 }
 
 void PropertiesPanel::onLayerItemChanged(QTreeWidgetItem* item, int column)
