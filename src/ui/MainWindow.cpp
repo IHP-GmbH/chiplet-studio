@@ -1217,10 +1217,13 @@ void MainWindow::setupFlowPanel()
     m_flowPanelDock->setMinimumHeight(100);
     m_flowPanelDock->resize(m_flowPanelDock->width(), 200);
 
-    // Tab with script console, hidden by default (View > Flow Pipeline to show)
+    // Tab with the script console; both start hidden. The Python console is a
+    // power-user surface reopened via View > Python Console (Ctrl+`). The flow
+    // panel has no menu toggle and reveals itself only when the loaded assembly
+    // defines a flow (see populateFlowEngine), so it never shows an empty panel.
     if (m_scriptConsoleDock) {
         tabifyDockWidget(m_scriptConsoleDock, m_flowPanelDock);
-        m_scriptConsoleDock->raise();
+        m_scriptConsoleDock->hide();
     }
     m_flowPanelDock->hide();
 
@@ -1239,17 +1242,15 @@ void MainWindow::setupFlowPanel()
                 }
             });
 
-    // View menu entry
+    // View menu (kept for the base-plane toggle below). The Flow Pipeline dock has
+    // no menu entry on purpose: it is not user-toggled and auto-reveals only when the
+    // assembly defines a flow (populateFlowEngine). This keeps the tested flow engine
+    // available without advertising an empty panel that no shipped project populates.
     QMenu* viewMenu = menuBar()->findChild<QMenu*>("viewMenu");
     if (!viewMenu) {
         viewMenu = menuBar()->addMenu("&View");
         viewMenu->setObjectName("viewMenu");
     }
-
-    QAction* toggleFlow = m_flowPanelDock->toggleViewAction();
-    toggleFlow->setText("Flow Pipeline");
-    toggleFlow->setShortcut(QKeySequence("Ctrl+F"));
-    viewMenu->addAction(toggleFlow);
 
     // Base plane toggle
     viewMenu->addSeparator();
@@ -1320,6 +1321,7 @@ void MainWindow::populateFlowEngine()
         if (m_flowPanel) {
             m_flowPanel->set_flow_engine(nullptr);
         }
+        if (m_flowPanelDock) m_flowPanelDock->hide();
         return;
     }
 
@@ -1327,6 +1329,7 @@ void MainWindow::populateFlowEngine()
 
     if (!m_assembly->has_flow()) {
         m_flowPanel->set_flow_engine(nullptr);
+        if (m_flowPanelDock) m_flowPanelDock->hide();
         return;
     }
 
@@ -1343,6 +1346,11 @@ void MainWindow::populateFlowEngine()
     }
 
     m_flowPanel->set_flow_engine(m_flowEngine);
+    // The assembly defines a real flow: reveal the panel (it has no menu toggle).
+    if (m_flowPanelDock) {
+        m_flowPanelDock->show();
+        m_flowPanelDock->raise();
+    }
     qDebug() << "Loaded flow pipeline with"
              << m_flowEngine->step_count() << "steps";
 }
