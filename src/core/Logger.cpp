@@ -126,9 +126,24 @@ bool Logger::init(int argc, char** argv, const QString& appVersion)
     if (qEnvironmentVariableIsSet("CHIPLET_NO_LOGFILE"))
         return false;
 
-    QString dir = qEnvironmentVariableIsSet("CHIPLET_LOG_DIR")
-                      ? qEnvironmentVariable("CHIPLET_LOG_DIR")
-                      : QDir::currentPath();
+    // Log directory priority: CHIPLET_LOG_DIR override > a logs/ dir next to the
+    // project file argument (so a .chiplet in outputs/ logs to outputs/logs/,
+    // alongside the rest of the flow's logs) > the current directory.
+    QString dir;
+    if (qEnvironmentVariableIsSet("CHIPLET_LOG_DIR")) {
+        dir = qEnvironmentVariable("CHIPLET_LOG_DIR");
+    } else {
+        dir = QDir::currentPath();
+        for (int i = 1; i < argc; ++i) {
+            const QString arg = QString::fromLocal8Bit(argv[i]);
+            if (arg.startsWith('-'))
+                continue; // skip option flags; the first file arg is the project
+            const QString parent = QFileInfo(arg).absolutePath();
+            if (!parent.isEmpty() && QDir(parent).mkpath(QStringLiteral("logs")))
+                dir = QDir(parent).absoluteFilePath(QStringLiteral("logs"));
+            break; // only the first non-flag argument (the .chiplet path)
+        }
+    }
 
     const QDateTime now = QDateTime::currentDateTime();
     QString base = QStringLiteral("chiplet-studio_%1.log")

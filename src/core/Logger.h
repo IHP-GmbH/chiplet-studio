@@ -8,15 +8,18 @@
 namespace chiplet {
 
 // Session logger. Redirects Qt diagnostics plus the process stdout/stderr to a
-// timestamped file in the invocation directory, so launching the tool from a
-// shell (e.g. `chiplet-studio my.chiplet &`) keeps that terminal quiet instead
-// of streaming the whole session log into it.
+// timestamped file in a logs/ directory next to the project file argument (so a
+// .chiplet in outputs/ logs to outputs/logs/), falling back to the invocation
+// directory when no file was given. Launching the tool from a shell
+// (e.g. `chiplet-studio my.chiplet &`) keeps that terminal quiet instead of
+// streaming the whole session log into it.
 //
 // Each line is structured for debug/crash triage:
 //   [yyyy-MM-dd HH:mm:ss.zzz] [LEVEL] [category] message (file:line)
 //
 // Environment variables:
-//   CHIPLET_LOG_DIR      directory for the log file (default: current directory)
+//   CHIPLET_LOG_DIR      directory for the log file (overrides the default
+//                        logs/-next-to-the-project-file location)
 //   CHIPLET_LOG_CONSOLE  if truthy, also echo to the launching terminal and do
 //                        not silence raw stdout/stderr (useful for development)
 //   CHIPLET_NO_LOGFILE   if set, disable file logging and keep default Qt output
