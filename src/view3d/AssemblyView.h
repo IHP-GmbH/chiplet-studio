@@ -28,6 +28,7 @@
 #include "view2d/LayerProperties.h"
 #include "LayerMeshBuilder.h"
 #include "ShapeFilter.h"
+#include "SceneOverview.h"
 
 class QTimer;
 
@@ -101,6 +102,18 @@ public:
     void fitToAssembly();
     void fitToComponent(const QString& componentId);
 
+    // Top-down mini-map (SceneMiniMap) support. buildSceneOverview() returns the
+    // full floor-plan model (per-component footprints projected onto the scene
+    // X-Z plane + the camera marker); overviewCameraMarker() is the cheap
+    // camera-only refresh for pan/zoom/orbit. navigateFloorTo() moves the look-at
+    // target to a floor point (a mini-map click), zoomOverview() scales the
+    // camera distance. All are floor-coordinate based (see SceneOverview.h) so no
+    // scene/GL type leaks to the widget.
+    SceneOverview buildSceneOverview() const;
+    OverviewCameraMarker overviewCameraMarker() const;
+    void navigateFloorTo(double floorX, double floorY);
+    void zoomOverview(double factor);
+
     // Per-component render mode change notification
     void onComponentRenderModeChanged(const QString& componentId, RenderMode newMode);
 
@@ -128,6 +141,13 @@ signals:
     void componentDoubleClicked(const QString& componentId);
     void selectionChanged(const QString& componentId);
     void shapeFilterChanged(const QString& componentId, double percent);
+
+    // Emitted when the camera moves (orbit/pan/zoom/fit/navigate) so the mini-map
+    // can refresh its viewport marker cheaply; and when the displayed content
+    // changes (assembly set/cleared, meshes rebuilt) so it can rebuild the
+    // footprint floor-plan.
+    void cameraChanged();
+    void overviewChanged();
 
 protected:
     // OpenGL lifecycle
