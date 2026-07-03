@@ -151,6 +151,7 @@ set(VIEW3D_SOURCES
     src/view3d/ComponentMesh.cpp
     src/view3d/MeshBuilder.cpp
     src/view3d/AssemblyView.cpp
+    src/view3d/SceneMiniMap.cpp
     src/view3d/GDSLayerExtractor.cpp
     src/view3d/GDSAnalyzer.cpp
     src/view3d/LayerMeshBuilder.cpp

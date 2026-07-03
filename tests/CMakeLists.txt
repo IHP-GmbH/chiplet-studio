@@ -44,6 +44,7 @@ add_executable(chiplet_tests
     test_tessellation.cpp
     test_via_cut_rendering.cpp
     test_overview_navigator.cpp
+    test_scene_minimap.cpp
     test_integration_final.cpp
     test_layer_stackup_blendergds.cpp
     test_flow_engine.cpp

@@ -138,6 +138,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
             m_meshes.clear();
             doneCurrent();
         }
+        emit overviewChanged();
         update();
         return;
     }
@@ -158,6 +159,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
         doneCurrent();
     }
 
+    emit overviewChanged();
     update();
 }
 
@@ -372,6 +374,7 @@ void AssemblyView::applyLayerOverrides(const QString& componentId)
 void AssemblyView::fitToAssembly()
 {
     m_scene.fitToScene();
+    emit cameraChanged();
     update();
 }
 
@@ -410,6 +413,7 @@ void AssemblyView::fitToComponent(const QString& componentId)
 
         if (!first) {
             m_scene.camera().fitToBox(compBounds);
+            emit cameraChanged();
             update();
             return;
         }
@@ -419,6 +423,7 @@ void AssemblyView::fitToComponent(const QString& componentId)
     auto it = m_meshes.find(componentId);
     if (it != m_meshes.end()) {
         m_scene.camera().fitToBox(it->second.boundingBox());
+        emit cameraChanged();
         update();
         return;
     }
@@ -438,10 +443,70 @@ void AssemblyView::fitToComponent(const QString& componentId)
                            static_cast<float>(pos.z + dims.thickness));
             box.SetFromMinsMaxes(mins, maxes);
             m_scene.camera().fitToBox(box);
+            emit cameraChanged();
             update();
             return;
         }
     }
+}
+
+OverviewCameraMarker AssemblyView::overviewCameraMarker() const
+{
+    const Camera& cam = m_scene.camera();
+    const VECTOR3D t = cam.target();
+    return computeCameraMarker(t.x, t.z, cam.distance(), cam.fov(),
+                               cam.yaw(), cam.pitch(),
+                               static_cast<double>(currentAspect()));
+}
+
+SceneOverview AssemblyView::buildSceneOverview() const
+{
+    SceneOverview ov;
+
+    // Floor extent from the current scene bounds (geometry only; the base plane
+    // is excluded on purpose so the map frames the actual assembly).
+    const AA_BOUNDING_BOX& sb = m_scene.sceneBounds();
+    ov.floorBounds = floorRectFromSceneXZ(sb.mins.x, sb.mins.z, sb.maxes.x, sb.maxes.z);
+
+    // One footprint per component. Every component has a colored box mesh in
+    // world/scene coordinates (buildMeshes), which already carries the GDS
+    // footprint extent, so the box bounding box is the right source here.
+    for (const auto& [id, mesh] : m_meshes) {
+        const AA_BOUNDING_BOX& b = mesh.boundingBox();
+        OverviewFootprint fp;
+        fp.id = id.toStdString();
+        fp.rect = floorRectFromSceneXZ(b.mins.x, b.mins.z, b.maxes.x, b.maxes.z);
+        fp.rgb = static_cast<unsigned int>(mesh.color().rgb() & 0x00FFFFFFu);
+        fp.selected = (id == m_selectedComponent);
+        ov.footprints.push_back(fp);
+    }
+
+    ov.camera = overviewCameraMarker();
+    return ov;
+}
+
+void AssemblyView::navigateFloorTo(double floorX, double floorY)
+{
+    Camera& cam = m_scene.camera();
+    double sceneX = 0.0, sceneZ = 0.0;
+    sceneFromFloor(floorX, floorY, sceneX, sceneZ);
+    const VECTOR3D t = cam.target();
+    // Keep the current elevation (target Y) and orbit/zoom; only slide the look-at
+    // across the floor so the user flies to a region without changing the angle.
+    cam.setTarget(VECTOR3D(static_cast<float>(sceneX), t.y, static_cast<float>(sceneZ)));
+    emit cameraChanged();
+    update();
+}
+
+void AssemblyView::zoomOverview(double factor)
+{
+    if (!(factor > 0.0)) {
+        return;
+    }
+    Camera& cam = m_scene.camera();
+    cam.setDistance(cam.distance() * static_cast<float>(factor));
+    emit cameraChanged();
+    update();
 }
 
 void AssemblyView::initializeGL()
@@ -481,6 +546,7 @@ void AssemblyView::initializeGL()
             buildMeshes();
             updateSceneBounds();
             fitToAssembly();
+            emit overviewChanged();
         } catch (const std::exception& e) {
             qCritical() << "AssemblyView::initializeGL: Exception during mesh building:" << e.what();
         } catch (...) {
@@ -1932,6 +1998,7 @@ void AssemblyView::mouseMoveEvent(QMouseEvent* event)
         m_scene.camera().orbit(delta.x(), delta.y());
     }
 
+    emit cameraChanged();
     update();
     event->accept();
 }
@@ -1940,6 +2007,7 @@ void AssemblyView::wheelEvent(QWheelEvent* event)
 {
     float delta = event->angleDelta().y() / 120.0f;
     m_scene.camera().zoom(delta);
+    emit cameraChanged();
     update();
     event->accept();
 }
@@ -2063,6 +2131,7 @@ void AssemblyView::zoomToRect(const QRect& rect)
     // If no hit (all background), only zoom distance without moving target
 
     cam.setDistance(cam.distance() * scale);
+    emit cameraChanged();
     update();
 }
 

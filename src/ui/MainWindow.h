@@ -30,6 +30,7 @@ namespace chiplet {
 class HierarchyPanel;
 class PropertiesPanel;
 class AssemblyView;
+class SceneMiniMap;
 class KLayout2DView;
 class DrillDownPanel;
 class ScriptConsole;
@@ -93,6 +94,11 @@ private slots:
     // Auto-save
     void onAutoSave();
 
+protected:
+    // Keeps the 3D top-down mini-map pinned to a corner of the AssemblyView as
+    // it resizes (the mini-map is a child overlay of the central view).
+    bool eventFilter(QObject* obj, QEvent* event) override;
+
 private:
     void setupMenus();
     void setupPanels();
@@ -111,6 +117,12 @@ private:
     QDockWidget* m_hierarchyDock = nullptr;
     PropertiesPanel* m_propertiesPanel = nullptr;
     AssemblyView* m_assemblyView = nullptr;
+
+    // 3D top-down mini-map / navigator (corner overlay child of m_assemblyView).
+    SceneMiniMap* m_sceneMiniMap = nullptr;
+    bool m_sceneMiniMapVisible = true;
+    void positionSceneMiniMap();
+    void updateSceneMiniMapVisibility();
 
     // 2D view dock
     DrillDownPanel* m_drillDownPanel = nullptr;

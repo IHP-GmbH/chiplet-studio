@@ -18,6 +18,7 @@
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
 #include "view3d/AssemblyView.h"
+#include "view3d/SceneMiniMap.h"
 #include "view3d/GDSAnalyzer.h"
 #include "view3d/GDSLayerExtractor.h"
 #include "formats/ChipletFormat.h"
@@ -52,6 +53,7 @@
 #include <QApplication>
 #include <QScreen>
 #include <QImage>
+#include <QEvent>
 
 namespace chiplet {
 
@@ -214,6 +216,25 @@ void MainWindow::setupPanels()
     // Central 3D view widget
     m_assemblyView = new AssemblyView(this);
     setCentralWidget(m_assemblyView);
+
+    // 3D top-down mini-map / navigator: a corner overlay child of the view so it
+    // composites on top of the QOpenGLWidget. MainWindow keeps it pinned to the
+    // corner (eventFilter on the view) and toggles it from the View menu. It
+    // rebuilds its floor-plan on content/selection changes and refreshes its
+    // camera marker on every camera move.
+    m_sceneMiniMap = new SceneMiniMap(m_assemblyView, m_assemblyView);
+    m_assemblyView->installEventFilter(this);
+    connect(m_assemblyView, &AssemblyView::overviewChanged, this, [this]() {
+        // Content (assembly/meshes) changed: rebuild the floor-plan, then decide
+        // whether the overlay should be shown (hidden on an empty scene).
+        if (m_sceneMiniMap) m_sceneMiniMap->onContentChanged();
+        updateSceneMiniMapVisibility();
+    });
+    connect(m_assemblyView, &AssemblyView::cameraChanged,
+            m_sceneMiniMap, &SceneMiniMap::onCameraChanged);
+    connect(m_assemblyView, &AssemblyView::selectionChanged,
+            m_sceneMiniMap, &SceneMiniMap::onContentChanged);
+    updateSceneMiniMapVisibility();
 
     // Connect signals
 
@@ -1261,6 +1282,17 @@ void MainWindow::setupFlowPanel()
     connect(toggleBasePlane, &QAction::toggled, m_assemblyView,
             &AssemblyView::setBasePlaneVisible);
     viewMenu->addAction(toggleBasePlane);
+
+    // Top-down mini-map toggle
+    QAction* toggleMiniMap = new QAction("3D Overview", this);
+    toggleMiniMap->setCheckable(true);
+    toggleMiniMap->setChecked(m_sceneMiniMapVisible);
+    toggleMiniMap->setShortcut(QKeySequence("Ctrl+M"));
+    connect(toggleMiniMap, &QAction::toggled, this, [this](bool on) {
+        m_sceneMiniMapVisible = on;
+        updateSceneMiniMapVisibility();
+    });
+    viewMenu->addAction(toggleMiniMap);
 }
 
 void MainWindow::setupNetGraphPanel()
@@ -1518,6 +1550,43 @@ bool MainWindow::detectAndSelectCells()
     }
 
     return anyChanges;
+}
+
+void MainWindow::positionSceneMiniMap()
+{
+    if (!m_sceneMiniMap || !m_assemblyView) {
+        return;
+    }
+    const int margin = 12;
+    const int x = m_assemblyView->width()  - m_sceneMiniMap->width()  - margin;
+    const int y = m_assemblyView->height() - m_sceneMiniMap->height() - margin;
+    m_sceneMiniMap->move(qMax(0, x), qMax(0, y));
+    m_sceneMiniMap->raise();
+}
+
+void MainWindow::updateSceneMiniMapVisibility()
+{
+    if (!m_sceneMiniMap) {
+        return;
+    }
+    // Shown only when enabled AND there is an assembly with geometry to navigate;
+    // an empty scene leaves the corner clean (matches the 2D navigator).
+    if (m_sceneMiniMapVisible && m_sceneMiniMap->hasContent()) {
+        positionSceneMiniMap();
+        m_sceneMiniMap->show();
+        m_sceneMiniMap->raise();
+    } else {
+        m_sceneMiniMap->hide();
+    }
+}
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    if (obj == m_assemblyView && m_sceneMiniMapVisible &&
+        (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+        positionSceneMiniMap();
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 } // namespace chiplet
