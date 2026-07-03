@@ -21,6 +21,7 @@
 #include <set>
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 
 namespace chiplet {
 
@@ -1478,6 +1479,32 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     ExtractionConfig config;
     config.max_polygons_per_layer = 10000;  // Limit for performance
     config.min_polygon_area = 0.1;  // Skip tiny polygons (0.1 um^2)
+
+    // Draw via/contact layers with their individual cuts, exempt from the area
+    // cull above. A via cut array (interposer Via4 = 0.19um cuts = 0.036 um^2)
+    // sits below min_polygon_area, so a normal extract would delete the whole
+    // M4<->M5 connector while the larger TopVia1/TopVia2 cuts survive -- the
+    // reported "M4 has no pillars to M5". The real cuts are drawn as-is (not
+    // fused) so the view stays faithful to the physical via array. Two
+    // mechanisms, both fed from the resolved stackup:
+    //   via_layers    proactive: classify connectors by name (contains "via"
+    //                 or "con" -- covers Via*/TopVia*/Cont/Contact/mcon/licon
+    //                 across the bundled PDKs).
+    //   modeled_layers backstop: every modeled layer. If min_polygon_area ever
+    //                 empties one the name rule missed, the extractor draws its
+    //                 cuts anyway, so no modeled connector can vanish whatever a
+    //                 future PDK names it.
+    for (const auto& elev : stackup.sortedLayers()) {
+        config.modeled_layers.insert(elev.key());
+        std::string ln = elev.name;
+        std::transform(ln.begin(), ln.end(), ln.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (ln.find("via") != std::string::npos ||
+            ln.find("con") != std::string::npos) {
+            config.via_layers.insert(elev.key());
+        }
+    }
+
     extractor.setConfig(config);
 
     // Pass the component's top_cell to extract from the correct cell

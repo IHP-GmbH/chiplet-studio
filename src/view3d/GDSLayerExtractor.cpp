@@ -137,6 +137,53 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         }
     }
 
+    // Draw a via/contact layer's INDIVIDUAL cuts, exempt from min_polygon_area.
+    // The cuts are sub-micron (interposer Via4 = 0.036 um^2) and would be culled
+    // by the area filter, dropping the whole connector. Emitting the real cuts
+    // (not a fused body) keeps the 3D view faithful to the physical via array --
+    // pillars, as fab builds them. Dense layers are skipped by count so a
+    // standard-cell die (~5e5 cuts per via layer) cannot stall load or swamp the
+    // view; those internal vias are not the targeted connector and drew nothing
+    // before this path existed.
+    auto emitViaCuts = [&](unsigned int layer_index, LayerPolygons& out) {
+        if (m_config.via_max_cuts > 0) {
+            // Pre-count with an early-out (bounded to cap+1 iterations).
+            size_t n = 0;
+            for (db::RecursiveShapeIterator ci(*layout, cell, layer_index);
+                 !ci.at_end(); ++ci) {
+                if (++n > m_config.via_max_cuts) break;
+            }
+            if (n > m_config.via_max_cuts) {
+                const db::LayerProperties& vp = layout->get_properties(layer_index);
+                qCInfo(lcGds) << "via layer" << vp.layer << "/" << vp.datatype
+                              << "skipped:" << (int)m_config.via_max_cuts
+                              << "+ cuts exceed the via cap; not drawn (as before)";
+                return;
+            }
+        }
+        // No bound needed here: the pre-count above already skipped layers
+        // over the cap, so a layer that reaches this loop draws all its cuts
+        // (or the cap is disabled -> via_max_cuts == 0 -> draw all).
+        for (db::RecursiveShapeIterator it(*layout, cell, layer_index);
+             !it.at_end(); ++it) {
+            const db::Shape& shape = it.shape();
+            if (!(shape.is_polygon() || shape.is_box() || shape.is_path())) {
+                continue;
+            }
+            db::Polygon db_poly;
+            shape.polygon(db_poly);
+            db_poly = db_poly.transformed(it.trans());
+            SimplePolygon poly;
+            poly.points.reserve(db_poly.hull().size());
+            for (const auto& pt : db_poly.hull()) {
+                poly.points.emplace_back(pt.x() * dbu, pt.y() * dbu);
+            }
+            if (poly.points.size() >= 3) {
+                out.polygons.push_back(std::move(poly));
+            }
+        }
+    };
+
     // Extract each layer
     for (unsigned int li : layer_indices) {
         const db::LayerProperties& lp = layout->get_properties(li);
@@ -146,16 +193,35 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         layer_data.key = key;
         layer_data.name = lp.name;
 
+        // Via/contact layers: draw the individual cuts (physical pillars),
+        // exempt from the area cull. Their cuts are sub-micron (interposer
+        // Via4 = 0.19um = 0.036 um^2) and fall below min_polygon_area, so a
+        // normal extract would delete the whole connector -- the M4<->M5
+        // "no pillars" bug. The caller marks these from the stackup by name
+        // (contains "via"/"con").
+        if (m_config.via_layers.count(key) > 0) {
+            emitViaCuts(li, layer_data);
+            if (!layer_data.polygons.empty()) {
+                result[key] = std::move(layer_data);
+                ++m_lastLayerCount;
+                m_lastPolygonCount += result[key].polygons.size();
+                m_lastPointCount += result[key].totalPoints();
+            }
+            continue;
+        }
+
         // Use recursive shape iterator to flatten hierarchy
         db::RecursiveShapeIterator shapes(*layout, cell, li);
 
         size_t poly_count = 0;
+        bool saw_shape = false;
 
         for (; !shapes.at_end() && poly_count < m_config.max_polygons_per_layer; ++shapes) {
             const db::Shape& shape = shapes.shape();
 
             // Convert shape to simple polygon
             if (shape.is_polygon() || shape.is_box() || shape.is_path()) {
+                saw_shape = true;
                 db::Polygon db_poly;
                 shape.polygon(db_poly);
 
@@ -185,6 +251,19 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
                 layer_data.polygons.push_back(std::move(poly));
                 ++poly_count;
             }
+        }
+
+        // Backstop: the area cull must never fully empty a real (stackup-
+        // modeled) layer. If a modeled layer had shapes but every one fell
+        // below min_polygon_area, it is a cut array the name rule did not
+        // recognize as a via (e.g. a PDK whose contact is named neither
+        // "via" nor "con"). Draw its cuts anyway, exactly like a via, so no
+        // modeled connector can silently vanish -- whatever the PDK names it.
+        // Non-modeled layers (fill/noise not in the stackup) keep the plain
+        // cull; they carry no z and would not render anyway.
+        if (saw_shape && layer_data.polygons.empty() &&
+            m_config.modeled_layers.count(key) > 0) {
+            emitViaCuts(li, layer_data);
         }
 
         if (!layer_data.polygons.empty()) {
