@@ -8,6 +8,7 @@
 #include "DrillDownPanel.h"
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
+#include "view2d/OverviewNavigator.h"
 
 #include <QLabel>
 #include <QComboBox>
@@ -22,6 +23,8 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QFile>
+#include <QTimer>
+#include <QEvent>
 
 namespace chiplet {
 
@@ -100,6 +103,13 @@ void DrillDownPanel::setupUI()
     m_hierToggle->setToolTip("Toggle hierarchy control panel");
     navLayout->addWidget(m_hierToggle);
 
+    m_overviewToggle = new QToolButton(navBar);
+    m_overviewToggle->setText("Overview");
+    m_overviewToggle->setCheckable(true);
+    m_overviewToggle->setChecked(true);
+    m_overviewToggle->setToolTip("Toggle overview navigator (corner mini-map)");
+    navLayout->addWidget(m_overviewToggle);
+
     mainLayout->addWidget(navBar);
 
     // -- Central area with splitter --
@@ -147,6 +157,24 @@ void DrillDownPanel::setupUI()
     // KLayout 2D View (center)
     m_view2d = new KLayout2DView(m_splitter);
     m_splitter->addWidget(m_view2d);
+
+    // Overview navigator: a corner mini-map overlaid on the 2D view. It is our
+    // own Qt child of m_view2d (NOT a reparented KLayout frame, which would
+    // crash) and is repositioned to the bottom-right corner via an event filter
+    // on resize. The thumbnail re-render is debounced so bursts of layer toggles
+    // or a load + cell change collapse into a single render.
+    m_overview = new OverviewNavigator(m_view2d, m_view2d);
+    m_overview->hide();
+    m_view2d->installEventFilter(this);
+
+    m_overviewRefreshTimer = new QTimer(this);
+    m_overviewRefreshTimer->setSingleShot(true);
+    m_overviewRefreshTimer->setInterval(120);
+    connect(m_overviewRefreshTimer, &QTimer::timeout, this, [this]() {
+        if (m_overview) {
+            m_overview->onContentChanged();
+        }
+    });
 
     // Hierarchy panel container (right sidebar)
     m_hierContainer = new QWidget(m_splitter);
@@ -200,15 +228,28 @@ void DrillDownPanel::setupUI()
     connect(m_hierToggle, &QToolButton::toggled,
             this, &DrillDownPanel::setHierarchyPanelVisible);
 
+    connect(m_overviewToggle, &QToolButton::toggled,
+            this, &DrillDownPanel::setOverviewVisible);
+
     connect(m_view2d, &KLayout2DView::positionChanged,
             this, &DrillDownPanel::onPositionChanged);
 
     connect(m_view2d, &KLayout2DView::layoutChanged,
             this, &DrillDownPanel::onLayoutChanged);
 
+    // Overview: the viewport rectangle tracks zoom/pan live (cheap repaint); the
+    // thumbnail only re-renders on content changes (below).
+    connect(m_view2d, &KLayout2DView::viewportChanged,
+            this, [this]() {
+                if (m_overview) {
+                    m_overview->onViewportChanged();
+                }
+            });
+
     connect(m_view2d, &KLayout2DView::cellChanged,
             this, [this](const QString& cellName) {
                 m_cellLabel->setText("Cell: " + cellName);
+                scheduleOverviewRefresh();
             });
 
     // Layer tree: checkbox toggling
@@ -226,6 +267,9 @@ void DrillDownPanel::setupUI()
     // Cell navigation in 2D -> component mapping for assembly mode
     connect(m_view2d, &KLayout2DView::cellNavigated,
             this, [this](const QString& cellName) {
+                // Descending into a cell changes the displayed extent -> refresh
+                // the overview regardless of mode.
+                scheduleOverviewRefresh();
                 if (m_panelMode != PanelMode::Assembly || !m_cellMapper) return;
                 QString compId = m_cellMapper->componentForCell(cellName);
                 if (!compId.isEmpty()) {
@@ -398,6 +442,64 @@ void DrillDownPanel::setHierarchyPanelVisible(bool visible)
     }
 }
 
+void DrillDownPanel::setOverviewVisible(bool visible)
+{
+    m_overviewVisible = visible;
+    if (m_overviewToggle && m_overviewToggle->isChecked() != visible) {
+        m_overviewToggle->setChecked(visible);
+    }
+    updateOverviewVisibility();
+    if (visible) {
+        scheduleOverviewRefresh();
+    }
+}
+
+void DrillDownPanel::positionOverview()
+{
+    if (!m_overview || !m_view2d) {
+        return;
+    }
+    const int margin = 12;
+    m_overview->move(m_view2d->width()  - m_overview->width()  - margin,
+                     m_view2d->height() - m_overview->height() - margin);
+    m_overview->raise();
+}
+
+void DrillDownPanel::updateOverviewVisibility()
+{
+    if (!m_overview || !m_view2d) {
+        return;
+    }
+    // Only meaningful with a real, loaded layout: hide it in the empty state and
+    // when there is no display (headless), where renderOverview yields nothing.
+    const bool show = m_overviewVisible
+                      && m_panelMode != PanelMode::Empty
+                      && m_view2d->isViewAvailable()
+                      && m_view2d->hasLayout();
+    if (show) {
+        positionOverview();
+        m_overview->show();
+        m_overview->raise();
+    } else {
+        m_overview->hide();
+    }
+}
+
+void DrillDownPanel::scheduleOverviewRefresh()
+{
+    if (m_overview && m_overviewVisible && m_overviewRefreshTimer) {
+        m_overviewRefreshTimer->start();
+    }
+}
+
+bool DrillDownPanel::eventFilter(QObject* obj, QEvent* event)
+{
+    if (obj == m_view2d && event->type() == QEvent::Resize) {
+        positionOverview();
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
 void DrillDownPanel::onCellComboChanged(int index)
 {
     if (m_blockCellCombo || index < 0) {
@@ -423,10 +525,13 @@ void DrillDownPanel::onLayoutChanged(bool hasLayout)
     if (hasLayout) {
         updateSidePanels();
         populateCellCombo();
+        updateOverviewVisibility();
+        scheduleOverviewRefresh();
     } else {
         m_cellCombo->clear();
         m_cellLabel->setText("");
         m_layerTree->clear();
+        updateOverviewVisibility();  // hides the overview (no layout)
     }
 }
 
@@ -440,6 +545,7 @@ void DrillDownPanel::onLayerItemChanged(QTreeWidgetItem* item, int column)
     int layerIndex = item->data(0, Qt::UserRole).toInt();
     bool visible = (item->checkState(0) == Qt::Checked);
     m_view2d->setLayerVisible(layerIndex, visible);
+    scheduleOverviewRefresh();  // layer visibility changes the thumbnail
 }
 
 void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
@@ -475,6 +581,7 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
                 it->setCheckState(0, (idx == layerIndex) ? Qt::Checked : Qt::Unchecked);
             }
             m_blockLayerSync = false;
+            scheduleOverviewRefresh();
         });
 
         menu.addSeparator();
@@ -488,6 +595,7 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
             m_layerTree->topLevelItem(i)->setCheckState(0, Qt::Checked);
         }
         m_blockLayerSync = false;
+        scheduleOverviewRefresh();
     });
 
     QAction* hideAllAction = menu.addAction("Hide All");
@@ -498,6 +606,7 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
             m_layerTree->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
         }
         m_blockLayerSync = false;
+        scheduleOverviewRefresh();
     });
 
     menu.exec(m_layerTree->viewport()->mapToGlobal(pos));

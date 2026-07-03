@@ -43,6 +43,7 @@ add_executable(chiplet_tests
     test_scripting.cpp
     test_tessellation.cpp
     test_via_cut_rendering.cpp
+    test_overview_navigator.cpp
     test_integration_final.cpp
     test_layer_stackup_blendergds.cpp
     test_flow_engine.cpp
@@ -105,6 +106,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayoutBridge.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayout2DView.cpp
+    ${CMAKE_SOURCE_DIR}/src/view2d/OverviewNavigator.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/EmbeddedDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/math/VECTOR3D.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/math/VECTOR4D.cpp

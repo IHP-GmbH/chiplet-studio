@@ -15,9 +15,12 @@
 #include <QString>
 #include <QStringList>
 #include <QColor>
+#include <QImage>
 #include <QVBoxLayout>
 #include <QVector>
 #include <memory>
+
+#include "ViewBox.h"
 
 // Forward declarations (avoid KLayout headers in our header)
 namespace lay {
@@ -155,6 +158,42 @@ public:
      */
     void setMaxHierLevels(int levels);
 
+    // -- Overview / navigator support --
+    //
+    // A small, KLayout-type-free surface the overview navigator (corner
+    // mini-map) drives. All KLayout types stay inside the .cpp; the navigator
+    // only ever sees ViewBox / QImage / doubles, which keeps it decoupled and
+    // the geometry math unit-testable.
+
+    /**
+     * @brief Full extent of the current layout in micrometers (invalid if none)
+     */
+    ViewBox fullBox() const;
+
+    /**
+     * @brief Current visible viewport in micrometers (invalid if no layout)
+     */
+    ViewBox visibleBox() const;
+
+    /**
+     * @brief Render the WHOLE layout to an overview thumbnail
+     *
+     * Uses KLayout's own renderer (faithful layer colors/styles) at the layout's
+     * aspect ratio, capped to fit within maxWidth x maxHeight. Returns a null
+     * image when no layout is loaded or the view is unavailable (headless).
+     */
+    QImage renderOverview(int maxWidth, int maxHeight) const;
+
+    /**
+     * @brief Zoom the view to the given box (micrometers)
+     */
+    void zoomToBox(const ViewBox& box);
+
+    /**
+     * @brief Recenter the view on a point (micrometers), keeping the zoom level
+     */
+    void centerOn(double xUm, double yUm);
+
 signals:
     /**
      * @brief Emitted when mouse position changes in layout coordinates
@@ -180,6 +219,14 @@ signals:
      */
     void cellNavigated(const QString& cellName);
 
+    /**
+     * @brief Emitted whenever the visible viewport changes (zoom/pan)
+     *
+     * Bridged from KLayout's viewport_changed_event. The overview navigator
+     * uses it to move its viewport rectangle without re-rendering the thumbnail.
+     */
+    void viewportChanged();
+
 private:
     void setupUI();
     void connectSignals();
@@ -193,6 +240,8 @@ private:
     lay::LayoutViewWidget* m_viewWidget = nullptr;
     class CellViewEventBridge;
     std::unique_ptr<CellViewEventBridge> m_cellViewBridge;
+    class ViewportEventBridge;
+    std::unique_ptr<ViewportEventBridge> m_viewportBridge;
 #endif
     QString m_currentPath;
     bool m_viewAvailable = false;
