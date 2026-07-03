@@ -13,6 +13,7 @@
 
 #include <vector>
 #include <map>
+#include <set>
 #include <string>
 #include "view2d/LayerProperties.h"
 
@@ -76,6 +77,34 @@ struct ExtractionConfig {
     bool merge_polygons = false;             // Merge touching polygons
     bool flatten_hierarchy = true;           // Flatten cell hierarchy
     double min_polygon_area = 0.0;           // Skip tiny polygons (um^2)
+
+    // Layers rendered with their INDIVIDUAL via cuts, exempt from
+    // min_polygon_area. A via cut array is sub-micron (interposer Via4 is 0.19um
+    // cuts = 0.036 um^2), below a sensible min_polygon_area, so a normal extract
+    // deletes the whole M4<->M5 connector while the larger TopVia1/TopVia2 cuts
+    // survive -- the "M4 has no pillars to M5" report. The real cuts are drawn
+    // as-is (NOT fused into a solid body): the 3D view then matches the physical
+    // via array -- individual pillars, as fab builds them. Keyed by GDS
+    // layer/datatype; the caller derives the set from the stackup (layer name
+    // contains "via"/"con").
+    std::set<LayerKey> via_layers;
+
+    // Upper bound on cuts a via layer may draw individually before it is
+    // skipped. An interposer RDL via layer is small (~1e4 cuts). A dense
+    // standard-cell die carries ~5e5 cuts per via layer; drawing every one would
+    // stall load and swamp the view, and those die internal vias are not the
+    // connector this targets, so skip them past the cap (logged, not silent).
+    // Keep <= LayerMeshBuilder's per-layer cap so a rendered via layer is not
+    // truncated downstream.
+    size_t via_max_cuts = 50000;
+
+    // All stackup-modeled layers (real PDK layers with a defined z). Backstop
+    // for via_layers: a name rule can never be complete across PDKs, so if a
+    // modeled layer is fully deleted by min_polygon_area, the extractor draws
+    // its cuts anyway. Guarantees no modeled connector silently vanishes
+    // regardless of naming (e.g. sky130 mcon/licon, gf180 Contact). Empty =
+    // no backstop (name rule only).
+    std::set<LayerKey> modeled_layers;
 };
 
 /**

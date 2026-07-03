@@ -42,6 +42,7 @@ add_executable(chiplet_tests
     test_stackup_rendering.cpp
     test_scripting.cpp
     test_tessellation.cpp
+    test_via_cut_rendering.cpp
     test_integration_final.cpp
     test_layer_stackup_blendergds.cpp
     test_flow_engine.cpp
