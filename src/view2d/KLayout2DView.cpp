@@ -21,9 +21,14 @@
 #include "layParsedLayerSource.h"
 #include "layCellView.h"
 #include "dbLayout.h"
+#include "dbBox.h"
+#include "dbPoint.h"
 #include "dbLoadLayoutOptions.h"
+#include "tlColor.h"
 #include "tlException.h"
 #include "tlObject.h"
+#include <algorithm>
+#include <cmath>
 #endif
 
 namespace chiplet {
@@ -42,6 +47,19 @@ public:
 private:
     KLayout2DView* m_parent;
 };
+
+// Bridges KLayout's viewport_changed_event (a no-arg tl::Event) to the Qt
+// viewportChanged() signal. Same lifetime rule as CellViewEventBridge: reset
+// before the view widget so the event subscription never dangles.
+class KLayout2DView::ViewportEventBridge : public tl::Object {
+public:
+    ViewportEventBridge(KLayout2DView* parent) : m_parent(parent) {}
+    void on_viewport_changed() {
+        emit m_parent->viewportChanged();
+    }
+private:
+    KLayout2DView* m_parent;
+};
 #endif
 
 KLayout2DView::KLayout2DView(QWidget* parent)
@@ -53,8 +71,9 @@ KLayout2DView::KLayout2DView(QWidget* parent)
 KLayout2DView::~KLayout2DView()
 {
 #ifdef HAVE_KLAYOUT
-    // Destroy bridge before view widget to avoid dangling event subscriptions
+    // Destroy bridges before view widget to avoid dangling event subscriptions
     m_cellViewBridge.reset();
+    m_viewportBridge.reset();
 #endif
 }
 
@@ -178,6 +197,12 @@ void KLayout2DView::connectSignals()
         m_cellViewBridge = std::make_unique<CellViewEventBridge>(this);
         view->cellview_changed_event.add(m_cellViewBridge.get(),
             &CellViewEventBridge::on_cellview_changed);
+
+        // Subscribe to viewport_changed_event so the overview navigator can
+        // track zoom/pan.
+        m_viewportBridge = std::make_unique<ViewportEventBridge>(this);
+        view->viewport_changed_event.add(m_viewportBridge.get(),
+            &ViewportEventBridge::on_viewport_changed);
     }
 #endif
 }
@@ -569,6 +594,152 @@ QVector<LayerInfo> KLayout2DView::layerInfos() const
     }
 #endif
     return result;
+}
+
+ViewBox KLayout2DView::fullBox() const
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return {};
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (view->cellviews() == 0) {
+            return {};
+        }
+        db::DBox b = view->full_box();
+        if (b.empty()) {
+            return {};
+        }
+        return ViewBox{ b.left(), b.bottom(), b.right(), b.top() };
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::fullBox failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::fullBox failed: %s", e.what());
+    }
+#endif
+    return {};
+}
+
+ViewBox KLayout2DView::visibleBox() const
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return {};
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (view->cellviews() == 0) {
+            return {};
+        }
+        db::DBox b = view->box();
+        if (b.empty()) {
+            return {};
+        }
+        return ViewBox{ b.left(), b.bottom(), b.right(), b.top() };
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::visibleBox failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::visibleBox failed: %s", e.what());
+    }
+#endif
+    return {};
+}
+
+QImage KLayout2DView::renderOverview(int maxWidth, int maxHeight) const
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return {};
+    }
+    if (maxWidth <= 0 || maxHeight <= 0) {
+        return {};
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (view->cellviews() == 0) {
+            return {};
+        }
+        db::DBox fb = view->full_box();
+        if (fb.empty()) {
+            return {};
+        }
+
+        // Size the image to the layout aspect ratio so the thumbnail maps 1:1
+        // onto full_box (KLayout would otherwise letterbox internally, and the
+        // overview's viewport rectangle would no longer align). The overview
+        // widget does the letterboxing itself via OverviewTransform.
+        const double bw = fb.width();
+        const double bh = fb.height();
+        int w = maxWidth;
+        int h = maxHeight;
+        if (bw * maxHeight > bh * maxWidth) {
+            // box wider than the area: width-bound, shrink height
+            h = std::max(1, static_cast<int>(std::lround(maxWidth * bh / bw)));
+        } else {
+            // box taller than the area: height-bound, shrink width
+            w = std::max(1, static_cast<int>(std::lround(maxHeight * bw / bh)));
+        }
+
+        // 0 / invalid arguments make KLayout reuse the view's own oversampling,
+        // resolution and colors; oversampling 2 gives a crisp anti-aliased
+        // thumbnail. target_box = full_box() renders the WHOLE layout.
+        return view->get_image_with_options(
+            static_cast<unsigned int>(w), static_cast<unsigned int>(h),
+            0,            // linewidth (auto)
+            2,            // oversampling
+            0.0, 0.0,     // resolution, font_resolution (auto)
+            tl::Color(), tl::Color(), tl::Color(),  // background/foreground/active = view's
+            fb,           // target box = full layout extent
+            false);       // color (not monochrome)
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::renderOverview failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::renderOverview failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(maxWidth);
+    Q_UNUSED(maxHeight);
+#endif
+    return {};
+}
+
+void KLayout2DView::zoomToBox(const ViewBox& box)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view() || !box.valid()) {
+        return;
+    }
+    try {
+        m_viewWidget->view()->zoom_box(
+            db::DBox(box.xmin, box.ymin, box.xmax, box.ymax));
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::zoomToBox failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::zoomToBox failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(box);
+#endif
+}
+
+void KLayout2DView::centerOn(double xUm, double yUm)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return;
+    }
+    try {
+        m_viewWidget->view()->pan_center(db::DPoint(xUm, yUm));
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::centerOn failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::centerOn failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(xUm);
+    Q_UNUSED(yUm);
+#endif
 }
 
 } // namespace chiplet

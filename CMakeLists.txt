@@ -164,6 +164,7 @@ set(VIEW2D_SOURCES
     src/view2d/KLayout2DView.cpp
     src/view2d/EmbeddedDispatcher.cpp
     src/view2d/CellComponentMapper.cpp
+    src/view2d/OverviewNavigator.cpp
 )
 
 set(UI_SOURCES

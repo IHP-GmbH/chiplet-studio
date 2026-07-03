@@ -25,12 +25,15 @@ class QSplitter;
 class QLineEdit;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QTimer;
+class QEvent;
 
 namespace chiplet {
 
 class Assembly;
 class KLayout2DView;
 class CellComponentMapper;
+class OverviewNavigator;
 
 /**
  * DrillDownPanel provides a complete 2D drill-down interface.
@@ -132,6 +135,16 @@ public slots:
     void setLayerPanelVisible(bool visible);
     void setHierarchyPanelVisible(bool visible);
 
+    /**
+     * @brief Show or hide the overview navigator (corner mini-map)
+     */
+    void setOverviewVisible(bool visible);
+
+    /**
+     * @brief Whether the overview navigator is enabled by the user
+     */
+    bool isOverviewVisible() const { return m_overviewVisible; }
+
 signals:
     /**
      * @brief User clicked the Back button
@@ -156,11 +169,19 @@ private slots:
     void onLayerContextMenu(const QPoint& pos);
     void onLayerFilterChanged(const QString& text);
 
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
+
 private:
     void setupUI();
     void updateSidePanels();
     void populateCellCombo();
     void populateLayerList();
+
+    // Overview navigator (corner mini-map)
+    void positionOverview();          // pin to the 2D view's bottom-right corner
+    void updateOverviewVisibility();  // show only with a layout + toggle on
+    void scheduleOverviewRefresh();   // debounced thumbnail re-render
 
     // Nav bar
     QPushButton* m_backButton = nullptr;
@@ -169,9 +190,15 @@ private:
     QComboBox* m_cellCombo = nullptr;
     QToolButton* m_layerToggle = nullptr;
     QToolButton* m_hierToggle = nullptr;
+    QToolButton* m_overviewToggle = nullptr;
 
     // Central
     KLayout2DView* m_view2d = nullptr;
+
+    // Overview navigator (corner mini-map, child overlay of m_view2d)
+    OverviewNavigator* m_overview = nullptr;
+    QTimer* m_overviewRefreshTimer = nullptr;
+    bool m_overviewVisible = true;
 
     // Side panels
     QWidget* m_layerContainer = nullptr;
