@@ -7,6 +7,11 @@ It reads the `.chiplet` interchange format, shows the assembly in an interactive
 pipeline, inspect connectivity, and automate everything from an embedded Python
 console.
 
+## Status
+
+> [!WARNING]
+> Chiplet Studio is currently a preview release only!
+
 ## Features
 
 - **3D Visualization** - Interactive assembly view with orbit camera and per-component render modes
