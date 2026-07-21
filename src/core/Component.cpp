@@ -147,6 +147,16 @@ const Component::dimensions_type& Component::dimensions() const
     return m_dimensions;
 }
 
+const std::optional<double>& Component::attachment_surface_z() const
+{
+    return m_attachmentSurfaceZ;
+}
+
+void Component::set_attachment_surface_z(const std::optional<double>& z)
+{
+    m_attachmentSurfaceZ = z;
+}
+
 void Component::set_array(const array_type& array)
 {
     m_array = array;

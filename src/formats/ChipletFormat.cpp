@@ -266,6 +266,10 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
             component->set_dimensions(dims);
         }
 
+        // Interposer die-attachment surface (component-level, optional).
+        // Absent => nullopt; Assembly falls back to dimensions.thickness.
+        component->set_attachment_surface_z(c.attachment_surface_z);
+
         if (c.array.has_value()) {
             const auto& la = c.array.value();
             ComponentArray arr;
@@ -704,6 +708,13 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::Key << "height" << YAML::Value << dims.height;
                 out << YAML::Key << "thickness" << YAML::Value << dims.thickness;
                 out << YAML::EndMap;
+            }
+
+            // Interposer die-attachment surface (component-level). Emitted only
+            // when present so files without it round-trip unchanged.
+            if (comp->attachment_surface_z()) {
+                out << YAML::Key << "attachment_surface_z" << YAML::Value
+                    << comp->attachment_surface_z().value();
             }
 
             // Array configuration

@@ -802,6 +802,43 @@ TEST(ChipletFormat, AnchorAlwaysSerializedEvenIfDefaulted)
     std::filesystem::remove(tempPath);
 }
 
+// The optional component-level attachment_surface_z survives a save/load round
+// trip, dimensions.thickness stays an independent physical body, and a
+// component that never declared the field round-trips as absent (nullopt).
+TEST(ChipletFormat, AttachmentSurfaceZRoundTrip)
+{
+    Assembly assembly;
+    assembly.set_name("AttachmentSurfaceZTest");
+    auto interposer = std::make_unique<Component>("interposer", ComponentType::Interposer);
+    interposer->set_dimensions({1000, 1000, 300.0});
+    interposer->set_attachment_surface_z(13.83);
+    assembly.add_component(std::move(interposer));
+
+    auto die = std::make_unique<Component>("U1", ComponentType::Die);
+    die->set_dimensions({500, 500, 50});
+    assembly.add_component(std::move(die));
+
+    std::string tempPath = "test_attachment_surface_z_roundtrip.chiplet";
+    ChipletFormat format;
+    EXPECT_NO_THROW(format.save(assembly, tempPath));
+
+    ChipletFormat format2;
+    auto loaded = format2.load(tempPath);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* interp = loaded->component("interposer");
+    ASSERT_NE(interp, nullptr);
+    ASSERT_TRUE(interp->attachment_surface_z().has_value());
+    EXPECT_NEAR(interp->attachment_surface_z().value(), 13.83, 1e-6);
+    EXPECT_NEAR(interp->dimensions().thickness, 300.0, 1e-6);  // body, untouched
+
+    auto* u1 = loaded->component("U1");
+    ASSERT_NE(u1, nullptr);
+    EXPECT_FALSE(u1->attachment_surface_z().has_value());
+
+    std::filesystem::remove(tempPath);
+}
+
 TEST(ChipletFormat, MetadataFinalizeRequiredRejected)
 {
     // Files marked with `_metadata.finalize_required: true` must be
@@ -859,6 +896,27 @@ TEST(Assembly, CalculateZFallsBackWhenConnectionStackUndefined)
 
     double z = assembly.calculate_component_z("die_undefined_stack");
     EXPECT_NEAR(z, 13.83, 1e-6);
+}
+
+// Component-level attachment_surface_z (the interposer die-attachment surface,
+// decoupled from the physical body) wins over dimensions.thickness in the
+// fallback mount computation. The two legacy tests above -- no
+// attachment_surface_z set -- keep the thickness-as-mount behavior.
+TEST(Assembly, CalculateZPrefersAttachmentSurfaceZOverThickness)
+{
+    Assembly assembly;
+    auto interposer = std::make_unique<Component>("interp", ComponentType::Interposer);
+    interposer->set_dimensions({1000, 1000, 300.0});  // physical body
+    interposer->set_attachment_surface_z(13.83);      // die-attachment surface
+    assembly.add_component(std::move(interposer));
+
+    auto die = std::make_unique<Component>("die_no_connection", ComponentType::Die);
+    die->set_dimensions({500, 500, 50});
+    // No connection stack -> fallback path. It must mount on the attachment
+    // surface (13.83), not the 300 um physical thickness.
+    assembly.add_component(std::move(die));
+
+    EXPECT_NEAR(assembly.calculate_component_z("die_no_connection"), 13.83, 1e-6);
 }
 
 TEST(Assembly, CalculateZReturnsZeroForUnknownComponent)
