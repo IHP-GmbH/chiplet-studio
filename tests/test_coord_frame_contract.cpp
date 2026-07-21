@@ -330,7 +330,12 @@ TEST_F(CoordFrameContractWirebondDemo, InterposerPosition)
     EXPECT_NEAR(interposer->position().z,    0.00, 0.01);
     EXPECT_NEAR(interposer->dimensions().width,  6492.31, 0.1);
     EXPECT_NEAR(interposer->dimensions().height, 5602.00, 0.1);
-    EXPECT_NEAR(interposer->dimensions().thickness, 13.83, 0.01);
+    // thickness is the interposer physical body (board GetBoardThickness, now
+    // 300 um after the demo stackup fix); the die-attachment surface is the
+    // separate component-level attachment_surface_z (13.83).
+    EXPECT_NEAR(interposer->dimensions().thickness, 300.0, 0.01);
+    ASSERT_TRUE(interposer->attachment_surface_z().has_value());
+    EXPECT_NEAR(interposer->attachment_surface_z().value(), 13.83, 0.01);
 }
 
 // Pre-Gate-3 the io_pads pass-through left them in HYP-absolute
