@@ -65,3 +65,16 @@ re-sync, one upstream change is applied here surgically:
   The `TechDef.stackup` removal and the `orientation` comment reword from that
   commit were intentionally left out. Re-fold these when doing the next full
   re-sync.
+
+## Handoff: the full re-sync is owned by another team
+
+The full re-vendor described above (adopt the current chiplet-spec HEAD, which
+drops the `TechDef.stackup` field, and re-fold the `attachment_surface_z`
+cherry-pick into a clean copy) is **intentionally deferred and handed off**. It
+is *not* a drop-in file copy: it is coupled to migrating the host off
+`TechDef.stackup` (still read by `Assembly.cpp` / `stackup_path()`), which must
+land first. Another development team will pick this up when that
+`TechDef.stackup` migration is scheduled. Until then, keep fixing format bugs
+upstream in `chiplet-spec` and applying them here as *surgical* cherry-picks (as
+was done for `attachment_surface_z`), never as a partial re-sync that would drag
+in the `TechDef.stackup` removal and break the build.
