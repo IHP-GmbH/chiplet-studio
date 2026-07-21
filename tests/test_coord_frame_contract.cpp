@@ -165,7 +165,11 @@ TEST_F(CoordFrameContractSynth, Dimensions)
     ASSERT_NE(interposer, nullptr);
     EXPECT_DOUBLE_EQ(interposer->dimensions().width, 1000.0);
     EXPECT_DOUBLE_EQ(interposer->dimensions().height, 1000.0);
-    EXPECT_DOUBLE_EQ(interposer->dimensions().thickness, 13.83);
+    // thickness is now the physical body; the die-attachment surface is a
+    // separate component-level field.
+    EXPECT_DOUBLE_EQ(interposer->dimensions().thickness, 300.0);
+    ASSERT_TRUE(interposer->attachment_surface_z().has_value());
+    EXPECT_DOUBLE_EQ(interposer->attachment_surface_z().value(), 13.83);
 
     for (const char* id : {"U_A", "U_B"}) {
         auto* die = assembly->component(id);

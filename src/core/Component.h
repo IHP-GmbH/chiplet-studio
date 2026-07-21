@@ -164,6 +164,14 @@ public:
     void set_dimensions(const dimensions_type& dims);
     const dimensions_type& dimensions() const;
 
+    // Interposer die-attachment (BEOL-top) surface z. std::nullopt when the
+    // .chiplet omits it; consumers then fall back to dimensions().thickness as
+    // the mount reference (legacy files). When present, dimensions().thickness
+    // is the physical body z-extent, decoupled from the mount plane.
+    // See coord_frame_contract.md §3.2 / §3.4 / §5.5.
+    const std::optional<double>& attachment_surface_z() const;
+    void set_attachment_surface_z(const std::optional<double>& z);
+
     // Array configuration (for DieArray type)
     void set_array(const array_type& array);
     const std::optional<array_type>& array() const;
@@ -212,6 +220,7 @@ private:
     position_type m_position;
     rotation_type m_rotation;
     dimensions_type m_dimensions;
+    std::optional<double> m_attachmentSurfaceZ;
     std::optional<array_type> m_array;
     metadata_type m_metadata;
     RenderMode m_renderMode;

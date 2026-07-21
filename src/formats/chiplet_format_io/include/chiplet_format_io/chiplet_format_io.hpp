@@ -146,6 +146,11 @@ struct Component {
     // consumer validates the value and owns the "missing anchor" warning.
     std::optional<std::string> anchor;
     Dimensions3D dimensions;
+    // Optional interposer die-attachment surface z (component-level). See
+    // coord_frame_contract.md 3.2 / 3.4. std::nullopt => consumers fall back
+    // to dimensions.thickness as the mount reference (legacy files); when
+    // present, dimensions.thickness is the physical body z-extent.
+    std::optional<double> attachment_surface_z;
     std::optional<ComponentArray> array;
     // Insertion-ordered key/value metadata.
     std::vector<std::pair<std::string, std::string>> metadata;

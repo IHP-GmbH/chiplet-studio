@@ -49,3 +49,19 @@ tests.
 
 Vendoring an Apache-2.0 library into this GPL-3.0-or-later project is
 license-compatible; the copied files keep their own Apache-2.0 SPDX headers.
+
+## Local cherry-picks on top of the vendored commit
+
+The base is still `1a56f61c` (above). A **full** re-sync to the current
+chiplet-spec HEAD is deliberately *not* done yet, because HEAD also removes the
+`TechDef.stackup` field, which this host still reads (`Assembly.cpp`,
+`stackup_path()`); adopting that is a separate change. Until the next full
+re-sync, one upstream change is applied here surgically:
+
+- **`attachment_surface_z`** (optional interposer die-attachment surface,
+  component-level), from chiplet-spec `c74bc5d`. Applied hunks: the
+  `std::optional<double> attachment_surface_z` member on `Component`, its parse
+  (after `dimensions`) and its write (after the `dimensions` map, when engaged).
+  The `TechDef.stackup` removal and the `orientation` comment reword from that
+  commit were intentionally left out. Re-fold these when doing the next full
+  re-sync.

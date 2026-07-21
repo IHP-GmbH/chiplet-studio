@@ -17,7 +17,10 @@ components:
   - id: interposer
     type: interposer
     anchor: bbox_center
-    dimensions: {width: 1000, height: 1000, thickness: 13.83}
+    # thickness = physical silicon body; attachment_surface_z = the BEOL-top
+    # die-attachment (mount) surface, decoupled from the body.
+    dimensions: {width: 1000, height: 1000, thickness: 300.0}
+    attachment_surface_z: 13.83
     position: {x: 500, y: 500, z: 0}
     io_pads:
       - id: P_BL

@@ -409,7 +409,12 @@ double Assembly::calculate_component_z(const ComponentID& id) const
     if (!mounting_surface_found) {
         for (const auto& c : m_components) {
             if (c->type() == ComponentType::Interposer) {
-                mounting_surface = c->dimensions().thickness;
+                // Mount reference = the interposer's declared die-attachment
+                // surface z when present; otherwise dimensions.thickness, which
+                // in legacy files encoded that surface (now the physical body).
+                // Contract §3.4 collapses both onto the same formula.
+                mounting_surface = c->attachment_surface_z().value_or(
+                    c->dimensions().thickness);
                 break;
             }
         }
