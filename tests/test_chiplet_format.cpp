@@ -3,9 +3,13 @@
  */
 
 #include <gtest/gtest.h>
+#include <QtGlobal>
+#include <QString>
 #include <filesystem>
 #include <cstdlib>
 #include <fstream>
+#include <string>
+#include <vector>
 #include <yaml-cpp/yaml.h>
 #include "formats/ChipletFormat.h"
 #include "core/LayerStackup.h"
@@ -561,6 +565,99 @@ TEST(ChipletFormat, OrientationRoundTrip)
     EXPECT_EQ(normal->orientation(), Orientation::FaceUp);
 
     std::filesystem::remove(tempPath);
+}
+
+// ---------------------------------------------------------------------
+// Orientation vocabulary: the frame contract defines only face_up and
+// flip_chip. The reader is a lenient viewer -- it keeps rendering -- but must
+// never be SILENT: a non-canonical face_down aliases to flip_chip WITH a
+// warning, and any unknown token stays at the face_up default WITH a warning
+// (rather than silently rendering un-mirrored). Uses a scoped qWarning capture.
+// ---------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::string>* g_captured_msgs = nullptr;
+
+void captureHandler(QtMsgType, const QMessageLogContext&, const QString& msg)
+{
+    if (g_captured_msgs) {
+        g_captured_msgs->push_back(msg.toStdString());
+    }
+}
+
+// Load a one-die assembly with the given orientation token, capturing warnings.
+std::unique_ptr<Assembly> loadWithOrientation(
+    const std::string& token, std::vector<std::string>& out_warnings)
+{
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "chiplet_orientation";
+    fs::remove_all(base);
+    fs::create_directories(base);
+    const fs::path file = base / "orient.chiplet";
+    {
+        std::ofstream out(file);
+        out << "format_version: \"1.0\"\n"
+            << "assembly:\n"
+            << "  name: \"Orient\"\n"
+            << "  units: \"um\"\n"
+            << "components:\n"
+            << "  - id: die0\n"
+            << "    type: die\n"
+            << "    orientation: " << token << "\n"
+            << "    dimensions: { width: 1000, height: 1000, thickness: 100 }\n";
+    }
+    g_captured_msgs = &out_warnings;
+    QtMessageHandler prev = qInstallMessageHandler(captureHandler);
+    ChipletFormat format;
+    auto assembly = format.load(file.string());
+    qInstallMessageHandler(prev);
+    g_captured_msgs = nullptr;
+    fs::remove_all(base);
+    return assembly;
+}
+
+bool anyContains(const std::vector<std::string>& msgs, const std::string& needle)
+{
+    for (const auto& m : msgs) {
+        if (m.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(ChipletFormat, OrientationFaceDownWarnsAndAliasesToFlipChip)
+{
+    std::vector<std::string> warnings;
+    auto assembly = loadWithOrientation("face_down", warnings);
+    ASSERT_NE(assembly, nullptr);
+    auto* die = assembly->component("die0");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->orientation(), Orientation::FaceDown);  // still renders flipped
+    EXPECT_TRUE(anyContains(warnings, "face_down"));       // but never silent
+}
+
+TEST(ChipletFormat, OrientationUnknownTokenWarnsAndDefaultsFaceUp)
+{
+    std::vector<std::string> warnings;
+    auto assembly = loadWithOrientation("flip-chip", warnings);  // typo
+    ASSERT_NE(assembly, nullptr);
+    auto* die = assembly->component("die0");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->orientation(), Orientation::FaceUp);   // not silently mirrored
+    EXPECT_TRUE(anyContains(warnings, "flip-chip"));
+}
+
+TEST(ChipletFormat, OrientationFlipChipIsSilent)
+{
+    std::vector<std::string> warnings;
+    auto assembly = loadWithOrientation("flip_chip", warnings);
+    ASSERT_NE(assembly, nullptr);
+    auto* die = assembly->component("die0");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->orientation(), Orientation::FaceDown);
+    EXPECT_FALSE(anyContains(warnings, "orientation"));  // canonical: no warning
 }
 
 // ---------------------------------------------------------------------

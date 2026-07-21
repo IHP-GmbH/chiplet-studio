@@ -206,10 +206,23 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
             component->set_rotation(rot);
         }
 
-        // Orientation (face-up default; flip_chip/face_down -> FaceDown). Render
-        // mode stays at the constructor default regardless of orientation.
-        if (c.orientation == "flip_chip" || c.orientation == "face_down") {
+        // Orientation. The frame contract defines only face_up (default) and
+        // flip_chip; face_down is a non-canonical alias kept working but warned,
+        // and any other token warns and stays at the FaceUp default instead of
+        // silently rendering un-mirrored. Render mode stays at the constructor
+        // default regardless of orientation. Mirrors the unknown-anchor warning
+        // below so a lenient viewer is forgiving but never silent.
+        if (c.orientation == "flip_chip") {
             component->set_orientation(Orientation::FaceDown);
+        } else if (c.orientation == "face_down") {
+            qWarning("[chiplet] component '%s': orientation 'face_down' is not a "
+                     "canonical token (use 'flip_chip'); treating as flip_chip",
+                     c.id.c_str());
+            component->set_orientation(Orientation::FaceDown);
+        } else if (!c.orientation.empty() && c.orientation != "face_up") {
+            qWarning("[chiplet] component '%s': unknown orientation '%s' "
+                     "(expected face_up or flip_chip); treating as face_up",
+                     c.id.c_str(), c.orientation.c_str());
         }
 
         // Anchor convention (coord_frame_contract.md §2). Present-and-valid sets

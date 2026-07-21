@@ -54,11 +54,13 @@ enum class RenderMode {
 };
 
 /**
- * Die orientation (face-up for wirebond, face-down for flip-chip)
+ * Die orientation (face-up for wirebond, face-down for flip-chip).
+ * This is the internal render enum; the canonical .chiplet YAML token for
+ * FaceDown is `flip_chip` (see coord_frame_contract.md 2.4), not `face_down`.
  */
 enum class Orientation {
-    FaceUp,    // Default: die face up (wirebond)
-    FaceDown   // Flip-chip: die face down, mirror X
+    FaceUp,    // Default: die face up (wirebond); YAML "face_up"
+    FaceDown   // Flip-chip: die face down, mirror X; YAML "flip_chip"
 };
 
 /**
