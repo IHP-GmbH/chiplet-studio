@@ -180,6 +180,51 @@ TEST_F(CoordFrameContractSynth, Dimensions)
     }
 }
 
+// Box/Trans-mode vertical anchoring, implemented by
+// MeshBuilder::anchoredOffsetY (src/view3d/MeshBuilder.cpp). Restated here by
+// hand -- like componentWorldPosition above -- so the contract is asserted
+// against literal expected extents without linking the GL-adjacent MeshBuilder
+// into this test. A box is NOT centered on position.z: a die/substrate is
+// bottom-anchored (bottom face at position.z, grows up); an interposer that
+// declares attachment_surface_z is top-anchored (top face at that surface, body
+// hangs down). Regression guard for the f077122 thickness-semantics flip that
+// made the old center-on-position.z bug sink dies through the interposer.
+struct BoxYExtents { double bottom_mm; double top_mm; };
+static BoxYExtents boxYExtents(const Component& c)
+{
+    const double t_mm = c.dimensions().thickness / 1000.0;
+    if (c.type() == ComponentType::Interposer && c.attachment_surface_z()) {
+        const double top = c.attachment_surface_z().value() / 1000.0;
+        return {top - t_mm, top};
+    }
+    const double bottom = c.position().z / 1000.0;
+    return {bottom, bottom + t_mm};
+}
+
+TEST_F(CoordFrameContractSynth, BoxModeVerticalAnchoring)
+{
+    // Interposer (thickness 300 um, attachment_surface_z 13.83 um): body hangs
+    // below the attach surface, top face exactly at the surface -- never rising
+    // into the dies.
+    auto* interposer = assembly->component("interposer");
+    ASSERT_NE(interposer, nullptr);
+    BoxYExtents ip = boxYExtents(*interposer);
+    EXPECT_FLOAT_EQ(static_cast<float>(ip.top_mm), 0.01383f);      // 13.83 um attach surface
+    EXPECT_FLOAT_EQ(static_cast<float>(ip.bottom_mm), -0.28617f);  // 13.83 - 300 um
+
+    // Dies (pos.z 50 um, thickness 50 um): bottom face seats on the standoff at
+    // pos.z, box grows upward -- above the interposer, no overlap.
+    for (const char* id : {"U_A", "U_B"}) {
+        auto* die = assembly->component(id);
+        ASSERT_NE(die, nullptr) << id;
+        BoxYExtents d = boxYExtents(*die);
+        EXPECT_FLOAT_EQ(static_cast<float>(d.bottom_mm), 0.05f) << id;  // pos.z
+        EXPECT_FLOAT_EQ(static_cast<float>(d.top_mm), 0.10f) << id;     // pos.z + thickness
+        // The die bottom is at/above the interposer top face: no interpenetration.
+        EXPECT_GE(d.bottom_mm, boxYExtents(*interposer).top_mm) << id;
+    }
+}
+
 TEST_F(CoordFrameContractSynth, IOPadsParsedAtCorners)
 {
     auto* interposer = assembly->component("interposer");

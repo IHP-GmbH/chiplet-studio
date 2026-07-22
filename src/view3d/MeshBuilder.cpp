@@ -56,7 +56,7 @@ ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp,
     float d = static_cast<float>(dims.thickness / 1000.0);
     const ScenePosition scenePos = sceneFromChiplet(pos);
     float x = scenePos.x;
-    float y = scenePos.y;   // Chiplet Z elevation -> 3D Y (vertical)
+    float y = anchoredOffsetY(comp, scenePos.y, d);  // stack-anchored elevation (bottom-anchored die/substrate, top-anchored interposer)
     float z = scenePos.z;   // Chiplet Y -> 3D -Z (horizontal, negated for correct orientation)
 
     // Build box with dimensions: (width, thickness, height) for (3D X, 3D Y, 3D Z)
@@ -154,6 +154,30 @@ ComponentMesh MeshBuilder::buildBox(float width, float height, float depth,
     mesh.setIndices(indices);
 
     return mesh;
+}
+
+float MeshBuilder::anchoredOffsetY(const Component& comp,
+                                    float baseSceneY, float depthMm)
+{
+    const float halfDepth = depthMm * 0.5f;
+
+    // Interposer body hangs DOWN from its die-attach (BEOL-top) surface when the
+    // .chiplet declares one: the top face lands at attachment_surface_z, so the
+    // box center sits half a body-thickness below it. position.z is not the
+    // mount reference here -- thickness is the physical silicon body, decoupled
+    // from the mount plane (see coord_frame_contract.md).
+    if (comp.type() == ComponentType::Interposer) {
+        const std::optional<double>& surfaceZ = comp.attachment_surface_z();
+        if (surfaceZ.has_value()) {
+            return static_cast<float>(*surfaceZ * kUmToMm) - halfDepth;
+        }
+    }
+
+    // Everything else (dies, die arrays, substrate, and a legacy interposer with
+    // no declared surface) is BOTTOM-anchored: bottom face at position.z
+    // (baseSceneY), box grows upward. Matches the pos.z-is-bottom convention
+    // already used by getComponentCenter() and the camera-fit fallback.
+    return baseSceneY + halfDepth;
 }
 
 ComponentMesh MeshBuilder::buildPlaneMesh(float size, float centerX, float centerZ, float y)

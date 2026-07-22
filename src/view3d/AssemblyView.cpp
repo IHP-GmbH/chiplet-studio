@@ -753,11 +753,14 @@ void AssemblyView::buildMeshes()
             // LayerMode centers each mesh on its own GDS bbox center so that
             // .chiplet position consistently means "where the component's center
             // sits in assembly space". BoxMode follows the same convention here.
-            // buildBox() centers along X and Y but treats offsetZ as the +Z face,
-            // so add h/2 to land the box centered on -pos.y in 3D Z.
+            // buildBox() centers along X and treats offsetZ as the +Z face, so add
+            // h/2 for the horizontal Z. The vertical (Y) is stack-anchored so the
+            // box seats on the physical stack instead of centering on position.z:
+            // bottom-anchored for a die, top-anchored at the interposer's attach
+            // surface (see MeshBuilder::anchoredOffsetY).
             const ScenePosition scenePos = sceneFromChiplet(pos);
             float offsetX = scenePos.x;
-            float offsetY = scenePos.y;     // Elevation
+            float offsetY = MeshBuilder::anchoredOffsetY(*comp, scenePos.y, d);  // stack-anchored elevation
             float offsetZ = scenePos.z + h / 2.0f;
 
             mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
@@ -1184,7 +1187,15 @@ VECTOR3D AssemblyView::getComponentCenter(const QString& id) const
     center.y = pos.y + dims.height / 2.0;
     center.z = pos.z + dims.thickness / 2.0;
     const ScenePosition scenePos = sceneFromChiplet(center);
-    return VECTOR3D(scenePos.x, scenePos.y, scenePos.z);
+    // The vertical (elevation) center must track the stack-anchored box mesh
+    // (bottom-anchored die/substrate, top-anchored interposer) so the
+    // transparent back-to-front painter sort uses the mesh's real center; for a
+    // die this equals pos.z+thickness/2 (unchanged), for an interposer it drops
+    // to attachment_surface_z-thickness/2.
+    const float sceneY = MeshBuilder::anchoredOffsetY(
+        *comp, sceneFromChiplet(pos).y,
+        static_cast<float>(dims.thickness * kUmToMm));
+    return VECTOR3D(scenePos.x, sceneY, scenePos.z);
 }
 
 void AssemblyView::sortBackToFront(std::vector<QString>& ids)

@@ -34,6 +34,17 @@ public:
     static ComponentMesh buildBox(float width, float height, float depth,
                                   float offsetX = 0, float offsetY = 0, float offsetZ = 0);
 
+    // Scene-Y (vertical) center to pass as buildBox's offsetY so a box is
+    // anchored to the physical stack instead of centered on position.z.
+    // Dies / die-arrays / substrate are BOTTOM-anchored (bottom face at
+    // position.z, box grows upward). An interposer that declares an
+    // attachment_surface_z is TOP-anchored (top face at that surface, body
+    // hangs downward); a legacy interposer without it falls back to bottom.
+    //   baseSceneY = sceneFromChiplet(pos).y  (== position.z in mm)
+    //   depthMm    = dimensions.thickness in mm (buildBox's 2nd argument)
+    static float anchoredOffsetY(const Component& comp,
+                                 float baseSceneY, float depthMm);
+
     // Generate a solid plane on the XZ plane (for substrate/base)
     // With optional center position and Y offset
     static ComponentMesh buildPlaneMesh(float size,
