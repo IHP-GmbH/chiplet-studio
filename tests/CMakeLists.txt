@@ -204,6 +204,12 @@ include(GoogleTest)
 # Use PRE_TEST discovery mode to avoid running binary at configure time
 # (needed because KLayout libs are found via RPATH at runtime)
 # Set WORKING_DIRECTORY so tests can find fixtures at relative path
+# DISCOVERY_TIMEOUT: enumerating the suite runs the binary once, which links
+# KLayout and initializes Qt offscreen. On a loaded machine that takes longer
+# than CMake's 5 s default, and the timeout surfaces as "Error running test
+# executable", indistinguishable from a real build break. The suite itself
+# keeps its own per-test timeouts; this bound only covers enumeration.
 gtest_discover_tests(chiplet_tests
     DISCOVERY_MODE PRE_TEST
+    DISCOVERY_TIMEOUT 120
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
