@@ -89,7 +89,12 @@ struct Technology {
     std::string id;              // map key in the YAML
     std::string description;
     std::string layer_properties;  // verbatim path to the .lyp
-    std::string stackup;           // optional verbatim path to a stackup YAML
+    // Optional path to a layer-stackup YAML this technology ships. Verbatim as
+    // read: the consumer resolves it through the same ${VAR}/relative chain as
+    // layer_properties, and an explicit value takes priority over whatever
+    // stackup the consumer would otherwise look up for this id. Empty means the
+    // field was absent.
+    std::string stackup;
     double dbu = 0.001;
     bool has_dbu = false;        // whether dbu was present in the file
 };
@@ -139,17 +144,25 @@ struct Component {
     std::vector<std::string> cells;
     Position3D position;
     Rotation3D rotation;
-    // Canonical orientation string ("face_up" / "flip_chip" / "face_down");
-    // empty means the field was absent (treated as face_up downstream).
+    // Raw orientation string. The contract defines only "face_up" (default)
+    // and "flip_chip" (see coord_frame_contract.md 2.4); "face_down" is a
+    // non-canonical alias consumers may accept-with-warning. Empty means the
+    // field was absent (treated as face_up downstream). The consumer validates
+    // the value.
     std::string orientation;
     // Raw anchor string if the field was present; std::nullopt if absent. The
     // consumer validates the value and owns the "missing anchor" warning.
     std::optional<std::string> anchor;
     Dimensions3D dimensions;
-    // Optional interposer die-attachment surface z (component-level). See
-    // coord_frame_contract.md 3.2 / 3.4. std::nullopt => consumers fall back
-    // to dimensions.thickness as the mount reference (legacy files); when
-    // present, dimensions.thickness is the physical body z-extent.
+    // Interposer die-attachment (BEOL-top) surface z, in the component's local
+    // frame: the plane dies mount on (a die's position.z == this +
+    // connection-stack height). std::nullopt when the field is absent, in
+    // which case consumers fall back to dimensions.thickness as the mount
+    // reference -- legacy files where thickness encoded the attachment
+    // surface. When present, dimensions.thickness is the physical body
+    // z-extent (the interposer substrate, extending downward from this
+    // surface), decoupled from the mount plane. See coord_frame_contract.md
+    // sections 3.2 / 3.4 / 5.5.
     std::optional<double> attachment_surface_z;
     std::optional<ComponentArray> array;
     // Insertion-ordered key/value metadata.

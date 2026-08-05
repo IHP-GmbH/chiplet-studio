@@ -213,3 +213,14 @@ gtest_discover_tests(chiplet_tests
     DISCOVERY_MODE PRE_TEST
     DISCOVERY_TIMEOUT 120
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+# The pybind11 module has its own suite, which lived outside ctest and so ran
+# only when someone remembered to invoke it by hand. Registering it here is what
+# puts the Python bindings behind the same `ctest` every gate already calls.
+if(HAVE_PYTHON)
+    add_test(NAME chiplet_python_bindings
+             COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_python_tests.sh)
+    set_tests_properties(chiplet_python_bindings PROPERTIES
+        ENVIRONMENT "CHIPLET_PYTHON_MODULE_DIR=${CMAKE_BINARY_DIR}/python"
+        TIMEOUT 300)
+endif()

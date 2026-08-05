@@ -15,8 +15,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Set Python path to find the module
-export PYTHONPATH="${PROJECT_DIR}/build/python:${PYTHONPATH}"
+# Set Python path to find the module. CHIPLET_PYTHON_MODULE_DIR lets a caller
+# that knows the real binary dir say so; ctest sets it, since the build tree is
+# not always the in-source build/ this default assumes.
+export PYTHONPATH="${CHIPLET_PYTHON_MODULE_DIR:-${PROJECT_DIR}/build/python}:${PYTHONPATH}"
 export CHIPLET_FIXTURES="${SCRIPT_DIR}/fixtures"
 
 echo "=== Chiplet Studio Python Binding Tests ==="

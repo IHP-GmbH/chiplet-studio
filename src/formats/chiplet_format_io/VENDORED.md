@@ -12,7 +12,7 @@ This directory is a **verbatim copy** of the C++ reference reader/writer for the
 `.chiplet` format:
 
 - **Upstream:** `IHP-GmbH/chiplet-spec`, `reference/cpp/`
-- **Commit:** `1a56f61c321b1e2ed62bfa4b8ff81dfbcad9de41`
+- **Commit:** `8537ef48c011847f560e86ea3720d1b7d96b8e19`
 - **License:** Apache-2.0 (see the SPDX headers in each file)
 
 ## What is vendored
@@ -47,34 +47,28 @@ tree and bump the commit hash in this note. Do not drag in the upstream
 `CMakeLists.txt` or `tests/`; the studio supplies its own build and contract
 tests.
 
+The copy is byte-identical to upstream and is meant to stay that way, so the
+check is a plain `diff` against a `chiplet-spec` checkout at the commit above.
+There are no local patches and no cherry-picks to re-fold.
+
 Vendoring an Apache-2.0 library into this GPL-3.0-or-later project is
 license-compatible; the copied files keep their own Apache-2.0 SPDX headers.
 
-## Local cherry-picks on top of the vendored commit
+## History: why this copy had drifted
 
-The base is still `1a56f61c` (above). A **full** re-sync to the current
-chiplet-spec HEAD is deliberately *not* done yet, because HEAD also removes the
-`TechDef.stackup` field, which this host still reads (`Assembly.cpp`,
-`stackup_path()`); adopting that is a separate change. Until the next full
-re-sync, one upstream change is applied here surgically:
+For a while this note described a deferred full re-sync, a `attachment_surface_z`
+cherry-pick applied surgically on top of `1a56f61c`, and a handoff of the full
+re-vendor to another team. All of it rested on the claim that chiplet-spec HEAD
+had *removed* `TechDef.stackup`, which the host still reads
+(`ChipletFormat.cpp`, `Technology::stackup_path()`).
 
-- **`attachment_surface_z`** (optional interposer die-attachment surface,
-  component-level), from chiplet-spec `c74bc5d`. Applied hunks: the
-  `std::optional<double> attachment_surface_z` member on `Component`, its parse
-  (after `dimensions`) and its write (after the `dimensions` map, when engaged).
-  The `TechDef.stackup` removal and the `orientation` comment reword from that
-  commit were intentionally left out. Re-fold these when doing the next full
-  re-sync.
+That claim was wrong. `stackup` was never in chiplet-spec, at any commit, on any
+branch: it was added to this copy here, locally, by the File > Import GDS work,
+and the deferral was built on the assumption that upstream had taken away
+something it had never carried. The re-sync was blocked by a mistake rather than
+by a real coupling.
 
-## Handoff: the full re-sync is owned by another team
-
-The full re-vendor described above (adopt the current chiplet-spec HEAD, which
-drops the `TechDef.stackup` field, and re-fold the `attachment_surface_z`
-cherry-pick into a clean copy) is **intentionally deferred and handed off**. It
-is *not* a drop-in file copy: it is coupled to migrating the host off
-`TechDef.stackup` (still read by `Assembly.cpp` / `stackup_path()`), which must
-land first. Another development team will pick this up when that
-`TechDef.stackup` migration is scheduled. Until then, keep fixing format bugs
-upstream in `chiplet-spec` and applying them here as *surgical* cherry-picks (as
-was done for `attachment_surface_z`), never as a partial re-sync that would drag
-in the `TechDef.stackup` removal and break the build.
+`technologies.<id>.stackup` is now specified upstream (`CHIPLET_FORMAT_SPEC.md`,
+Technologies Section) and implemented in the reference reader and writer with a
+round-trip test, so this directory is a clean verbatim copy again and the
+deferred work is discharged rather than handed on.
