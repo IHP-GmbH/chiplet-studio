@@ -67,6 +67,14 @@ endif()
 set(KLAYOUT_SRC_DIR "${CMAKE_SOURCE_DIR}/extern/klayout/src")
 set(KLAYOUT_BUILD_DIR "" CACHE PATH "Path to KLayout build directory (e.g., extern/klayout/bin-release)")
 
+# A build without KLayout still compiles and still passes most of the suite:
+# the 2D view degrades to a stub. That makes a failed KLayout build look like a
+# successful Chiplet Studio build, which is how a gate goes green while proving
+# nothing about the geometry path. Any build that is meant to be verified sets
+# this, and then a missing KLayout stops the configure instead of the review.
+option(CHIPLET_REQUIRE_KLAYOUT
+    "Fail the configure when KLayout integration is unavailable" OFF)
+
 # Check if KLayout libraries exist
 set(HAVE_KLAYOUT FALSE)
 if(KLAYOUT_BUILD_DIR)
@@ -76,8 +84,19 @@ if(KLAYOUT_BUILD_DIR)
         set(HAVE_KLAYOUT TRUE)
         message(STATUS "KLayout libraries found at ${KLAYOUT_BUILD_DIR}")
     else()
-        message(WARNING "KLAYOUT_BUILD_DIR set but libraries not found. Run KLayout build first.")
+        # Unconditionally fatal, option or not: the caller asked for KLayout at
+        # a specific path and it is not there. There is no reading of that which
+        # means "carry on without it".
+        message(FATAL_ERROR
+            "KLAYOUT_BUILD_DIR is set to ${KLAYOUT_BUILD_DIR} but no KLayout "
+            "library was found there. Build KLayout first "
+            "(extern/klayout/build.sh -without-qtbinding), or unset "
+            "KLAYOUT_BUILD_DIR to build without KLayout integration.")
     endif()
+elseif(CHIPLET_REQUIRE_KLAYOUT)
+    message(FATAL_ERROR
+        "CHIPLET_REQUIRE_KLAYOUT is ON but KLAYOUT_BUILD_DIR is not set. "
+        "Point it at the KLayout build directory (extern/klayout/bin-release).")
 else()
     message(WARNING "KLAYOUT_BUILD_DIR not set. KLayout integration will be disabled.")
 endif()
