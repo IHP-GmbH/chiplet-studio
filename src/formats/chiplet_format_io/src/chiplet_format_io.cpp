@@ -287,6 +287,8 @@ void emit_technology_fields(YAML::Emitter& out, const Technology& tech) {
         out << YAML::Key << "layer_properties" << YAML::Value
             << tech.layer_properties;
     }
+    // Emitted only when engaged, so a technology without a stackup round-trips
+    // without gaining a key it never had.
     if (!tech.stackup.empty()) {
         out << YAML::Key << "stackup" << YAML::Value << tech.stackup;
     }
