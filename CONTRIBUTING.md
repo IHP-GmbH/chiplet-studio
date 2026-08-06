@@ -103,6 +103,18 @@ Do not edit the vendored files in place. Fix format bugs upstream in
 `chiplet-spec`, then re-vendor and bump the commit hash recorded in
 `src/formats/chiplet_format_io/VENDORED.md`.
 
+CI enforces this. `ci/check_vendored.py` byte-compares the copy against the
+commit `VENDORED.md` names, so an in-place edit fails the gate. Run it yourself
+with a chiplet-spec checkout at that commit:
+
+```bash
+python3 ci/check_vendored.py --spec-dir ../chiplet-spec
+```
+
+It compares against the *declared* commit, not the upstream tip, so an upstream
+change does not turn this red; noticing that the declared commit has aged is a
+separate, deliberate re-vendor.
+
 The format and its coordinate conventions are a contract surface consumed by
 adk-tools (which embeds this repo as a submodule). The contract docs
 (`docs/CHIPLET_FORMAT_SPEC.md`, `docs/coord_frame_contract.md`,
