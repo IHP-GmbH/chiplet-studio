@@ -1,0 +1,76 @@
+name: ci
+
+# Chiplet Studio is verified locally, not here: the build needs Qt6 and an
+# in-tree KLayout (848 MB of vendored sources), which is not viable on a 14 GB
+# hosted runner, and the adk-tools image build is the gate that compiles it and
+# runs the 585 ctest cases. What is left for hosted CI is the class of defect
+# that a compiler never catches and a full build cannot catch either: a source
+# nobody listed, and a vendored copy somebody edited in place. Both are quiet,
+# both have happened, and both cost seconds to detect.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the checkers
+        # Run first, and in the same job. A checker that cannot fail is
+        # indistinguishable from `exit 0`, and this one guards a merge.
+        run: |
+          python3 ci/check_source_list.py --self-test
+          python3 ci/check_vendored.py --self-test
+
+      - name: Every source on disk is named in a CMakeLists
+        run: python3 ci/check_source_list.py
+
+      - name: Read the vendoring commit VENDORED.md declares
+        id: vendored
+        # Guarded to 40 hex before it is ever used as a ref. An empty or
+        # malformed value handed to actions/checkout resolves to the default
+        # branch, which would compare the copy against whatever chiplet-spec
+        # happens to be today and pass.
+        run: |
+          sha="$(python3 ci/check_vendored.py --print-commit)"
+          if ! printf '%s' "$sha" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::VENDORED.md gave a non-sha commit: '$sha'"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out chiplet-spec at that commit
+        uses: actions/checkout@v4
+        with:
+          repository: IHP-GmbH/chiplet-spec
+          ref: ${{ steps.vendored.outputs.sha }}
+          path: .chiplet-spec
+
+      - name: Vendored chiplet_format_io is still verbatim
+        run: python3 ci/check_vendored.py --spec-dir .chiplet-spec
+
+  # The one required status check. A single collector context per repository
+  # means a ruleset names `ci-gate` everywhere and never has to be edited when
+  # the job list inside a workflow changes.
+  ci-gate:
+    needs: [contracts]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every gating job to have succeeded
+        # `needs` alone does not gate: with `if: always()` this job runs even
+        # when a dependency failed, so the result has to be compared
+        # explicitly. Without the comparison the gate reports green after its
+        # dependencies went red.
+        run: |
+          echo "contracts: ${{ needs.contracts.result }}"
+          test "${{ needs.contracts.result }}" = "success"
