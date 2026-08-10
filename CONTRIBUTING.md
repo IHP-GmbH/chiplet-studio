@@ -33,7 +33,8 @@ merged.
 
 ## Workflow
 
-1. Fork the repo (or branch, if you have write access). Branch from `main`.
+1. Fork the repo (or branch, if you have write access). Branch from `dev`, which
+   is where work lands. `main` moves only at a release fold.
 2. Build in Docker; host libraries may differ from the container:
    ```bash
    ./scripts/build-docker.sh
@@ -51,7 +52,14 @@ merged.
    ```
    Do not add headers to third-party code under `extern/`.
 6. Follow `docs/CODE_STYLE.md`.
-7. Open a pull request against `main` describing the change and how you tested it.
+7. Open a pull request against `dev` describing the change and how you tested it.
+   One check is required to merge, `ci-gate`. It collects the jobs in
+   `.github/workflows/ci.yml` and finishes in about a minute. Those jobs check
+   what a compiler cannot: that every source is named in a `CMakeLists`, and
+   that the vendored `chiplet_format_io` is still the verbatim copy it declares.
+   The build and the test suites are verified separately, on the machine that
+   has the Docker cache for them, so a green `ci-gate` is necessary and not
+   sufficient.
 
 ## Running the tests
 
