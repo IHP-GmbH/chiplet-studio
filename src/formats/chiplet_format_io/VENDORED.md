@@ -12,7 +12,7 @@ This directory is a **verbatim copy** of the C++ reference reader/writer for the
 `.chiplet` format:
 
 - **Upstream:** `IHP-GmbH/chiplet-spec`, `reference/cpp/`
-- **Commit:** `8537ef48c011847f560e86ea3720d1b7d96b8e19`
+- **Commit:** `e94e77420468b18f7c56bfae37a1bceeffd56abb`
 - **License:** Apache-2.0 (see the SPDX headers in each file)
 
 ## What is vendored
