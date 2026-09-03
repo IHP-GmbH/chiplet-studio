@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <QtGlobal>
 #include <QString>
+#include <QCryptographicHash>
 #include <sstream>
 #include <filesystem>
 #include <cstdlib>
@@ -1352,7 +1353,7 @@ TEST(PathVars, UnresolvableVarThrows)
 
 
 // ---------------------------------------------------------------------------
-// Scalar quoting on the wire (STUDIO-14)
+// Adapter id contract (STUDIO: validate at LOAD) and scalar quoting (STUDIO-14)
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -1365,6 +1366,89 @@ std::string readWholeFile(const std::string& path)
 }
 
 } // namespace
+
+// The oracle is chiplet-spec's, vendored verbatim. Assert its hash first: a
+// case "fixed" by editing the local copy instead of the implementation is the
+// failure this guards against, and without the hash it would pass silently.
+TEST(AdapterId, ParityWithSpecOracle)
+{
+    const std::string path = fixturesPath() + "/adapter_id_cases.json";
+    const std::string text = readWholeFile(path);
+    ASSERT_FALSE(text.empty()) << "vendored oracle missing: " << path;
+
+    const QByteArray digest =
+        QCryptographicHash::hash(QByteArray(text.data(),
+                                            static_cast<int>(text.size())),
+                                 QCryptographicHash::Sha256).toHex();
+    EXPECT_EQ(digest.toStdString(),
+              "0364a6f2a2da84f9651af8283b1c456638e6897d174d105f271ed46ddfb80eb1")
+        << "tests/fixtures/adapter_id_cases.json is not the copy declared in "
+           "its PROVENANCE.md. Do not edit it here; change it upstream in "
+           "chiplet-spec and re-copy.";
+
+    // Parsed as YAML: JSON is a YAML subset and yaml-cpp is already a
+    // dependency, so this needs no new JSON library.
+    YAML::Node cases = YAML::Load(text);
+    ASSERT_TRUE(cases["accept"] && cases["accept"].IsSequence());
+    ASSERT_TRUE(cases["reject"] && cases["reject"].IsSequence());
+
+    // Iterate the file; never restate the counts in prose or in a literal.
+    size_t nAccept = 0, nReject = 0;
+    for (const auto& n : cases["accept"]) {
+        const auto id = n.as<std::string>();
+        EXPECT_TRUE(is_valid_adapter_id(id))
+            << "schema ACCEPTS this id, we reject it: " << id;
+        ++nAccept;
+    }
+    for (const auto& n : cases["reject"]) {
+        const auto id = n.as<std::string>();
+        EXPECT_FALSE(is_valid_adapter_id(id))
+            << "schema REJECTS this id, we accept it: " << id;
+        ++nReject;
+    }
+    EXPECT_GT(nAccept, 0u);
+    EXPECT_GT(nReject, 0u);
+}
+
+// META-1: prove the check can fail. Without this, an implementation that
+// returned true unconditionally would still pass every accept case, and the
+// reject loop is the only thing standing between a document and a path.
+TEST(AdapterId, RejectsTheDeckSuffixTheBarePatternWouldAccept)
+{
+    EXPECT_TRUE(is_valid_adapter_id("ihp_cupillar"));
+    EXPECT_TRUE(is_valid_adapter_id("x.drcx"));   // only a .drc SUFFIX is out
+    EXPECT_FALSE(is_valid_adapter_id("evil.drc")) // the pattern alone accepts this
+        << "the id pattern without the schema's .drc negative accepts a deck "
+           "name; both halves of the contract are required";
+    EXPECT_FALSE(is_valid_adapter_id("intm4tm2\n"))
+        << "a trailing newline must not pass: this is the \\Z-vs-$ trap, and "
+           "regex_match is what closes it in C++";
+}
+
+// A hostile adapter id must cost the interconnect axis, not the document.
+TEST(AdapterId, HostileAdapterIsDroppedAndTheDocumentStillLoads)
+{
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "hostile_adapter.chiplet").string();
+    {
+        std::ofstream f(path);
+        f << "format_version: \"1.0\"\n"
+             "assembly:\n  name: \"victim\"\n  units: \"um\"\n"
+             "interconnect:\n  adapter: \"evil.drc\"\n"
+             "components:\n"
+             "  - id: \"die0\"\n    type: die\n    anchor: gds_origin\n"
+             "    dimensions: { width: 10, height: 10, thickness: 1 }\n";
+    }
+    ChipletFormat fmt;
+    std::unique_ptr<Assembly> asm1;
+    ASSERT_NO_THROW(asm1 = fmt.load(path));
+    ASSERT_TRUE(asm1);
+    EXPECT_TRUE(asm1->interconnect_adapter().empty())
+        << "a path-shaped adapter id reached the assembly";
+    EXPECT_EQ(asm1->components().size(), 1u)
+        << "the rest of the document must still load";
+    std::filesystem::remove(path);
+}
 
 // STUDIO-14. Polarity is deliberate: this enumerates the field names the
 // format declares NON-string and demands quotes on everything else, so a

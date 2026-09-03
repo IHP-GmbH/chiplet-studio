@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <regex>
 #include <filesystem>
 
 namespace chiplet {
@@ -86,6 +87,20 @@ std::string interface_type_to_string(InterfaceType t)
         case InterfaceType::WireBond: return "wire_bond";
     }
     return "micro_bump";
+}
+
+bool is_valid_adapter_id(const std::string& id)
+{
+    if (id.empty()) return false;
+
+    // chiplet-spec definitions/interconnect/properties/adapter, both halves.
+    // regex_match anchors both ends, so the pattern carries no end anchor:
+    // std::regex is ECMAScript and has no \Z. See the header for why the
+    // anchor is never ported verbatim between dialects.
+    static const std::regex kIdPattern(R"([A-Za-z0-9_][A-Za-z0-9_.\-]*)");
+    static const std::regex kDeckSuffix(R"(.*\.drc)");
+
+    return std::regex_match(id, kIdPattern) && !std::regex_match(id, kDeckSuffix);
 }
 
 namespace {
@@ -364,11 +379,27 @@ std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
     // other technology so viewers list it alongside the die/interposer PDKs; a
     // same-id entry already declared under technologies: wins over it.
     if (doc.interconnect.has_value()) {
-        assembly->set_interconnect_adapter(doc.interconnect->adapter);
-        if (doc.interconnect->technology.has_value()
-            && !assembly->technology(doc.interconnect->adapter)) {
-            assembly->add_technology(
-                build_technology(doc.interconnect->technology.value()));
+        // Gate the id before anything concatenates it into a path. The
+        // vendored reader accepts any string (it validates structure, not
+        // registry semantics) and cannot be changed here, so the host owns
+        // this check. Fail closed and drop the adapter rather than throwing:
+        // a bad adapter costs the interconnect axis, not the whole document,
+        // and refusing to open a file the schema considers structurally valid
+        // would be the reader overreaching.
+        if (!is_valid_adapter_id(doc.interconnect->adapter)) {
+            qWarning("[chiplet] interconnect.adapter '%s' is not a valid "
+                     "adapter id and was IGNORED. An adapter is a registry id "
+                     "resolved by the ADK, never a path and never a .drc deck "
+                     "name. Interconnect geometry and the interconnect DRC "
+                     "axis are off for this document.",
+                     doc.interconnect->adapter.c_str());
+        } else {
+            assembly->set_interconnect_adapter(doc.interconnect->adapter);
+            if (doc.interconnect->technology.has_value()
+                && !assembly->technology(doc.interconnect->adapter)) {
+                assembly->add_technology(
+                    build_technology(doc.interconnect->technology.value()));
+            }
         }
     }
 

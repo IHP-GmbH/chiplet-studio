@@ -100,6 +100,32 @@ std::string component_type_to_string(ComponentType t);
 InterfaceType interface_type_from_string(const std::string& s);
 std::string interface_type_to_string(InterfaceType t);
 
+// True when `id` is a well-formed adapter id (interconnect.adapter and, when
+// this reader grows one, interposer.adapter).
+//
+// An adapter id is a REGISTRY ID resolved by the consuming ADK, never a
+// filesystem path and never a deck file name. This matters because a .chiplet
+// crosses a trust boundary: a downloaded project's adapter id reaches
+// BlenderGDSConfigs::interconnectStackupFragmentPath, which concatenates it
+// into a path, and in the wider ecosystem an adapter names a DRC deck that a
+// KLayout runner File.reads and eval's. So the gate belongs at LOAD, in every
+// consumer, and fails closed.
+//
+// The contract is chiplet-spec's schema for the field, which is a PAIR and not
+// a single expression: the pattern PLUS the negative that forbids a `.drc`
+// suffix. Implementing only the pattern accepts "evil.drc"; that is not
+// hypothetical, it is the gap the reference implementations had. The oracle is
+// chiplet-spec conformance/fixtures/adapter_id_cases.json, vendored beside the
+// parity test, and the proposition that test closes is "rejects everything the
+// schema rejects".
+//
+// Anchoring is dialect-specific and must never be copied across languages:
+// Python needs \Z (a bare $ also matches before a trailing newline), the
+// portable spelling is (?![\s\S]), and C++ std::regex is ECMAScript where \Z
+// does not exist at all -- it would match a literal 'Z'. Hence regex_match,
+// which anchors both ends by construction, with no end anchor in the pattern.
+bool is_valid_adapter_id(const std::string& id);
+
 } // namespace chiplet
 
 #endif // CHIPLET_FORMATS_CHIPLETFORMAT_H
