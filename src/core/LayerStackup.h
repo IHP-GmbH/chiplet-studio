@@ -194,12 +194,20 @@ namespace BlenderGDSConfigs {
 // Resolve stackup YAML path for a technology ID
 std::string stackupPath(const std::string& techId);
 
-// Resolve the interconnect PDK 3D stackup fragment for an interconnect adapter
-// (e.g. "vendorx_microbump" -> interconnect_pdk/libs.tech/chiplet_studio/
-// stackup_fragments/vendorx_microbump.stackup.yaml). $INTERCONNECT_PDK_ROOT
+// Resolve the interconnect PDK 3D stackup fragment for a fragment KEY
+// (e.g. "cupillar_opt3" -> interconnect_pdk/libs.tech/chiplet_studio/
+// stackup_fragments/cupillar_opt3.stackup.yaml). $INTERCONNECT_PDK_ROOT
 // first (set-but-invalid falls through), then a sibling-checkout walk up from
 // the configs dir. Empty when unresolvable -- callers skip the merge.
-std::string interconnectStackupFragmentPath(const std::string& adapter);
+//
+// The key is normally a per-die connection METHOD id, not an adapter id: see
+// LayerStackup::resolveInterconnectKeys, which tries the method ids first and
+// only falls back to the assembly-level adapter when none of them resolves.
+// This parameter was called `adapter` until 2026-09; two separate reviewers
+// read that name, concluded the studio selects geometry by adapter, and one
+// opened a defect on it before anyone read the caller. Geometry resolves by
+// METHOD; the adapter axis is DRC and parameters.
+std::string interconnectStackupFragmentPath(const std::string& key);
 
 // Resolve the bundled KLayout layer-properties (.lyp) for a supported PDK,
 // shipped under pdks/<pdk>/<file>.lyp (sibling of the configs dir). Lets an

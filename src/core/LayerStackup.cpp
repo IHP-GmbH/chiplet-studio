@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <yaml-cpp/yaml.h>
 #include <QtGlobal>
 
@@ -224,6 +225,24 @@ std::vector<std::string> LayerStackup::resolveInterconnectKeys(
     }
     if (keys.empty() && !adapter.empty() &&
         !BlenderGDSConfigs::interconnectStackupFragmentPath(adapter).empty()) {
+        // Legacy fallback. The adapter is the DRC/parameter axis, not the
+        // geometry axis, so the fragment it names is only a default: it is
+        // whatever stack the adapter's PDK ships, and the dies in this
+        // assembly may use something else entirely (ihp_cupillar ships
+        // Option 1, so an assembly of Option 3 stacks would be drawn and
+        // seated ~17 um short). Say so once per key: rendering the wrong
+        // stack silently is a false sign-off, and this is a sign-off tool.
+        static std::set<std::string> warned;
+        if (warned.insert(adapter).second) {
+            qWarning("[chiplet] interconnect geometry: no per-die connection "
+                     "id resolved to a stackup fragment, falling back to the "
+                     "assembly adapter '%s'. The bump geometry shown is that "
+                     "adapter's DEFAULT stack, not one derived from the dies; "
+                     "it may not match the real stack. Give each die a "
+                     "connection: id that is a method of the interconnect PDK "
+                     "manifest to render its actual geometry.",
+                     adapter.c_str());
+        }
         keys.push_back(adapter);
     }
     return keys;
@@ -497,12 +516,15 @@ std::string pdkLayerPropertiesPath(const std::string& techId)
     return "";
 }
 
-std::string interconnectStackupFragmentPath(const std::string& adapter)
+std::string interconnectStackupFragmentPath(const std::string& key)
 {
-    if (adapter.empty()) return "";
+    if (key.empty()) return "";
 
     namespace fs = std::filesystem;
-    const std::string fragName = adapter + ".stackup.yaml";
+    // NOTE: `key` is normally a per-die connection METHOD id (cupillar_opt3),
+    // not an adapter id. See the header for why this parameter is no longer
+    // called `adapter`.
+    const std::string fragName = key + ".stackup.yaml";
     // IHP PDK layout: the fragments live under libs.tech/<tool>/ of the
     // interconnect PDK, keyed by the consuming tool (chiplet_studio).
     auto fragmentUnder = [&fragName](const fs::path& pdkRoot) {
