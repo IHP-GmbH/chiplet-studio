@@ -1,0 +1,46 @@
+# Fixture for STUDIO-14. Values here are declared-string fields whose content
+# is shaped like something YAML would re-type: a leading-zero id (octal under
+# YAML 1.1), a two-decimal cell name (1.10 -> 1.1), ISO dates (-> date), and a
+# numeric technology id. The rest exist to widen writer coverage, so the test
+# walks a document that exercises most string-emitting branches.
+format_version: "1.0"
+
+assembly:
+  name: "0042"
+  description: "quoting round-trip"
+  author: "1234"
+  created: "2026-03-22"
+  modified: "2026-09-01"
+  units: "um"
+  io_technology: "sg13g2"
+
+technologies:
+  "1234":
+    description: "numeric-looking technology id"
+    dbu: 0.001
+  sg13g2:
+    description: "io technology"
+    dbu: 0.001
+
+interconnect:
+  adapter: "ihp_cupillar"
+
+connection_stacks:
+  "0010":
+    description: "numeric-looking stack id"
+    layers:
+      - { name: "0755", material: "Cu", height: 5.0, diameter: 10.0 }
+
+components:
+  - id: "0755"
+    type: die
+    technology: "1234"
+    connection: "0010"
+    anchor: gds_origin
+    top_cell: "1.10"
+    orientation: flip_chip
+    position: { x: 1, y: 2, z: 3 }
+    dimensions: { width: 100, height: 100, thickness: 50 }
+    metadata:
+      "0900": "0x1F"
+      vendor: "1.20"

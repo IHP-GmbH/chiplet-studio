@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <QtGlobal>
 #include <QString>
+#include <sstream>
 #include <filesystem>
 #include <cstdlib>
 #include <fstream>
@@ -1347,6 +1348,106 @@ TEST(PathVars, UnresolvableVarThrows)
                   std::string::npos);
     }
     fs::remove_all(base);
+}
+
+
+// ---------------------------------------------------------------------------
+// Scalar quoting on the wire (STUDIO-14)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string readWholeFile(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+}
+
+} // namespace
+
+// STUDIO-14. Polarity is deliberate: this enumerates the field names the
+// format declares NON-string and demands quotes on everything else, so a
+// newly added string field defaults to "must be quoted" and forgetting to
+// touch this test is RED, not silence. Enumerating the string fields instead
+// would make every new field pass by default (META-4).
+TEST(ChipletFormatWriter, EveryDeclaredStringScalarIsQuoted)
+{
+    // chiplet-spec chiplet.schema.json, every leaf typed number/integer/boolean.
+    const std::vector<std::string> kNonStringFields = {
+        "attachment_surface_z", "dbu", "diameter", "external",
+        "finalize_required", "height", "pitch", "thickness", "width",
+        "x", "y", "z",
+    };
+
+    const std::string src = fixturesPath() + "/quoting_roundtrip.chiplet";
+    ChipletFormat fmt;
+    auto assembly = fmt.load(src);
+    ASSERT_TRUE(assembly);
+
+    const std::string out =
+        (std::filesystem::temp_directory_path() / "quoting_out.chiplet").string();
+    fmt.save(*assembly, out);
+    const std::string text = readWholeFile(out);
+    ASSERT_FALSE(text.empty());
+
+    std::istringstream in(text);
+    std::string line;
+    size_t lineNo = 0, checked = 0;
+    while (std::getline(in, line)) {
+        ++lineNo;
+        // `key: value` scalars only; skip block openers, flow maps and seqs.
+        const auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string key = line.substr(0, colon);
+        const auto ks = key.find_first_not_of(" -");
+        if (ks == std::string::npos) continue;
+        key = key.substr(ks);
+        if (key.find(' ') != std::string::npos) continue;
+        std::string value = line.substr(colon + 1);
+        const auto vs = value.find_first_not_of(' ');
+        if (vs == std::string::npos) continue;   // block opener
+        value = value.substr(vs);
+        if (value[0] == '{' || value[0] == '[') continue;  // flow collection
+
+        if (std::find(kNonStringFields.begin(), kNonStringFields.end(), key)
+            != kNonStringFields.end()) {
+            continue;
+        }
+        ++checked;
+        EXPECT_EQ(value.front(), '"')
+            << "line " << lineNo << ": `" << line << "`\n"
+            << "  '" << key << "' is not one of the format's non-string fields, "
+               "so it is a declared string and must be emitted quoted. Unquoted, "
+               "YAML re-types it: 0755 reads back as 493 and 2026-03-22 as a "
+               "date under PyYAML, while yaml-cpp returns strings, so the two "
+               "readers disagree about the same bytes.";
+    }
+    EXPECT_GT(checked, 10u) << "the fixture exercised almost nothing";
+    std::filesystem::remove(out);
+}
+
+// The values that actually re-type, end to end through save.
+TEST(ChipletFormatWriter, NumericLookingIdentifiersSurviveASave)
+{
+    const std::string src = fixturesPath() + "/quoting_roundtrip.chiplet";
+    ChipletFormat fmt;
+    auto assembly = fmt.load(src);
+    ASSERT_TRUE(assembly);
+    const std::string out =
+        (std::filesystem::temp_directory_path() / "quoting_types.chiplet").string();
+    fmt.save(*assembly, out);
+
+    // Re-read with a plain YAML load (not our reader): this is the view the
+    // PyYAML-based consumers in the ecosystem get.
+    YAML::Node root = YAML::LoadFile(out);
+    EXPECT_EQ(root["format_version"].Tag(), "!")
+        << "format_version must be an explicitly quoted string; unquoted it is "
+           "a schema negative in chiplet-spec (fixture v1_0_unquoted_numeric)";
+    EXPECT_EQ(root["assembly"]["created"].as<std::string>(), "2026-03-22");
+    EXPECT_EQ(root["components"][0]["id"].as<std::string>(), "0755");
+    EXPECT_EQ(root["components"][0]["top_cell"].as<std::string>(), "1.10");
+    std::filesystem::remove(out);
 }
 
 } // namespace

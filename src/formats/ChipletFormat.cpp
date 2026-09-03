@@ -499,26 +499,66 @@ void ChipletFormat::auto_calculate_z(Assembly& assembly)
     }
 }
 
+// A scalar the format declares a string, emitted always double-quoted.
+//
+// Quoting is STRUCTURAL here, not cosmetic. yaml-cpp omits quotes whenever
+// YAML does not strictly require them, and the reader on the other side then
+// re-types the value: `id: 0755` comes back as the integer 493 under YAML 1.1
+// (PyYAML, which is what the KiCad plugin and the reference Python reader
+// use), `top_cell: 1.10` comes back as 1.1, and `created: 2026-03-22` comes
+// back as a date. yaml-cpp itself returns all three as strings, so the two
+// readers disagree about the same bytes and the disagreement is about
+// IDENTITY, not formatting. chiplet-spec holds the same line: an unquoted
+// format_version is a SCHEMA NEGATIVE there (conformance fixture
+// v1_0_unquoted_numeric.chiplet); the reference reader only coerces it for
+// back-compat.
+//
+// The rule is unconditional on purpose: quote every scalar the format
+// declares a string, without inspecting the value. Quoting only the values
+// that "would" re-type requires modelling every YAML version's resolution
+// table, is untestable, and makes correctness depend on the data.
+//
+// KEYS are deliberately NOT routed through this. Top-level keys are literals
+// and must stay bare: the downstream KiCad merge guard identifies top-level
+// blocks with a line regex that does not match a quoted key, so quoting them
+// would make every file we write unparseable to it. Document-derived keys
+// that are nested (technology ids, connection-stack ids) DO get quoted --
+// they are never at column 0, so the guard is unaffected, and they re-type
+// exactly like values do.
+struct QuotedScalar {
+    std::string value;
+};
+
+static inline QuotedScalar qs(std::string value)
+{
+    return QuotedScalar{std::move(value)};
+}
+
+static YAML::Emitter& operator<<(YAML::Emitter& out, const QuotedScalar& s)
+{
+    return out << YAML::DoubleQuoted << s.value;
+}
+
 // Shared field emission for a technology entry (used by the technologies:
 // map and the interconnect: technology subblock).
 static void emit_technology_fields(YAML::Emitter& out, const Technology& tech)
 {
     if (!tech.description().empty()) {
-        out << YAML::Key << "description" << YAML::Value << tech.description();
+        out << YAML::Key << "description" << YAML::Value << qs(tech.description());
     }
 
     if (!tech.layer_properties_path().empty()) {
         out << YAML::Key << "layer_properties" << YAML::Value
-            << (tech.layer_properties_source().empty()
-                    ? tech.layer_properties_path()
-                    : tech.layer_properties_source());
+            << qs(tech.layer_properties_source().empty()
+                      ? tech.layer_properties_path()
+                      : tech.layer_properties_source());
     }
 
     if (!tech.stackup_path().empty()) {
         out << YAML::Key << "stackup" << YAML::Value
-            << (tech.stackup_source().empty()
-                    ? tech.stackup_path()
-                    : tech.stackup_source());
+            << qs(tech.stackup_source().empty()
+                      ? tech.stackup_path()
+                      : tech.stackup_source());
     }
 
     out << YAML::Key << "dbu" << YAML::Value << tech.dbu();
@@ -530,32 +570,32 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     out << YAML::BeginMap;
 
     // Format version
-    out << YAML::Key << "format_version" << YAML::Value << kSupportedFormatVersion;
+    out << YAML::Key << "format_version" << YAML::Value << qs(kSupportedFormatVersion);
 
     // Assembly metadata
     out << YAML::Key << "assembly" << YAML::Value << YAML::BeginMap;
-    out << YAML::Key << "name" << YAML::Value << assembly.name();
+    out << YAML::Key << "name" << YAML::Value << qs(assembly.name());
     if (!assembly.description().empty()) {
-        out << YAML::Key << "description" << YAML::Value << assembly.description();
+        out << YAML::Key << "description" << YAML::Value << qs(assembly.description());
     }
     if (!assembly.author().empty()) {
-        out << YAML::Key << "author" << YAML::Value << assembly.author();
+        out << YAML::Key << "author" << YAML::Value << qs(assembly.author());
     }
     if (!assembly.created().empty()) {
-        out << YAML::Key << "created" << YAML::Value << assembly.created();
+        out << YAML::Key << "created" << YAML::Value << qs(assembly.created());
     }
     if (!assembly.modified().empty()) {
-        out << YAML::Key << "modified" << YAML::Value << assembly.modified();
+        out << YAML::Key << "modified" << YAML::Value << qs(assembly.modified());
     }
-    out << YAML::Key << "units" << YAML::Value << assembly.units();
+    out << YAML::Key << "units" << YAML::Value << qs(assembly.units());
     if (!assembly.assembly_gds().empty()) {
         out << YAML::Key << "assembly_gds" << YAML::Value
-            << (assembly.assembly_gds_source().empty()
-                    ? assembly.assembly_gds()
-                    : assembly.assembly_gds_source());
+            << qs(assembly.assembly_gds_source().empty()
+                      ? assembly.assembly_gds()
+                      : assembly.assembly_gds_source());
     }
     if (!assembly.io_technology().empty()) {
-        out << YAML::Key << "io_technology" << YAML::Value << assembly.io_technology();
+        out << YAML::Key << "io_technology" << YAML::Value << qs(assembly.io_technology());
     }
     out << YAML::EndMap;
 
@@ -577,7 +617,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             if (!icAdapter.empty() && tech->id() == icAdapter) {
                 continue;
             }
-            out << YAML::Key << tech->id() << YAML::Value << YAML::BeginMap;
+            out << YAML::Key << qs(tech->id()) << YAML::Value << YAML::BeginMap;
             emit_technology_fields(out, *tech);
             out << YAML::EndMap;
         }
@@ -588,7 +628,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
     // Interconnect (assembly-level bumping method + its PDK-backed identity)
     if (!icAdapter.empty()) {
         out << YAML::Key << "interconnect" << YAML::Value << YAML::BeginMap;
-        out << YAML::Key << "adapter" << YAML::Value << icAdapter;
+        out << YAML::Key << "adapter" << YAML::Value << qs(icAdapter);
 
         Technology* ictech = assembly.technology(icAdapter);
         if (ictech) {
@@ -605,18 +645,18 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
         out << YAML::Key << "connection_stacks" << YAML::Value << YAML::BeginMap;
 
         for (const auto& [stackId, stack] : assembly.connection_stacks()) {
-            out << YAML::Key << stackId << YAML::Value << YAML::BeginMap;
+            out << YAML::Key << qs(stackId) << YAML::Value << YAML::BeginMap;
 
             if (!stack.description.empty()) {
-                out << YAML::Key << "description" << YAML::Value << stack.description;
+                out << YAML::Key << "description" << YAML::Value << qs(stack.description);
             }
 
             if (!stack.layers.empty()) {
                 out << YAML::Key << "layers" << YAML::Value << YAML::BeginSeq;
                 for (const auto& layer : stack.layers) {
                     out << YAML::Flow << YAML::BeginMap;
-                    out << YAML::Key << "name" << YAML::Value << layer.name;
-                    out << YAML::Key << "material" << YAML::Value << layer.material;
+                    out << YAML::Key << "name" << YAML::Value << qs(layer.name);
+                    out << YAML::Key << "material" << YAML::Value << qs(layer.material);
                     out << YAML::Key << "height" << YAML::Value << layer.height;
                     out << YAML::Key << "diameter" << YAML::Value << layer.diameter;
                     out << YAML::EndMap;
@@ -636,29 +676,29 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 
         for (const auto& comp : assembly.components()) {
             out << YAML::BeginMap;
-            out << YAML::Key << "id" << YAML::Value << comp->id();
-            out << YAML::Key << "type" << YAML::Value << component_type_to_string(comp->type());
+            out << YAML::Key << "id" << YAML::Value << qs(comp->id());
+            out << YAML::Key << "type" << YAML::Value << qs(component_type_to_string(comp->type()));
 
             // Anchor convention is part of the canonical contract and
             // must always be emitted explicitly so downstream readers
             // never have to guess (see coord_frame_contract.md §2,
             // §4 Writer Contract).
             out << YAML::Key << "anchor" << YAML::Value
-                << anchor_to_string(comp->anchor());
+                << qs(anchor_to_string(comp->anchor()));
 
             if (!comp->technology().empty()) {
-                out << YAML::Key << "technology" << YAML::Value << comp->technology();
+                out << YAML::Key << "technology" << YAML::Value << qs(comp->technology());
             }
 
             if (!comp->connection().empty()) {
-                out << YAML::Key << "connection" << YAML::Value << comp->connection();
+                out << YAML::Key << "connection" << YAML::Value << qs(comp->connection());
             }
 
             if (!comp->layout_path().empty()) {
                 out << YAML::Key << "layout" << YAML::Value
-                    << (comp->layout_path_source().empty()
-                            ? comp->layout_path()
-                            : comp->layout_path_source());
+                    << qs(comp->layout_path_source().empty()
+                              ? comp->layout_path()
+                              : comp->layout_path_source());
             }
 
             // Save cells - use 'cells' array for multi-cell, 'top_cell' for single (backward compat)
@@ -666,12 +706,12 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             if (!cells.empty()) {
                 if (cells.size() == 1) {
                     // Single cell: use legacy 'top_cell' for backward compatibility
-                    out << YAML::Key << "top_cell" << YAML::Value << cells[0];
+                    out << YAML::Key << "top_cell" << YAML::Value << qs(cells[0]);
                 } else {
                     // Multiple cells: use new 'cells' array
                     out << YAML::Key << "cells" << YAML::Value << YAML::Flow << YAML::BeginSeq;
                     for (const auto& cell : cells) {
-                        out << cell;
+                        out << qs(cell);
                     }
                     out << YAML::EndSeq;
                 }
@@ -697,7 +737,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 
             // Orientation
             if (comp->orientation() == Orientation::FaceDown) {
-                out << YAML::Key << "orientation" << YAML::Value << "flip_chip";
+                out << YAML::Key << "orientation" << YAML::Value << qs("flip_chip");
             }
 
             // Dimensions
@@ -721,7 +761,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             if (comp->is_array()) {
                 const auto& arr = comp->array().value();
                 out << YAML::Key << "array" << YAML::Value << YAML::BeginMap;
-                out << YAML::Key << "pattern" << YAML::Value << arr.pattern;
+                out << YAML::Key << "pattern" << YAML::Value << qs(arr.pattern);
                 out << YAML::Key << "count" << YAML::Value << YAML::Flow << YAML::BeginMap;
                 out << YAML::Key << "x" << YAML::Value << arr.countX;
                 out << YAML::Key << "y" << YAML::Value << arr.countY;
@@ -743,7 +783,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             if (!meta.empty()) {
                 out << YAML::Key << "metadata" << YAML::Value << YAML::BeginMap;
                 for (const auto& [key, value] : meta) {
-                    out << YAML::Key << key << YAML::Value << value;
+                    out << YAML::Key << qs(key) << YAML::Value << qs(value);
                 }
                 out << YAML::EndMap;
             }
@@ -753,11 +793,11 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                 out << YAML::Key << "io_pads" << YAML::Value << YAML::BeginSeq;
                 for (const auto& pad : comp->io_pads()) {
                     out << YAML::BeginMap;
-                    out << YAML::Key << "id" << YAML::Value << pad.id();
+                    out << YAML::Key << "id" << YAML::Value << qs(pad.id());
                     out << YAML::Key << "io_class" << YAML::Value
-                        << io_class_to_string(pad.io_class());
+                        << qs(io_class_to_string(pad.io_class()));
                     if (!pad.net().empty()) {
-                        out << YAML::Key << "net" << YAML::Value << pad.net();
+                        out << YAML::Key << "net" << YAML::Value << qs(pad.net());
                     }
                     out << YAML::Key << "position" << YAML::Value
                         << YAML::Flow << YAML::BeginMap;
@@ -770,7 +810,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                     out << YAML::Key << "y" << YAML::Value << pad.size().y;
                     out << YAML::EndMap;
                     if (!pad.layer().empty()) {
-                        out << YAML::Key << "layer" << YAML::Value << pad.layer();
+                        out << YAML::Key << "layer" << YAML::Value << qs(pad.layer());
                     }
                     out << YAML::EndMap;
                 }
@@ -789,16 +829,16 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 
         for (const auto& iface : assembly.interfaces()) {
             out << YAML::BeginMap;
-            out << YAML::Key << "id" << YAML::Value << iface->id();
-            out << YAML::Key << "type" << YAML::Value << interface_type_to_string(iface->type());
+            out << YAML::Key << "id" << YAML::Value << qs(iface->id());
+            out << YAML::Key << "type" << YAML::Value << qs(interface_type_to_string(iface->type()));
 
             // From endpoint
             const auto& from = iface->from();
             if (!from.component.empty()) {
                 out << YAML::Key << "from" << YAML::Value << YAML::Flow << YAML::BeginMap;
-                out << YAML::Key << "component" << YAML::Value << from.component;
-                out << YAML::Key << "surface" << YAML::Value << from.surface;
-                out << YAML::Key << "port_layer" << YAML::Value << from.portLayer;
+                out << YAML::Key << "component" << YAML::Value << qs(from.component);
+                out << YAML::Key << "surface" << YAML::Value << qs(from.surface);
+                out << YAML::Key << "port_layer" << YAML::Value << qs(from.portLayer);
                 out << YAML::EndMap;
             }
 
@@ -806,9 +846,9 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
             const auto& to = iface->to();
             if (!to.component.empty()) {
                 out << YAML::Key << "to" << YAML::Value << YAML::Flow << YAML::BeginMap;
-                out << YAML::Key << "component" << YAML::Value << to.component;
-                out << YAML::Key << "surface" << YAML::Value << to.surface;
-                out << YAML::Key << "port_layer" << YAML::Value << to.portLayer;
+                out << YAML::Key << "component" << YAML::Value << qs(to.component);
+                out << YAML::Key << "surface" << YAML::Value << qs(to.surface);
+                out << YAML::Key << "port_layer" << YAML::Value << qs(to.portLayer);
                 out << YAML::EndMap;
             }
 
@@ -838,8 +878,8 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
 
             for (const auto& net : nl.nets()) {
                 out << YAML::BeginMap;
-                out << YAML::Key << "name" << YAML::Value << net.name();
-                out << YAML::Key << "class" << YAML::Value << net_class_to_string(net.net_class());
+                out << YAML::Key << "name" << YAML::Value << qs(net.name());
+                out << YAML::Key << "class" << YAML::Value << qs(net_class_to_string(net.net_class()));
 
                 if (net.external()) {
                     out << YAML::Key << "external" << YAML::Value << net.external();
@@ -849,10 +889,10 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
                     out << YAML::Key << "connections" << YAML::Value << YAML::BeginSeq;
                     for (const auto& conn : net.connections()) {
                         out << YAML::Flow << YAML::BeginMap;
-                        out << YAML::Key << "component" << YAML::Value << conn.component;
-                        out << YAML::Key << "pin" << YAML::Value << conn.pin;
+                        out << YAML::Key << "component" << YAML::Value << qs(conn.component);
+                        out << YAML::Key << "pin" << YAML::Value << qs(conn.pin);
                         if (!conn.layer.empty()) {
-                            out << YAML::Key << "layer" << YAML::Value << conn.layer;
+                            out << YAML::Key << "layer" << YAML::Value << qs(conn.layer);
                         }
                         out << YAML::EndMap;
                     }
@@ -866,7 +906,7 @@ void ChipletFormat::save(const Assembly& assembly, const string_type& path)
         }
 
         if (!nl.external_netlist_path().empty()) {
-            out << YAML::Key << "external_netlist" << YAML::Value << nl.external_netlist_path();
+            out << YAML::Key << "external_netlist" << YAML::Value << qs(nl.external_netlist_path());
         }
 
         out << YAML::EndMap;
