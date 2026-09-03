@@ -99,6 +99,18 @@ std::string synthesizeSingleGdsChiplet(const SingleGdsImportSpec& spec)
     o << "    dimensions: { width: " << num(width)
       << ", height: " << num(height)
       << ", thickness: " << num(thickness) << " }\n"
+      // bbox_center, NOT the die convention gds_origin, and the difference is
+      // half a die. The general rule (dies anchor on gds_origin) describes a
+      // die placed in an assembly, where its GDS origin is the design
+      // reference the position is measured from. This path is not that: it
+      // wraps a single loose GDS for 3D viewing, the position is a hardcoded
+      // zero, and the dimensions above ARE the GDS bounding box. A
+      // bbox-sized box has to be centred on the bbox; anchoring it on the
+      // GDS origin would shift every imported layout drawn in the first
+      // quadrant by half its own size. Declared explicitly because the
+      // format requires new files to state it and the reader's default for
+      // an absent anchor is not guaranteed to stay bbox_center.
+      << "    anchor: bbox_center\n"
       << "    position: { x: 0, y: 0, z: 0 }\n";
 
     return o.str();

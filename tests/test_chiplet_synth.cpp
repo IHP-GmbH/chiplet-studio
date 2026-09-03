@@ -68,6 +68,46 @@ TEST(ChipletSynth, SupportedPdkLoads)
     std::filesystem::remove(path);
 }
 
+// STUDIO-12. The synthesizer must DECLARE the anchor, and the value is
+// bbox_center even though the component type is `die`.
+//
+// The general convention (dies anchor on gds_origin) describes a die placed in
+// an assembly, where the GDS origin is the design reference its position is
+// measured from. This path is not that: it wraps one loose GDS for viewing,
+// the position is a hardcoded zero, and the dimensions ARE the GDS bounding
+// box, so a bbox-sized box has to be centred on the bbox. Stamping gds_origin
+// here would move every imported layout drawn in the first quadrant by half
+// its own size, and it was the first fix proposed for this row.
+//
+// Asserting on the emitted TEXT as well as the parsed value is deliberate: the
+// reader defaults an absent anchor to bbox_center, so a value check alone
+// passes just as happily when the file says nothing at all, which is the
+// defect this test exists to catch.
+TEST(ChipletSynth, DeclaresBboxCenterAnchorExplicitly)
+{
+    SingleGdsImportSpec spec;
+    spec.gdsPath = "/tmp/design.gds";
+    spec.widthUm = 100.0;
+    spec.heightUm = 50.0;
+    spec.thicknessUm = 10.0;
+
+    const std::string yaml = synthesizeSingleGdsChiplet(spec);
+    EXPECT_NE(yaml.find("anchor: bbox_center"), std::string::npos)
+        << "the synthesized document does not declare an anchor; consumers "
+           "would fall back to their own default. Emitted:\n" << yaml;
+
+    const std::string path = writeTemp("chiplet_synth_anchor.chiplet", yaml);
+    ChipletFormat format;
+    auto assembly = format.load(path);
+    ASSERT_NE(assembly, nullptr);
+    auto* die = assembly->component("imported_die");
+    ASSERT_NE(die, nullptr);
+    EXPECT_EQ(die->anchor(), Anchor::BboxCenter);
+    EXPECT_TRUE(die->anchor_declared())
+        << "anchor must be read from the file, not from the reader default";
+    std::filesystem::remove(path);
+}
+
 // A custom / unsupported PDK: user-supplied .lyp + stackup must parse into the
 // technology and survive a save -> reload round-trip (proves Edits 1-7).
 TEST(ChipletSynth, CustomLypAndStackupRoundTrip)
