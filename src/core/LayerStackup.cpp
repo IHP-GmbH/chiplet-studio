@@ -6,18 +6,21 @@
  */
 
 #include "LayerStackup.h"
+#include "Component.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
+#include <utility>
 #include <yaml-cpp/yaml.h>
 #include <QtGlobal>
 
 namespace chiplet {
 
 void LayerStackup::addLayer(int layer, int datatype, double z_bottom, double thickness,
-                            const std::string& name)
+                            const std::string& name, const std::string& purpose)
 {
     LayerElevation elev;
     elev.layer = layer;
@@ -26,6 +29,7 @@ void LayerStackup::addLayer(int layer, int datatype, double z_bottom, double thi
     elev.thickness = thickness;
     elev.name = name;
     elev.visible = true;
+    elev.purpose = purpose;
 
     m_layers[elev.key()] = elev;
 }
@@ -52,6 +56,15 @@ const LayerElevation* LayerStackup::findByLayer(int layer) const
         }
     }
     return nullptr;
+}
+
+const LayerElevation* LayerStackup::heightFor(const LayerKey& key, bool* borrowed) const
+{
+    const LayerElevation* elev = find(key);
+    if (borrowed) {
+        *borrowed = !elev;
+    }
+    return elev ? elev : findByLayer(key.layer);
 }
 
 std::vector<LayerElevation> LayerStackup::sortedLayers() const
@@ -131,8 +144,9 @@ bool LayerStackup::loadFromYAML(const std::string& path)
             double z_bottom = layer_node["z_bottom"].as<double>(0.0);
             double thickness = layer_node["thickness"].as<double>(1.0);
             std::string name = layer_node["name"].as<std::string>("");
+            std::string purpose = layer_node["purpose"].as<std::string>("");
 
-            addLayer(layer, datatype, z_bottom, thickness, name);
+            addLayer(layer, datatype, z_bottom, thickness, name, purpose);
         }
 
         return true;
@@ -175,8 +189,9 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
             int type = node["type"].as<int>(0);
             double z = node["z"].as<double>(0.0);
             double height = node["height"].as<double>(1.0);
+            std::string purpose = node["purpose"].as<std::string>("");
 
-            parsed.addLayer(index, type, z, height, name);
+            parsed.addLayer(index, type, z, height, name, purpose);
         }
 
         if (parsed.empty()) {
@@ -224,6 +239,24 @@ std::vector<std::string> LayerStackup::resolveInterconnectKeys(
     }
     if (keys.empty() && !adapter.empty() &&
         !BlenderGDSConfigs::interconnectStackupFragmentPath(adapter).empty()) {
+        // Legacy fallback. The adapter is the DRC/parameter axis, not the
+        // geometry axis, so the fragment it names is only a default: it is
+        // whatever stack the adapter's PDK ships, and the dies in this
+        // assembly may use something else entirely (ihp_cupillar ships
+        // Option 1, so an assembly of Option 3 stacks would be drawn and
+        // seated ~17 um short). Say so once per key: rendering the wrong
+        // stack silently is a false sign-off, and this is a sign-off tool.
+        static std::set<std::string> warned;
+        if (warned.insert(adapter).second) {
+            qWarning("[chiplet] interconnect geometry: no per-die connection "
+                     "id resolved to a stackup fragment, falling back to the "
+                     "assembly adapter '%s'. The bump geometry shown is that "
+                     "adapter's DEFAULT stack, not one derived from the dies; "
+                     "it may not match the real stack. Give each die a "
+                     "connection: id that is a method of the interconnect PDK "
+                     "manifest to render its actual geometry.",
+                     adapter.c_str());
+        }
         keys.push_back(adapter);
     }
     return keys;
@@ -288,7 +321,7 @@ LayerStackup LayerStackup::loadInterconnectFragments(
         (void)key;
         result.addLayer(entry.first.layer, entry.first.datatype,
                         entry.first.z_bottom, entry.first.thickness,
-                        entry.first.name);
+                        entry.first.name, entry.first.purpose);
     }
     // The union's reference frame is meaningful only when all sources agree.
     if (!first && refAgrees) {
@@ -347,7 +380,7 @@ size_t LayerStackup::mergeInterconnectFragments(
         (void)key;
         addLayer(entry.first.layer, entry.first.datatype,
                  entry.first.z_bottom, entry.first.thickness,
-                 entry.first.name);
+                 entry.first.name, entry.first.purpose);
         ++merged;
     }
     return merged;
@@ -497,12 +530,31 @@ std::string pdkLayerPropertiesPath(const std::string& techId)
     return "";
 }
 
-std::string interconnectStackupFragmentPath(const std::string& adapter)
+ComponentType importedComponentType(const std::string& techId)
 {
-    if (adapter.empty()) return "";
+    std::string lower = techId;
+    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // techId -> the role a lone GDS of that technology plays. One row per
+    // technology that is not a die process; an id no row matches is a Die.
+    static const std::pair<const char*, ComponentType> kRoles[] = {
+        {"intm4tm2", ComponentType::Interposer},
+    };
+    for (const auto& [id, type] : kRoles) {
+        if (lower.find(id) != std::string::npos) return type;
+    }
+    return ComponentType::Die;
+}
+
+std::string interconnectStackupFragmentPath(const std::string& key)
+{
+    if (key.empty()) return "";
 
     namespace fs = std::filesystem;
-    const std::string fragName = adapter + ".stackup.yaml";
+    // NOTE: `key` is normally a per-die connection METHOD id (cupillar_opt3),
+    // not an adapter id. See the header for why this parameter is no longer
+    // called `adapter`.
+    const std::string fragName = key + ".stackup.yaml";
     // IHP PDK layout: the fragments live under libs.tech/<tool>/ of the
     // interconnect PDK, keyed by the consuming tool (chiplet_studio).
     auto fragmentUnder = [&fragName](const fs::path& pdkRoot) {
@@ -559,14 +611,16 @@ LayerStackup createInterposer()
 
     // IHP 130-nm IntM4TM2 aluminum BEOL interposer stackup - top metal layers
     // used for RDL routing. Layer numbers match the GDS layers actually present
-    // in interposer designs; heights from the SG13G2 process (um).
-    stackup.addLayer(50, 0, 3.2, 0.5, "Metal4");
-    stackup.addLayer(66, 0, 3.7, 0.5, "Via4");
-    stackup.addLayer(67, 0, 4.2, 0.8, "Metal5");
-    stackup.addLayer(125, 0, 5.0, 0.6, "TopVia1");
-    stackup.addLayer(126, 0, 5.6, 2.0, "TopMetal1");
-    stackup.addLayer(133, 0, 7.6, 1.0, "TopVia2");
-    stackup.addLayer(134, 0, 8.6, 3.0, "TopMetal2");
+    // in interposer designs. Every z and height is the interposer PDK's stack
+    // key (um, z = 0 at the substrate top), as in the bundled intm4tm2.yaml, so
+    // this last resort draws in the same frame and its top is the key's plane.
+    stackup.addLayer(50, 0, 0.64, 0.49, "Metal4");
+    stackup.addLayer(66, 0, 1.13, 0.54, "Via4");
+    stackup.addLayer(67, 0, 1.67, 0.49, "Metal5");
+    stackup.addLayer(125, 0, 2.16, 0.8503, "TopVia1");
+    stackup.addLayer(126, 0, 3.0103, 2.0, "TopMetal1");
+    stackup.addLayer(133, 0, 5.0103, 2.8, "TopVia2");
+    stackup.addLayer(134, 0, 7.8103, 3.0, "TopMetal2");
 
     return stackup;
 }

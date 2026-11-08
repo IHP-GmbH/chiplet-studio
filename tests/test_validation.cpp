@@ -322,7 +322,7 @@ TEST(AssemblyValidation, ResolveTechnology)
     comp->set_technology("test_tech");
     assembly.add_component(std::move(comp));
 
-    Technology* resolved = assembly.resolve_component_technology("die1");
+    const Technology* resolved = assembly.resolve_component_technology("die1");
 
     ASSERT_NE(resolved, nullptr);
     EXPECT_EQ(resolved->id(), "test_tech");
@@ -336,7 +336,7 @@ TEST(AssemblyValidation, ResolveTechnologyNotFound)
     comp->set_technology("nonexistent");
     assembly.add_component(std::move(comp));
 
-    Technology* resolved = assembly.resolve_component_technology("die1");
+    const Technology* resolved = assembly.resolve_component_technology("die1");
 
     EXPECT_EQ(resolved, nullptr);
 }
@@ -346,7 +346,7 @@ TEST(AssemblyValidation, ResolveTechnologyInvalidId)
     Assembly assembly;
 
     // Test with empty/invalid component ID
-    Technology* resolved = assembly.resolve_component_technology("");
+    const Technology* resolved = assembly.resolve_component_technology("");
 
     EXPECT_EQ(resolved, nullptr);
 }

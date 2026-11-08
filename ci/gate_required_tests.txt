@@ -1,0 +1,395 @@
+# Tests that MUST be present and pass in a complete gate run.
+#
+# Set identity between the ctest inventory and the JUnit report says the run was
+# complete with respect to itself. It cannot say the build registered the tests
+# it should have: a file never added to a CMakeLists is absent from both and
+# reconciles perfectly. These are the names whose absence has actually happened,
+# or would cost the most.
+#
+# AtomicSave.FailedSaveLeavesTheOriginalIntact and
+# AtomicSave.PreservesTheModeOfTheFileItReplaces are the reason this list exists.
+# They skip on geteuid()==0, so a gate run as root certified save safety without
+# running the tests for it, for months, while reporting them as known
+# display-only skips.
+#
+# The names below come from two places and no count is written down anywhere in
+# this file, deliberately: a total is a second thing to keep true, and the next
+# addition falsifies it silently.
+#
+# The save-safety set is the 12 this file first carried plus the Save,
+# recovery and checkpoint cases that came with whole-document capture.
+#
+# The validated-import set is every case the validated import added: the
+# SaveFailureKind family, the rejected-output policy pair, the hostile-input
+# cases and the import write policy. Until they were pinned, the reconciler
+# could not notice any of them going missing, because presence is checked
+# against this list and a name that was never here is absent from both artifacts
+# and reconciles perfectly. That is the same hole the header above describes,
+# reopened by every test it added.
+#
+# How those names were derived, because the obvious way is wrong. Diffing the
+# TEST() macros between the two trees gives a candidate list; that list was then
+# cross-checked against the ctest inventory in an actual run, and the check
+# earned its place: GdsLoading.KLayoutNotAvailable is a TEST() in the sources
+# that does NOT register when KLayout is available, so a grep-only list would
+# have pinned a name that cannot appear and turned the gate red for a reason
+# having nothing to do with the change. Pin what an inventory says exists, never
+# what a grep says is written.
+#
+# The import-refusal set is three cases, here because the property they
+# hold is one nothing else in the suite would notice losing: a spec the import
+# cannot describe is refused, and the refusal is not then answered by writing
+# the document into the fallback directory anyway.
+# ARefusedSpecIsNotRescuedByTheFallback is the one worth naming. Every other
+# assertion about a refusal would also pass for a guard that ran later, after
+# destination admission; that one would not, because reaching admission on an
+# unwritable destination produces DestinationIo and DestinationIo is what routes
+# to the fallback.
+AtomicSave.FailedSaveLeavesTheOriginalIntact
+AtomicSave.PreservesTheModeOfTheFileItReplaces
+AutoSaveNoticePolicy.ASuccessClearsTheMarkerAndRearmsTheAnnouncement
+AutoSaveNoticePolicy.ASuccessOnAHealthyStateSaysNothing
+AutoSaveNoticePolicy.TheMarkerLastsAsLongAsTheCondition
+CameraFit.ActualNarrowPaneAndWideCaptureContainAllCorners
+CameraFit.InvalidFitsAndResetCannotPoisonResizeFollowing
+CameraFit.ObliquePerspectiveIncludesBoxDepthAndPreservesOrbit
+CameraFit.ResizeFollowsExplicitFitAndCanFitWideAgain
+CameraFit.ResizePreservesEachDeliberateNavigationOperation
+CameraFit.TransientInvalidResizePreservesFitState
+ChipletImportWrite.ADestinationTakenWhileChoosingIsRefusedAgain
+ChipletImportWrite.AFreshDestinationIsWrittenAndReadsBack
+ChipletImportWrite.ANameThatCannotBeResolvedIsStillTaken
+ChipletImportWrite.ANonFiniteDimensionIsRefusedAndNothingIsWritten
+ChipletImportWrite.ANulInAFilesystemFieldIsRefused
+ChipletImportWrite.ARefusedSpecIsNotRescuedByTheFallback
+ChipletImportWrite.AbsentIsFreeUnknownIsTakenAndDanglingIsTaken
+ChipletImportWrite.AnInadmissibleDestinationIsRefusedBeforeAnythingIsWritten
+ChipletImportWrite.AnOccupiedDestinationIsNeverReplaced
+ChipletImportWrite.AnUnwritableDestinationFallsBackAndSaysWhereItWent
+ChipletImportWrite.CancellingWritesNothingAnywhere
+ChipletImportWrite.NoHostileLayoutPathIsRefusedByTheImport
+ChipletImportWrite.WhenTheFallbackFailsTooNoPathIsClaimed
+ChipletSynthHostileInput.ARefusalLeavesAnExistingFileIntact
+ChipletSynthHostileInput.IdentifiersAreNotRetypedByTheReader
+ChipletSynthHostileInput.LayoutPathSurvivesOrTheSaveRefuses
+CommandProcessor.ModelChangedDoesNotClaimFailedTransitions
+CommandProcessor.ModelChangedTracksMergedExecuteUndoRedoAndBranch
+CoordFrameContractWirebondDemo.Anchors
+CoordFrameContractWirebondDemo.FinalizedFileLoaded
+CoordFrameContractWirebondDemo.IOPadsInCanonicalFrame
+CoordFrameContractWirebondDemo.InterposerPosition
+CoordFrameContractWirebondDemo.U1Position
+CoordFrameContractWirebondDemo.U2Position
+Coupon2DVisibility.HierarchicalCarrierPreservesPaletteAndAddsProjectionLayers
+Coupon2DVisibility.SelectingLeafAndReturningToCarrierRestoresFullContentDepth
+DocumentPreservation.CapturedFlowAndOpaqueOrderSurviveButDeletedFlowDoesNotReturn
+DocumentPreservation.CarriesPreambleAndOpaqueBytesIncludingUnterminatedLastBlock
+DocumentPreservation.ConstWorkerReturnsReceiptWithoutAdvancingAssembly
+DocumentPreservation.ExternalChangeAndUnrelatedDestinationRefuse
+DocumentPreservation.FailedWriteNeverAdvancesReceiptOrChangesModel
+DocumentPreservation.FreshModelRecoveryNeverAuthorizesExistingUnrelatedFile
+DocumentPreservation.IntentionalOwnedDeletionDoesNotReviveSourceSections
+DocumentPreservation.ReceiptForAnotherDocumentRefusesEvenIdenticalOpaqueContext
+DocumentPreservation.RecoveryKeepsOriginalBaselineAndCurrentEditsSeparately
+DocumentPreservation.RecoveryRefusesUnrelatedReceiptOpaqueBytesForBothDestinations
+DocumentPreservation.RecoveryRetainsOriginalRelativePathContextAfterSaveAs
+DocumentPreservation.RefusesUnsafeCaptureWithoutTouchingDestinationOrModel
+DocumentPreservation.RepeatedPrimaryAndAutosaveKeepSeparateReceipts
+FlowBlock.UndelimitableFlowLoadsButRefusesToSave
+GdsPlacement.BboxCenterBothOrientations
+GdsPlacement.DetailedFitTransformsReflectionBeforeTakingExtrema
+GdsPlacement.NonzeroOriginFaceDown
+GdsPlacement.NonzeroOriginFaceUp
+GdsPlacement.R3DiesContainedInCarrier
+InterconnectFragmentMerge.UnresolvableAdapterMergesNothing
+KLayout2DViewTest.LoadRealGdsIfDisplayAvailable
+MeshLifecycle.MoveAssignmentReleasesUnrenderedDestination
+MeshLifecycle.UploadMoveReleaseBeforeRender
+RecoveryCheckpoint.ArchiveCollisionAndFinalDirectorySymlinkNeverOverwrite
+RecoveryCheckpoint.ClosingArchivesOnlyIssuedSessionAndPreservesExactBytes
+RecoveryCheckpoint.CorruptionAndUnrelatedReplacementRefuseWithoutOverwrite
+RecoveryCheckpoint.DirectoryReplacementAndOversizePreserveEvidence
+RecoveryCheckpoint.FailedPublicationPreservesLastCompleteBytesAndReceipt
+RecoveryCheckpoint.MissingOwnedFileRecreatesNewIdentityWithoutTouchingOtherSession
+RecoveryCheckpoint.OpaqueRoundtripAndIndependentSessionIdentities
+RecoveryCheckpoint.RecreateRefusesCorruptionAndFinalSymlinkWithoutNewFiles
+RecoveryCheckpoint.RecreateRefusesMissingFilenameInReplacedParent
+RecoveryCheckpoint.RecreateRefusesPermissionFailureAndClosedHandle
+RecoveryCheckpoint.SymlinkedAncestorUsesCanonicalIdentityAndDetectsReplacement
+RecoveryCheckpoint.SymlinksAreNotCandidatesOrWritableTargets
+RecoveryDialogTest.ArchivedCopiesDoNotPromptAtStartupButManualPickerCanOpen
+RecoveryDialogTest.ClickRestoresEditedModelAndOpaqueSourceWithoutChangingFiles
+RecoveryDialogTest.LegacyOnlyHasNoRecoverActionAndKeepsJournal
+RecoveryDialogTest.ManualPickerExcludesOwnIdentityButKeepsOtherActiveAndArchivedCopies
+RecoveryDialogTest.ModifiedAfterSelectionIsRereadAndChecksumRefused
+RecoveryDialogTest.NewestCheckpointFirstAndEqualTimesUsePathOrder
+RecoveryDialogTest.TrashConfirmationDefaultsToNoAndCancellationChangesNothing
+RecoveryDialogTest.ValidEnvelopeWithInvalidPayloadRefusesInProblemLabel
+RejectedOutputPolicy.SuppressDropsTheSidecarAndChangesNothingElse
+RenderModeTest.WirebondDemoLoadsWithTransparentDefaults
+SaveFailureKind.AConcurrentCreatorNeverLosesItsFile
+SaveFailureKind.ACyclicSymlinkIsOccupiedAndNotAResolutionFailure
+SaveFailureKind.ADirectoryThatCannotTakeTheFileIsIo
+SaveFailureKind.ADocumentTheReaderRefusesIsNeitherOccupiedNorIo
+SaveFailureKind.ATargetCreatedInsideTheExclusiveCreateIsNotOverwritten
+SaveFailureKind.AnOccupiedDestinationSaysOccupiedAndAFreshOneIsWritten
+SaveTimeKeySequenceCheck.AKeyTheWriterNeverIntendedIsRefused
+SaveTimeKeySequenceCheck.DocumentsNobodyEditedStillSave
+SaveTimeKeySequenceCheck.EveryTopLevelKeyThisWriterEmitsIsRecorded
+SaveTimeKeySequenceCheck.FlowBytesThatAreNotAFlowBlockAreRefusedBeforeAnythingIsWritten
+SaveTimeKeySequenceCheck.TheFlowKeyIsRecordedOnTheAUTHOREDPath
+SaveTimeKeySequenceCheck.TheFlowKeyIsRecordedOnTheSOURCEBYTESPath
+SaveTimeReaderCheck.ARejectedDocumentIsNotWrittenAndIsNotLost
+SaveTimeReaderCheck.LegitimateDocumentsStillSave
+SaveTimeReaderCheck.TheRescueWriteIsNotRedirectedBySymlink
+SeparatorEscaping.NoFixtureDerivedEmissionSiteEscapesTheSweep
+TopLevelKeyIntent.ANonSplittableDocumentIsRefusedAsSuch
+TopLevelKeyIntent.ARepeatedKeyIsRefusedNotSwallowed
+TopLevelKeyIntent.AnEmptyIntentIsRefusedRatherThanAgreedWith
+TopLevelKeyIntent.TheSequenceIsCompared
+VendoredReaderContract.ARepeatedTopLevelKeyThrows
+VendoredReaderContract.NotSplittableLeavesNoKeysToRead
+VendoredReaderContract.SplitKeysAreInDocumentOrder
+VendoredReaderContract.SplitKeysCanNameAKeyTheParserNeverSees
+VendoredReaderContract.SplitKeysExcludeThePreamble
+chiplet_cross_reader
+chiplet_python_bindings
+
+# The GUI-polish set is the fifteen cases the GUI polish work added. The names
+# below were taken from the ctest inventory of the gate run that first executed
+# them, and not from a grep of the sources: that is the rule
+# the validated-import note above earned, and this set had no inventory to obey
+# it with until that run existed.
+#
+# What they hold that nothing else would notice losing. DockWidthPolicy is the
+# arithmetic for the 2D dock's opening width, and its first version could only
+# GROW: at the observed geometry it computed a target, saw the dock was already
+# wider, and returned having changed nothing while marking itself done. It could
+# not correct the layout it was added for, and no test existed to say so.
+# ShortcutPolicy is why Save As has a key at all in an image whose platform
+# theme resolves QKeySequence::SaveAs to nothing.
+#
+# What the two HierarchyPanelTest cases do NOT cover, because the name of the
+# second one reads like more than it is. They run at a 129 px panel, narrower
+# than any real left dock, and establish only the column policy: content sizing
+# beats stretch when the panel cannot hold the id. Readability of U1, U2 and the
+# interposer at DEFAULT dock width, without unbounded left-dock growth, is a
+# rehearsal question against a written expectation and no unit test here answers
+# it.
+DockWidthPolicy.AsksForNoChangeWhenTheLayoutAlreadyMatches
+DockWidthPolicy.GrowsOnlyAsFarAsTheViewportCanAfford
+DockWidthPolicy.ShrinksADockThatAlreadyStarvedTheViewport
+DockWidthPolicy.ShrinksToRepayAViewportDeficit
+DockWidthPolicy.ZeroWhenThereIsNothingToGive
+DrillDownPanelTest.BackTooltipTracksWhereBackWouldGo
+DrillDownPanelTest.OverviewChoiceSurvivesContextCalls
+DrillDownPanelTest.OverviewIsOffOnAFreshPanel
+DrillDownPanelTest.OverviewToggleAndMemberStayInStep
+HierarchyPanelTest.NameColumnSizesToContentNotToLeftoverWidth
+HierarchyPanelTest.NarrowPanelKeepsTheIdColumnWideEnough
+ShortcutPolicy.AnEmptyFallbackYieldsNothing
+ShortcutPolicy.EmptyPlatformBindingTakesTheFallback
+ShortcutPolicy.EveryPlatformBindingIsKept
+ShortcutPolicy.PlatformBindingWinsAndTheFallbackIsIgnored
+#
+# The viewing set is the thirty cases that came with per-technology 2D sheets,
+# fill and the viewing notes. The names were taken from the ctest inventory of
+# the gate run that first executed them, not from a grep of the sources.
+#
+# They are pinned because what they hold fails quietly. A fill layer drawn at
+# open, a GDS layer 3D skips, a declared stackup that did not load, a die cell
+# the 2D view cannot find: each still renders something plausible, and only
+# these cases say it is not what the file asked for.
+# AssemblySheet.ComposedLoadGroupsRowsHidesFillAndNotesTheMissingDie loads a
+# real layout into KLayout and needs the display; without one it skips, which
+# this gate counts as a failure.
+AssemblySheet.CarrierOnlyLayerIsGroupedAndStyledByTheCarrier
+AssemblySheet.ComposedLoadGroupsRowsHidesFillAndNotesTheMissingDie
+AssemblySheet.DieOnlyLayerIsStyledByTheDieSheet
+AssemblySheet.FillStartsHiddenOnEitherSide
+AssemblySheet.FillWithoutASheetEntryIsStillFill
+AssemblySheet.GroupsComeCarrierSharedDiesUnassigned
+AssemblySheet.LayerNoSheetNamesKeepsDefaultStyling
+AssemblySheet.LayerOnBothSidesIsOneSharedRowStyledByTheCarrierNamingBoth
+AssemblySheet.OccupancySplitsCarrierAndDieByCellPrefix
+FillAndNotesWidgets.NotesBarIsHiddenWhenThereIsNothingToSay
+FillAndNotesWidgets.PropertiesMarksFillAndListsRenderedLayersTheLypLacks
+FillMeshes.ABorrowedHeightIsNotFill
+FillMeshes.FillIsMarkedByItsExactKey
+FillMeshes.LayersTheStackupPlacesNowhereAreReportedNotDropped
+FillMeshes.SetFillVisibleTouchesOnlyFill
+StackupPurpose.FillerIsReadAndOtherValuesAreKeptAsText
+TechResolve.BundledIntm4tm2HasFourFillersTheContractAttachAndARealSubstrate
+TechResolve.MissingDeclaredStackupFallsBackToBuiltInAndSaysSo
+TechResolve.NoStackupAnywhereNamesWhat3DDerivesInstead
+TechResolve.PdkStackupFixtureAgreesWithBundledOnEverySharedLayer
+TechResolve.PlacementNoteForADieTheFilePlacesOffItsBumps
+TechResolve.SeatingFallsBackToTheBuiltInStackupLikeTheView
+TechResolve.SheetNoteNamesTheBuiltInSheetOrDefaultStyling
+TechResolve.UnmodeledNoteListsUpToTheLimitThenCounts
+TechResolve.UnreadableDeclaredStackupSaysCouldNotRead
+ViewingPaths.FlowTechSetToAFileIsNotAFolder
+ViewingPaths.FlowTechSetToAFolderResolvesBothFiles
+ViewingPaths.LayoutPathsStillRefuseAnUnresolvedVariable
+ViewingPaths.UnknownVariableInLayerPropertiesIsANoteWithDefaultStyling
+ViewingPaths.UnsetFlowTechOpensWithNotesAndSavesTheTextBack
+#
+# Two more, from the ctest inventory of the gate run that added them: the
+# roots the example specs declare for the gf180 layer sheet and for Studio's
+# own stackups. Without them every such declaration falls back with a note,
+# and a gf180 die draws in default colours.
+TechResolve.ChipletStudioRootResolvesFromTheEnvironmentOrBesideTheProject
+TechResolve.Gf180mcuPdkRootResolvesFromTheEnvironmentOrBesideTheProject
+#
+# Nine more, with the shape counts, the gf180mcu fill and the named .lyp
+# source. The names were cut from the TEST lines of the commits that added
+# them; the gate fails if its inventory lacks any of them. A limit that drops
+# shapes still draws a plausible die, and a misread sheet still draws in some
+# colour; only these say how much 3D left out, and that the sheet was read.
+FillAndNotesWidgets.PropertiesRowSaysHowMany3DShowsAndHasNoCheckboxWhenItShowsNone
+LayerPropertiesFile.EmptyNameTakesTheNameInTheSource
+LayerPropertiesUtils.ParseLayerSourceWithNameAndCellview
+ShapeCounts.ADatatypeWithNoEntryIsCountedAtTheHeightItIsDrawnAt
+ShapeCounts.ExtractorCountsWhatEachLimitTookAndTheNoteSaysIt
+ShapeCounts.MeshBuilderStopsWhereItSaysItDoes
+ShapeCounts.NoteIsEmptyOnlyWhenEveryShapeIsDrawn
+ShapeCounts.NoteNamesBothNumbersAndEachLimitThatTookShapes
+ShapeCounts.RowsCarryTheCountAndListALayer3DDrewNoneOf
+TechResolve.BundledGf180mcuMarksEveryFillLayerItsPdkSheetNames
+#
+# The attach-plane set. The file's plane wins over the stackup's in seating, in
+# the stackup 3D draws with and in the notes; a z derived from the plane is
+# summed and written as its decimal; and the techfile and the last-resort stack
+# keep the interposer PDK's z and heights. The names were cut from the TEST
+# lines of the commits that added them; the gate fails if its inventory lacks
+# any of them. A die seated on the wrong plane, or a z written as
+# 54.810299999999998, still opens and draws, so nothing else would notice.
+Assembly.CalculateZKeepsEveryDecimalOfTheHeight
+Assembly.CalculateZSumsThePlaneAndTheStackAsDecimals
+ChipletFormat.APlaneDerivedZIsWrittenAsItsDecimal
+DecimalText.APlaneAndAHeightSumToTheDecimal
+SceneLoad.TheViewDrawsTheBumpsOnTheFilesPlane
+SceneLoad.TheFilterRebuildKeepsTheBumpsOnTheFilesPlane
+TechResolve.InterposerTechfileAgreesWithThePdkStackupOnEverySharedLayer
+TechResolve.LastResortStackAgreesWithThePdkStackupOnEveryLayer
+TechResolve.TheFilesPlaneWinsOverTheStackups
+TechResolve.TheViewDrawsTheBumpsOnTheFilesPlane
+#
+# The fast 3D view set. Fast and Every shape read each shape into tiles and
+# choose per frame which tiles draw as shapes and which as coverage; the
+# counter checks that every layer's buckets add up to what was prepared, the
+# GL test counts the triangles the drawer emits against that choice, and the
+# standard pins hold the default view to what it drew before. The close camera
+# tests keep its eye out of every body. The names were cut from the binary's
+# test list and the TEST lines of the commits that added them; the gate fails
+# if its inventory lacks any of them. A drawer that drops
+# a run of tiles, or a standard view the new setting changed, still draws a
+# plausible assembly, so nothing else would notice.
+CloseCamera.NoClearCellIsAFailure
+CloseCamera.TheEyeIsInNoBoxAndSeesItsTargetPastThemAll
+CloseCamera.TheSearchTakesTheNearestClearCellAndBreaksTiesByXThenZ
+FastFrame.LayersSharingATopTakeTurnsAndAHiddenLayerStaysInTheFrame
+FastFrame.TheSpreadMovesAFastLayerAsTheStandardViewMovesItsMesh
+FastGL.ThePrimitiveQueryCountsWhatTheChoiceDrew
+FastPlacement.TheModelPutsAGdsPointWhereTheStandardMeshHasIt
+FastRecords.EveryShapeIsCountedAndTheAreaIsKept
+FastRecords.TheMemoryLimitPreparesAPrefixAndNeverSplitsAShape
+FastRows.APreparedLayerIsCountedAndCanBeSwitched
+FastSource.ReadsWhatStandardPlacesAndLeavesTheBodyToIt
+ShapeTiles.AShapeLargerThanATileIsATileOfItsOwn
+ShapeTiles.CoverageMapIsTheAreaFractionAndNeverDropsAShape
+ShapeTiles.EveryShapeLandsInOneTileAndATileIsOneRange
+StandardPin.ADatatypeWithNoEntryIsMeshedWithEveryShapeOfItsGdsLayer
+StandardPin.ALayoutAtEveryLimitGivesTheSameCountsRowsAndNotes
+StandardPin.TheLimitsAreTheOnesTheDefaultViewHad
+TileChoice.ATileBetweenTheThresholdsKeepsItsState
+TileChoice.BucketsAddUpAndHiddenAndOutsideAreWhole
+TileChoice.EveryShapeHasNoCoverageAndNoBudget
+TileChoice.TheBudgetServesTheNearestTilesFirst
+TileChoice.TheModelMatrixPlacesAndScalesTheTiles
+TileChoiceText.NotesNameTheSettingTheCoverageAndTheLimit
+TileChoiceText.RowsAddUpAndSayWhichBucket
+ViewCount.ACameraThatCannotBePlacedIsAFailure
+ViewCount.AComponentNotDetailedShowsNoLayers
+ViewCount.EveryShapeDrawsNoCoverage
+ViewCount.FastBucketsAddUpAtEachCamera
+ViewCount.FastNamesWhatTheMemoryLimitLeftOut
+ViewCount.FastPreparesEveryShapeAndLeavesTheBodyToTheStackup
+ViewCount.ModeNamesSetTheirModeAndABadOneSetsNone
+ViewCount.StandardAccountsForEveryShapeOfThePinLayout
+ViewCount.StandardFailsWhenAGapLosesItsNote
+ViewCount.StandardListsTheCountNotesOfTheLayersInView
+ViewCount.TheFillSwitchDecidesAFillLayer
+ViewNotes.EachSettingSaysWhatIsDrawn
+#
+# The detail note set. Fill and Fast or Every shape draw only on a Detailed
+# component, and every die opens Transparent, so switching fill on at open
+# drew nothing and said nothing. These hold the note that names those dies,
+# its silence at open, its place first in the strip, and the refresh on a
+# fill or render-mode switch. Without them the gap goes quiet again and the
+# view still looks plausible.
+DetailNote.ADetailedComponentIsNotAPart
+DetailNote.FastAndEveryNameEveryPart
+DetailNote.FillOffAndStandardSaysNothing
+DetailNote.FillOnLeavesOutAPartWithoutFill
+DetailNote.FillOnNamesEachDieWithFill
+FillAndNotesWidgets.FillAndRenderModeSwitchesRefreshTheNotes
+ViewNotes.TheDetailNoteLeadsEachSetting
+#
+# The connections MainWindow makes between panels. MainWindow is not in the
+# test target, so a missing connection compiles, links and reads green; the
+# Hierarchy's Properties action had no receiver at all, and undo of a render
+# mode change reached neither view. These make each connection with the
+# helper MainWindow calls and drive it.
+PanelWiring.ThePropertiesRequestShowsTheComponentInFront
+PanelWiring.UndoAndRedoOfARenderModeReachTheViewAndTheHierarchy
+#
+# The box drawn for a component that is not drawn from its layout. Back faces
+# are culled, and four of the box's six faces were wound inside out: an opaque
+# box seen from above showed its bottom face through a missing top, and a
+# face-down one only looked right because its mirror switch, meant for the
+# mirrored layer geometry, reversed the box as well.
+BoxMesh.EveryFaceWindsCounterClockwiseFromOutside
+BoxMesh.OpaqueBoxesShowTheirTopFaceUpAndFaceDown
+#
+# The type a lone GDS imports as. Every import was a Die, an interposer GDS
+# included; the type now comes from the technology registry's role table, and
+# the import dialog's "Imports as" line reads the same table.
+ChipletSynth.TheTechnologyDecidesWhetherAnImportIsADieOrAnInterposer
+ImportGdsDialog.TheImportsAsLineNamesTheTypeTheImportWrites
+#
+# Standard's fill. The standard read keeps the first 10,000 shapes of a layer
+# in read order, which are one region of it; drawn as fill, that told the user
+# the fill was there and nowhere else. Standard now never draws a fill mesh,
+# and with fill on draws every fill shape as hatched coverage tiles. The red
+# is a fill layer whose read order fills one quadrant first.
+FastGL.FillCoverageIsHatchedAndOtherCoverageIsNot
+SceneLoad.ShowFillInStandardReadsEveryFillShapeAndSaysTiles
+StandardFill.FillReadInOneQuadrantFirstDrawsTilesOverTheWholeExtent
+ViewCount.StandardDrawsFillAsCoverageTilesOverTheWholeLayer
+ViewNotes.StandardSaysFillIsDrawnAsTilesNotAsTheFirstShapesRead
+#
+# The strip says fill is being read only when a die whose fill is drawn
+# (Detailed, with or without its substrate, and shown) waits for it. A die
+# switched out of Detailed, or hidden, no longer makes the strip say fill is
+# coming next to the note that it is not drawn.
+SceneLoad.TheStripSaysFillIsBeingReadOnlyForADieWhoseFillIsDrawn
+#
+# The light is fixed in the scene, from above. The shaders light a face in
+# view space and were given the scene's light unturned, so it moved with the
+# camera: a face's shade gave its angle to the camera, and a top seen from
+# straight above was lit at 0.55 instead of 0.79. The standard view and the
+# fast drawer now turn the light by the view.
+BoxMesh.EachFaceIsLitByItsAngleToTheSceneNotToTheCamera
+FastGL.ALayersTopIsLitByItsAngleToTheSceneNotToTheCamera
+#
+# The assembled GDS leaves the carrier fill out, so 2D reads it from the
+# interposer's own GDS on the first Show Fill. Without these, a 2D that shows
+# only the dies' fill, or the carrier's fill drawn from a file in another
+# frame, still looks like fill switched on. The CarrierFill2D cases need the
+# display, as the composed load does.
+AssemblySheet.CarrierFillSourceIsTheInterposerLayoutWhenItIsNotTheShownOne
+CarrierFill2D.ALayoutThatDrawsTheCarrierFillIsNotOverlaid
+CarrierFill2D.AnotherFrameIsNotDrawnAndSaysSo
+CarrierFill2D.IsReadOnTheFirstShowFillAndFollowsTheSwitch
+CarrierFill2D.NoOutlineToCheckIsNotDrawnAndSaysSo

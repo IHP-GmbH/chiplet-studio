@@ -18,7 +18,7 @@ IOPad::IOPad(const string_type& id, IOClass io_class)
 const IOPad::string_type& IOPad::id() const { return m_id; }
 void IOPad::set_id(const string_type& id) { m_id = id; }
 
-IOClass IOPad::io_class() const { return m_io_class; }
+const std::optional<IOClass>& IOPad::io_class() const { return m_io_class; }
 void IOPad::set_io_class(IOClass cls) { m_io_class = cls; }
 
 const IOPad::string_type& IOPad::net() const { return m_net; }
@@ -30,7 +30,7 @@ void IOPad::set_position(const position_type& pos) { m_position = pos; }
 const IOPad::size_type& IOPad::size() const { return m_size; }
 void IOPad::set_size(const size_type& sz) { m_size = sz; }
 
-const IOPad::string_type& IOPad::layer() const { return m_layer; }
+const std::optional<IOPad::string_type>& IOPad::layer() const { return m_layer; }
 void IOPad::set_layer(const string_type& layer) { m_layer = layer; }
 
 std::string io_class_to_string(IOClass cls)

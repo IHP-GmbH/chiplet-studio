@@ -18,6 +18,8 @@
 
 namespace chiplet {
 
+enum class ComponentType;
+
 /**
  * Layer elevation definition for 3D extrusion
  */
@@ -28,8 +30,13 @@ struct LayerElevation {
     double thickness = 1.0;    // Layer thickness in micrometers
     std::string name;
     bool visible = true;
+    // The stackup's own word for what the layer is for (`purpose:` in the
+    // BlenderGDS YAML). Kept as written; only "filler" changes behaviour:
+    // fill is listed in both views and starts hidden. Empty when undeclared.
+    std::string purpose;
 
     double z_top() const { return z_bottom + thickness; }
+    bool isFiller() const { return purpose == "filler"; }
 
     LayerKey key() const { return LayerKey(layer, datatype); }
 };
@@ -43,7 +50,7 @@ public:
 
     // Add a layer to the stackup
     void addLayer(int layer, int datatype, double z_bottom, double thickness,
-                  const std::string& name = "");
+                  const std::string& name = "", const std::string& purpose = "");
 
     // Find elevation for a layer (exact layer/datatype match)
     const LayerElevation* find(int layer, int datatype) const;
@@ -53,6 +60,12 @@ public:
     // Returns the first match -- useful as fallback when exact datatype
     // is not mapped (e.g. filler/label datatypes sharing the same z).
     const LayerElevation* findByLayer(int layer) const;
+
+    // The entry that gives `key` its height in 3D: its own, else the layer
+    // number's (findByLayer). Null when there is neither. `borrowed`, when
+    // given, says whether the height is another key's. The 3D view draws a
+    // layer with this and counts its shapes with it, so the two cannot differ.
+    const LayerElevation* heightFor(const LayerKey& key, bool* borrowed = nullptr) const;
 
     // Get all layers sorted by z_bottom
     std::vector<LayerElevation> sortedLayers() const;
@@ -85,6 +98,13 @@ public:
     // around the opening rises above the real mounting surface).
     bool hasAttachmentSurfaceZ() const { return m_hasAttachmentSurfaceZ; }
     double attachmentSurfaceZ() const { return m_attachmentSurfaceZ; }
+    // A file that declares its interposer's plane overrides the stackup's:
+    // seating and the render set it before merging the fragments.
+    void setAttachmentSurfaceZ(double z)
+    {
+        m_attachmentSurfaceZ = z;
+        m_hasAttachmentSurfaceZ = true;
+    }
 
     // Generate default stackup from .lyp file (basic stacking)
     static LayerStackup fromLayerProperties(const LayerPropertiesFile& lyp,
@@ -107,7 +127,10 @@ public:
 
     // Resolution policy for the active fragment keys -- THE single place
     // that decides which fragments an assembly uses
-    // (docs/interconnect_render_contract.md, L2):
+    // (interconnect render contract, rule L2; the contract document is a
+    // local development note and is not published with this repo, so the
+    // rule is stated here in full and enforced by
+    // tests/test_layer_stackup_blendergds.cpp):
     // method ids that resolve to a fragment win; the legacy adapter id is
     // used only when NO method id resolves (it carries the family-default
     // heights, which must not overwrite resolved per-method values).
@@ -123,7 +146,9 @@ public:
     // Merge the interconnect fragment for one key into this stackup --
     // THE single entry point for every consumer of the body layers' z
     // (3D render and die-seating z calculation), so their views cannot
-    // diverge. Offset rule (docs/interconnect_render_contract.md, L1):
+    // diverge. Offset rule (interconnect render contract, rule L1; stated
+    // here in full for the same reason, and enforced by the
+    // InterconnectFragmentMerge tests):
     // fragment z_reference == "attachment_surface" -> offset by this
     // stackup's attachment_surface_z (missing -> warn + best-effort
     // totalHeight()); no marker -> legacy absolute z + deprecation warning.
@@ -194,12 +219,20 @@ namespace BlenderGDSConfigs {
 // Resolve stackup YAML path for a technology ID
 std::string stackupPath(const std::string& techId);
 
-// Resolve the interconnect PDK 3D stackup fragment for an interconnect adapter
-// (e.g. "vendorx_microbump" -> interconnect_pdk/libs.tech/chiplet_studio/
-// stackup_fragments/vendorx_microbump.stackup.yaml). $INTERCONNECT_PDK_ROOT
+// Resolve the interconnect PDK 3D stackup fragment for a fragment KEY
+// (e.g. "cupillar_opt3" -> interconnect_pdk/libs.tech/chiplet_studio/
+// stackup_fragments/cupillar_opt3.stackup.yaml). $INTERCONNECT_PDK_ROOT
 // first (set-but-invalid falls through), then a sibling-checkout walk up from
 // the configs dir. Empty when unresolvable -- callers skip the merge.
-std::string interconnectStackupFragmentPath(const std::string& adapter);
+//
+// The key is normally a per-die connection METHOD id, not an adapter id: see
+// LayerStackup::resolveInterconnectKeys, which tries the method ids first and
+// only falls back to the assembly-level adapter when none of them resolves.
+// This parameter was called `adapter` until 2026-09; two separate reviewers
+// read that name, concluded the studio selects geometry by adapter, and one
+// opened a defect on it before anyone read the caller. Geometry resolves by
+// METHOD; the adapter axis is DRC and parameters.
+std::string interconnectStackupFragmentPath(const std::string& key);
 
 // Resolve the bundled KLayout layer-properties (.lyp) for a supported PDK,
 // shipped under pdks/<pdk>/<file>.lyp (sibling of the configs dir). Lets an
@@ -207,6 +240,14 @@ std::string interconnectStackupFragmentPath(const std::string& adapter);
 // dither) instead of only the stackup-derived layer list. Returns "" when the
 // PDK ships no bundled .lyp (e.g. sg13cmos5l, gf180) or the file is missing.
 std::string pdkLayerPropertiesPath(const std::string& techId);
+
+// The component type a single GDS imports as (File > Import GDS) for a
+// technology id, matched as stackupPath matches it: Interposer for intm4tm2,
+// Die for every other id, an empty (custom) one included. No technology
+// descriptor or config declares whether a PDK builds interposers or dies, so
+// the role is this registry's, beside the stackup and .lyp it already maps the
+// same ids to. The import and the dialog's "Imports as" line both ask here.
+ComponentType importedComponentType(const std::string& techId);
 
 // Resolve the generic black-box color scheme path
 // (configs/stackups/colors/generic/<scheme>.yaml). Empty if no configs dir.

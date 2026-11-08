@@ -17,5 +17,5 @@ components:
   - id: interposer
     type: interposer
     anchor: bbox_center
-    dimensions: {width: 2000, height: 2000, thickness: 13.83}
+    dimensions: {width: 2000, height: 2000, thickness: 10.8103}
     position: {x: 1000, y: 1000, z: 0}

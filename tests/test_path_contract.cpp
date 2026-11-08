@@ -8,7 +8,7 @@
  * The released adk-tools Dockerfile bakes in configs/ and configs/stackups/
  * with a fixed set of stackup fragments, plus the discovery sibling dirnames.
  * Renaming any of them silently breaks the image at build time. These tests
- * fail at ctest (gate 5 of the image build) instead, with a clear message, so
+ * fail at ctest (a step of the image build) instead, with a clear message, so
  * a rename is caught here rather than in the downstream image build.
  */
 

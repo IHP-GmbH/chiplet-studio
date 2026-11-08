@@ -74,6 +74,26 @@ const Technology::string_type& Technology::stackup_source() const
     return m_stackupSource;
 }
 
+void Technology::set_layer_properties_problem(const string_type& why)
+{
+    m_layerPropertiesProblem = why;
+}
+
+const Technology::string_type& Technology::layer_properties_problem() const
+{
+    return m_layerPropertiesProblem;
+}
+
+void Technology::set_stackup_problem(const string_type& why)
+{
+    m_stackupProblem = why;
+}
+
+const Technology::string_type& Technology::stackup_problem() const
+{
+    return m_stackupProblem;
+}
+
 void Technology::set_dbu(double dbu)
 {
     m_dbu = dbu;

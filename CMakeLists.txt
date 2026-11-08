@@ -28,7 +28,7 @@ include(FetchContent)
 FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
+    GIT_TAG 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03 # v3.11.3
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
@@ -48,7 +48,7 @@ if(ENABLE_PYTHON_SCRIPTING)
         FetchContent_Declare(
             pybind11
             GIT_REPOSITORY https://github.com/pybind/pybind11.git
-            GIT_TAG v2.11.1
+            GIT_TAG 8a099e44b3d5f85b20f05828d919d2332a8de841 # v2.11.1
         )
         FetchContent_MakeAvailable(pybind11)
         set(HAVE_PYTHON TRUE)
@@ -67,6 +67,14 @@ endif()
 set(KLAYOUT_SRC_DIR "${CMAKE_SOURCE_DIR}/extern/klayout/src")
 set(KLAYOUT_BUILD_DIR "" CACHE PATH "Path to KLayout build directory (e.g., extern/klayout/bin-release)")
 
+# A build without KLayout still compiles and still passes most of the suite:
+# the 2D view degrades to a stub. That makes a failed KLayout build look like a
+# successful Chiplet Studio build, which is how a gate goes green while proving
+# nothing about the geometry path. Any build that is meant to be verified sets
+# this, and then a missing KLayout stops the configure instead of the review.
+option(CHIPLET_REQUIRE_KLAYOUT
+    "Fail the configure when KLayout integration is unavailable" OFF)
+
 # Check if KLayout libraries exist
 set(HAVE_KLAYOUT FALSE)
 if(KLAYOUT_BUILD_DIR)
@@ -76,8 +84,19 @@ if(KLAYOUT_BUILD_DIR)
         set(HAVE_KLAYOUT TRUE)
         message(STATUS "KLayout libraries found at ${KLAYOUT_BUILD_DIR}")
     else()
-        message(WARNING "KLAYOUT_BUILD_DIR set but libraries not found. Run KLayout build first.")
+        # Unconditionally fatal, option or not: the caller asked for KLayout at
+        # a specific path and it is not there. There is no reading of that which
+        # means "carry on without it".
+        message(FATAL_ERROR
+            "KLAYOUT_BUILD_DIR is set to ${KLAYOUT_BUILD_DIR} but no KLayout "
+            "library was found there. Build KLayout first "
+            "(extern/klayout/build.sh -without-qtbinding), or unset "
+            "KLAYOUT_BUILD_DIR to build without KLayout integration.")
     endif()
+elseif(CHIPLET_REQUIRE_KLAYOUT)
+    message(FATAL_ERROR
+        "CHIPLET_REQUIRE_KLAYOUT is ON but KLAYOUT_BUILD_DIR is not set. "
+        "Point it at the KLayout build directory (extern/klayout/bin-release).")
 else()
     message(WARNING "KLAYOUT_BUILD_DIR not set. KLayout integration will be disabled.")
 endif()
@@ -115,8 +134,10 @@ set(CORE_SOURCES
     src/core/Netlist.cpp
     src/core/Technology.cpp
     src/core/LayerStackup.cpp
+    src/core/TechResolve.cpp
     src/core/CommandProcessor.cpp
     src/core/CommandJournal.cpp
+    src/core/RecoveryCheckpoint.cpp
     src/core/CommandFactory.cpp
     src/core/commands/CmdMoveComponent.cpp
     src/core/commands/CmdRenameComponent.cpp
@@ -156,6 +177,11 @@ set(VIEW3D_SOURCES
     src/view3d/GDSAnalyzer.cpp
     src/view3d/LayerMeshBuilder.cpp
     src/view3d/ShapeFilter.cpp
+    src/view3d/SceneLoad.cpp
+    src/view3d/ShapeTiles.cpp
+    src/view3d/TileChoice.cpp
+    src/view3d/ViewCount.cpp
+    src/view3d/FastShapesGL.cpp
     ${VIEW3D_MATH_SOURCES}
 )
 
@@ -163,6 +189,7 @@ set(VIEW2D_SOURCES
     src/view2d/KLayoutBridge.cpp
     src/view2d/LayerProperties.cpp
     src/view2d/KLayout2DView.cpp
+    src/view2d/AssemblySheet.cpp
     src/view2d/EmbeddedDispatcher.cpp
     src/view2d/CellComponentMapper.cpp
     src/view2d/OverviewNavigator.cpp
@@ -173,6 +200,7 @@ set(UI_SOURCES
     src/ui/HierarchyPanel.cpp
     src/ui/PropertiesPanel.cpp
     src/ui/DrillDownPanel.cpp
+    src/ui/ViewingNotesBar.cpp
     src/ui/ComponentStyle.cpp
     src/ui/UnitConverter.cpp
     src/ui/CrashRecoveryDialog.cpp
@@ -197,6 +225,31 @@ set(SHADER_SOURCES
     src/view3d/shaders/grid.frag
 )
 
+# A missing enumerator in a switch over one of this project's enums is a BUILD
+# FAILURE, not a warning nobody reads.
+#
+# The reason is specific rather than hygienic. Several enums here model a
+# vocabulary the .chiplet format owns, and the format grows: an added member is
+# a MINOR there, so it arrives without anyone in this repo touching a line.
+# There are exhaustive switches over those enums with no `default:` arm, which
+# is the right way to write them, and with no diagnostic a new enumerator falls
+# through every one of them and each returns its trailing fallback. A guessed
+# ComponentType, for one, reads as Die and seats every component at z=0.
+#
+# -Wswitch is scoped on purpose. It does NOT need -Wall (measured on this image:
+# g++ 11.4 fires it standalone), so this buys the one diagnostic that matters
+# without a wall of unrelated noise that would have to be triaged before the
+# guard could be turned on at all. -Werror= rather than -W, because a warning in
+# a build that prints hundreds of lines is a warning nobody sees.
+#
+# Applied per target rather than to the directory, so that chiplet_gds3d keeps
+# its own -w: it is vendored GDS3D and this project does not get to have
+# opinions about its warnings. The vendored .chiplet reader IS compiled into
+# these three targets and IS under the guard; it was checked rather than
+# assumed, and it builds clean, so it needed no exemption. If it ever stops
+# building clean the answer is to exempt that one file, never to edit it.
+set(CHIPLET_SWITCH_GUARD -Werror=switch)
+
 # Main executable
 add_executable(chiplet-studio
     src/main.cpp
@@ -220,6 +273,8 @@ qt_add_resources(chiplet-studio "images"
     PREFIX "/images"
     FILES resources/ihp_logo.png
 )
+
+target_compile_options(chiplet-studio PRIVATE ${CHIPLET_SWITCH_GUARD})
 
 target_link_libraries(chiplet-studio
     Qt6::Core
@@ -282,6 +337,55 @@ if(HAVE_PYTHON)
     target_link_libraries(chiplet-studio pybind11::embed)
 endif()
 
+# What the 3D view draws for a .chiplet, counted from the view's own loading
+# code: no window, the same shapes. It carries the whole 3D view so that it
+# can render one frame of it as well.
+add_executable(studio-viewcount
+    src/tools/studio_viewcount.cpp
+    ${CORE_SOURCES}
+    ${FLOW_SOURCES}
+    ${FORMAT_SOURCES}
+    ${VIEW3D_SOURCES}
+    src/view2d/LayerProperties.cpp
+)
+qt_add_resources(studio-viewcount "viewcount_shaders"
+    PREFIX "/shaders"
+    FILES ${SHADER_SOURCES}
+)
+target_compile_options(studio-viewcount PRIVATE ${CHIPLET_SWITCH_GUARD})
+target_link_libraries(studio-viewcount
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::OpenGLWidgets
+    Qt6::Core5Compat
+    Qt6::Concurrent
+    yaml-cpp
+    nlohmann_json::nlohmann_json
+    chiplet_gds3d
+)
+if(HAVE_KLAYOUT)
+    target_compile_definitions(studio-viewcount PRIVATE HAVE_KLAYOUT HAVE_QT)
+    target_link_directories(studio-viewcount PRIVATE
+        ${KLAYOUT_BUILD_DIR}
+        ${KLAYOUT_BUILD_DIR}/db_plugins
+    )
+    target_link_libraries(studio-viewcount
+        klayout_tl
+        klayout_gsi
+        klayout_db
+        -Wl,--no-as-needed
+        gds2
+        -Wl,--as-needed
+    )
+    set_target_properties(studio-viewcount PROPERTIES
+        BUILD_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
+        INSTALL_RPATH "${KLAYOUT_BUILD_DIR};${KLAYOUT_BUILD_DIR}/db_plugins"
+    )
+endif()
+target_compile_definitions(studio-viewcount PRIVATE
+    CONFIGS_DIR="${CMAKE_SOURCE_DIR}/configs")
+
 # Python scripting module
 if(HAVE_PYTHON)
     # Create Python module 'chiplet_studio'
@@ -291,6 +395,8 @@ if(HAVE_PYTHON)
         ${FLOW_SOURCES}
         ${FORMAT_SOURCES}
     )
+
+    target_compile_options(chiplet_studio_py PRIVATE ${CHIPLET_SWITCH_GUARD})
 
     target_include_directories(chiplet_studio_py PRIVATE
         ${CMAKE_SOURCE_DIR}/src

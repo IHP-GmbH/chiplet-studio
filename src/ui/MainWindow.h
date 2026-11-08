@@ -9,10 +9,13 @@
 #define CHIPLET_UI_MAINWINDOW_H
 
 #include <QMainWindow>
+#include "AutoSaveState.h"
 #include <QFutureWatcher>
 #include <memory>
+#include <optional>
 #include "core/Assembly.h"
 #include "core/CommandProcessor.h"
+#include "core/RecoveryCheckpoint.h"
 
 class QToolBar;
 class QAction;
@@ -22,6 +25,7 @@ class QDoubleSpinBox;
 class QProgressDialog;
 class QTimer;
 class QStatusBar;
+class QCloseEvent;
 
 class QDockWidget;
 
@@ -38,6 +42,7 @@ class ScriptEngine;
 class FlowEngine;
 class FlowPanel;
 class NetGraphPanel;
+class ViewingNotesBar;
 
 /**
  * MainWindow is the main application window.
@@ -76,10 +81,16 @@ signals:
      */
     void loadingError(const QString& error);
 
+    void recoveryCheckpointSaved(const QString& path);
+    void recoveryCheckpointFailed(const QString& reason);
+    void recoveryCheckpointDuration(qint64 microseconds, bool success);
+
 private slots:
     void onFileOpen();
     void onFileReload();
     void onFileSave();
+    void onFileSaveAs();
+    void onFileRecovery();
     void onFileNew();
     void onImportGds();
     void onExportPng();
@@ -93,8 +104,10 @@ private slots:
 
     // Auto-save
     void onAutoSave();
+    bool checkpointRecovery();
 
 protected:
+    void closeEvent(QCloseEvent* event) override;
     // Keeps the 3D top-down mini-map pinned to a corner of the AssemblyView as
     // it resizes (the mini-map is a child overlay of the central view).
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -118,6 +131,12 @@ private:
     PropertiesPanel* m_propertiesPanel = nullptr;
     AssemblyView* m_assemblyView = nullptr;
 
+    // What the views could not show as the file asks (above the 3D view).
+    ViewingNotesBar* m_viewingNotesBar = nullptr;
+    void refreshViewingNotes();
+    // View > Show Fill: one switch for fill in both views, off at every open.
+    QAction* m_showFillAction = nullptr;
+
     // 3D top-down mini-map / navigator (corner overlay child of m_assemblyView).
     SceneMiniMap* m_sceneMiniMap = nullptr;
     bool m_sceneMiniMapVisible = true;
@@ -129,6 +148,11 @@ private:
     KLayout2DView* m_klayout2DView = nullptr;  // convenience ptr, owned by DrillDownPanel
     QDockWidget* m_klayout2DDock = nullptr;
     QDockWidget* m_propertiesDock = nullptr;
+    // The 2D dock takes its width from the central 3D widget, so the first time
+    // it is raised we hand it a share of the window instead of whatever the
+    // layout happened to give it. Once only: any later width is the user's.
+    bool m_klayout2DDockWidthApplied = false;
+    void applyInitial2DDockWidth();
 
     // Python scripting
     std::unique_ptr<ScriptEngine> m_scriptEngine;
@@ -169,20 +193,40 @@ private:
 
     // Auto-save state
     QTimer* m_autoSaveTimer = nullptr;
+    QTimer* m_recoveryTimer = nullptr;
+    AutoSaveState m_autoSaveState;
+    QLabel* m_autoSaveWarning = nullptr;  // permanent status-bar marker, hidden while healthy
     QString m_currentFilePath;  // Path to current file for auto-save
+    QString m_autoSaveIdentity; // Unique per opened document; never adopts another session's file.
+    std::optional<RecoveryCheckpoint::Handle> m_recoveryCheckpoint;
+    bool m_installingAssembly = false; // Suppresses persistence inside modal installation loops.
+    QLabel* m_recoveryWarning = nullptr;
+    bool m_recoveryFailed = false;
     static constexpr int AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000;  // 5 minutes
 
     void setupAutoSave();
     void initializeCommandProcessor();
+    void saveAssemblyToPath(const QString& path);
+    void retireRecoveryCheckpoint();
     // Detach every view/processor/script binding from the current assembly
     // before it is replaced or freed, and clear the 2D dock. Used by the load,
     // New and crash-recovery paths so they all share the same safe ordering.
-    void detachAssemblyFromViews();
+    bool detachAssemblyFromViews();
     QString autoSavePath() const;
+
+    // Render one auto-save notice: the persistent marker always, the modal only
+    // when the policy says this is the first failure of a run.
+    void applyAutoSaveNotice(const AutoSaveNotice& notice,
+                             const QString& path,
+                             const QString& reason);
     // Resolve the GDS to show in the 2D panel. If interposerOnly is non-null it
     // is set true when the result is the interposer's own layout used as a
     // fallback (no merged/complete assembly GDS was found), false otherwise.
-    QString resolveAssemblyGdsPath(bool* interposerOnly = nullptr) const;
+    // If loneComponent is non-null it is set to the component id when the
+    // result is the one layout a single component carries (Import GDS), and
+    // cleared otherwise.
+    QString resolveAssemblyGdsPath(bool* interposerOnly = nullptr,
+                                   QString* loneComponent = nullptr) const;
     void loadAssemblyGds();
 
     /**

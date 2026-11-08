@@ -145,4 +145,78 @@ TEST_F(DrillDownPanelTest, LayerTreeContextMenuPolicy) {
     EXPECT_EQ(tree->contextMenuPolicy(), Qt::CustomContextMenu);
 }
 
+namespace {
+QToolButton* findToggle(const DrillDownPanel& panel, const QString& text) {
+    const QList<QToolButton*> buttons = panel.findChildren<QToolButton*>();
+    for (QToolButton* b : buttons) {
+        if (b->text() == text) {
+            return b;
+        }
+    }
+    return nullptr;
+}
+} // namespace
+
+// The mini-map is drawn over the lower-right of the artwork, so it is opt-in.
+// Member and toggle have to agree, or the first click reads as a no-op.
+TEST_F(DrillDownPanelTest, OverviewIsOffOnAFreshPanel) {
+    DrillDownPanel panel;
+    EXPECT_FALSE(panel.isOverviewVisible());
+    QToolButton* toggle = findToggle(panel, "Overview");
+    ASSERT_NE(toggle, nullptr);
+    EXPECT_FALSE(toggle->isChecked());
+}
+
+TEST_F(DrillDownPanelTest, OverviewToggleAndMemberStayInStep) {
+    DrillDownPanel panel;
+    QToolButton* toggle = findToggle(panel, "Overview");
+    ASSERT_NE(toggle, nullptr);
+
+    toggle->click();
+    EXPECT_TRUE(panel.isOverviewVisible());
+    EXPECT_TRUE(toggle->isChecked());
+
+    panel.setOverviewVisible(false);
+    EXPECT_FALSE(toggle->isChecked());
+}
+
+// Whatever the user picked holds across the context calls: nothing in that path
+// is allowed to quietly reset it.
+//
+// Scope, because the name could promise more than this runs: no assembly GDS is
+// loaded here, and showFullAssembly returns immediately without one, so this is
+// not evidence across a real drill-down and Back. That belongs to the rehearsal.
+TEST_F(DrillDownPanelTest, OverviewChoiceSurvivesContextCalls) {
+    DrillDownPanel panel;
+    panel.setOverviewVisible(true);
+
+    panel.setContext("comp_1", "CPU Die", "IHP SG13G2");
+    EXPECT_TRUE(panel.isOverviewVisible());
+    panel.showFullAssembly();
+    EXPECT_TRUE(panel.isOverviewVisible());
+    panel.clearContext();
+    EXPECT_TRUE(panel.isOverviewVisible());
+
+    // And the same in the other direction.
+    panel.setOverviewVisible(false);
+    panel.setContext("comp_2", "Interposer", "");
+    panel.clearContext();
+    EXPECT_FALSE(panel.isOverviewVisible());
+}
+
+// Where Back goes depends on what is loaded, and the tooltip tracks it. Only the
+// two states reachable without a GDS file are covered here: with no assembly
+// loaded MainWindow hides the 2D dock, which does return the user to the 3D
+// view, and a drill-down with no assembly behind it says the same. The two
+// assembly-mode wordings need a real layout and belong to the rehearsal.
+TEST_F(DrillDownPanelTest, BackTooltipTracksWhereBackWouldGo) {
+    DrillDownPanel panel;
+    QPushButton* backBtn = panel.findChild<QPushButton*>();
+    ASSERT_NE(backBtn, nullptr);
+    EXPECT_EQ(backBtn->toolTip(), QString("Return to 3D view"));
+
+    panel.setContext("comp_1", "CPU Die", "IHP SG13G2");
+    EXPECT_EQ(backBtn->toolTip(), QString("Return to 3D view"));
+}
+
 } // namespace chiplet

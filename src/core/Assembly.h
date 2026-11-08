@@ -12,6 +12,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <experimental/propagate_const>
 #include <unordered_map>
 #include "ComponentID.h"
 #include "Component.h"
@@ -20,6 +21,7 @@
 #include "Technology.h"
 #include "Netlist.h"
 #include "flow/FlowDefinition.h"
+#include "DocumentPersistence.h"
 
 namespace chiplet {
 
@@ -59,9 +61,11 @@ class Assembly {
 public:
     // Type definitions
     typedef std::string string_type;
-    typedef std::vector<std::unique_ptr<Component>> component_list_type;
-    typedef std::vector<std::unique_ptr<Interface>> interface_list_type;
-    typedef std::vector<std::unique_ptr<Technology>> technology_list_type;
+    template <class T>
+    using owning_ptr = std::experimental::propagate_const<std::unique_ptr<T>>;
+    typedef std::vector<owning_ptr<Component>> component_list_type;
+    typedef std::vector<owning_ptr<Interface>> interface_list_type;
+    typedef std::vector<owning_ptr<Technology>> technology_list_type;
     typedef std::map<std::string, ConnectionStack> connection_stack_map_type;
 
     // Constructors and destructor
@@ -112,14 +116,18 @@ public:
 
     // Components
     void add_component(std::unique_ptr<Component> component);
-    Component* component(const ComponentID& id) const;
+    Component* component(const ComponentID& id);
+    const Component* component(const ComponentID& id) const;
     bool has_component(const ComponentID& id) const;
     bool remove_component(const ComponentID& id);
+    component_list_type& components();
     const component_list_type& components() const;
 
     // Interfaces
     void add_interface(std::unique_ptr<Interface> iface);
-    Interface* interface(const string_type& id) const;
+    Interface* interface(const string_type& id);
+    const Interface* interface(const string_type& id) const;
+    interface_list_type& interfaces();
     const interface_list_type& interfaces() const;
 
     // Netlist
@@ -128,15 +136,63 @@ public:
     const Netlist& netlist() const;
     Netlist& netlist();
 
-    // Flow definition
+    // Flow definition.
+    //
+    // Setting a definition CLEARS any captured source bytes, so a caller that
+    // changes the flow gets its change written. That is the safe direction by
+    // default: keeping the bytes is what silently discards an edit, and it now
+    // requires calling set_flow_definition_from_source on purpose.
     void set_flow_definition(const FlowDefinition& def);
     void set_flow_definition(FlowDefinition&& def);
     const FlowDefinition& flow_definition() const;
     bool has_flow() const;
 
+    // True when the document this assembly came from carries a flow block whose
+    // source bytes the reader could not delimit, so this host never saw them.
+    //
+    // Reading such a document is required rather than optional: flow rule 1 says
+    // a reader that cannot parse the block must not reject the document. Writing
+    // it back is the part that is impossible, because the bytes to write were
+    // never captured and the only ways to proceed are to drop the block or to
+    // invent something in its place. So the flag rides along on the assembly and
+    // ChipletFormat::save refuses, which is the same line the reference library
+    // draws in its own writer.
+    void set_flow_block_uncaptured(bool uncaptured);
+    bool flow_block_uncaptured() const;
+
+    // Set the definition AND the source bytes it was parsed from: the shape a
+    // reader uses, and the only way to end up with bytes attached.
+    //
+    // `sourceText` is the flow block exactly as it stood in the file, `flow:`
+    // key line included, and it is what a save writes back. Re-serialising the
+    // parsed model in its place loses the comments, the author's quoting and
+    // every key this program does not model, so a block that was read is
+    // written from its bytes.
+    //
+    // The pairing is deliberate. An earlier version of this had a standalone
+    // byte setter and a comment asking a future editor to clear the bytes when
+    // it changed the block. A comment does not clear anything: whoever adds
+    // that editor gets the stale bytes for free, the user's edit is dropped,
+    // and the drop looks exactly like a successful save. Now the dangerous
+    // combination cannot be reached without naming this function.
+    void set_flow_definition_from_source(FlowDefinition&& def,
+                                         const string_type& sourceText);
+
+    // The captured bytes, empty when the flow was authored rather than read.
+    const string_type& flow_source_text() const;
+
     // Technologies
+    //
+    // A Technology is assembly-owned state, so a const Assembly hands out a
+    // const Technology. There is deliberately NO non-const overload of either
+    // accessor, unlike components()/interfaces(). Every Technology mutation in
+    // this program happens in ChipletFormat::build_technology, on the
+    // unique_ptr before add_technology takes ownership; a non-const overload
+    // would today have no caller, and an accessor with no caller is a hole cut
+    // in advance. A future caller that genuinely needs to mutate one adds the
+    // overload then, in a diff where a reviewer can see the need.
     void add_technology(std::unique_ptr<Technology> tech);
-    Technology* technology(const string_type& id) const;
+    const Technology* technology(const string_type& id) const;
     const technology_list_type& technologies() const;
 
     // Connection stacks
@@ -155,9 +211,12 @@ public:
     /**
      * Resolve a component's technology reference to a Technology object.
      * @param id ComponentID to resolve technology for
-     * @return Pointer to Technology or nullptr if not found or component has no technology
+     * Returns a pointer INTO m_technologies. It is const for the same reason
+     * technology() is: handing a mutable pointer to owned state out of a const
+     * member function is what made `const Assembly&` mean nothing.
+     * @return const Technology* or nullptr if not found or component has no technology
      */
-    Technology* resolve_component_technology(const ComponentID& id) const;
+    const Technology* resolve_component_technology(const ComponentID& id) const;
 
     /**
      * Validate the entire assembly.
@@ -174,7 +233,13 @@ public:
      */
     bool is_valid() const;
 
+public:
+    const DocumentPersistence& document_persistence() const;
+
 private:
+    friend class ChipletFormat;
+    void set_document_persistence(DocumentPersistence state);
+    DocumentPersistence m_documentPersistence;
     string_type m_name;
     string_type m_description;
     string_type m_author;
@@ -190,6 +255,8 @@ private:
     interface_list_type m_interfaces;
     Netlist m_netlist;
     FlowDefinition m_flowDefinition;
+    bool m_flowBlockUncaptured = false;
+    string_type m_flowSourceText;
     technology_list_type m_technologies;
     connection_stack_map_type m_connectionStacks;
 };

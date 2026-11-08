@@ -201,8 +201,8 @@ TEST_F(ScriptingTest, ExecuteWithoutInit) {
     EXPECT_FALSE(engine.last_error().isEmpty());
 }
 
-// Test that verifies the core requirement from Phase 5.0:
-// C++ creates Assembly, Python creates component, C++ sees it
+// The core requirement of the scripting API: C++ creates the Assembly,
+// Python creates a component, and C++ sees it
 TEST_F(ScriptingTest, PythonCreatesComponentVisibleInCpp) {
     ScriptEngine engine;
     ASSERT_TRUE(engine.initialize());

@@ -65,7 +65,7 @@ components:
   dimensions:
     width: 172986.089
     height: 103893.19900000001
-    thickness: 13.83
+    thickness: 10.8103
   position:
     x: 0.0
     y: 0.0
@@ -124,7 +124,7 @@ components:
   position:
     x: 171461.971
     y: -100372.559
-    z: 61.83
+    z: 58.8103
   rotation:
     z: 0.0
   top_cell: DiffAmp_NOFILL
@@ -141,7 +141,7 @@ components:
   position:
     x: 172785.382
     y: -100482.692
-    z: 61.83
+    z: 58.8103
   rotation:
     z: 0.0
   top_cell: Interposer_ANT_CuPi
@@ -158,7 +158,7 @@ components:
   position:
     x: 169882.357
     y: -100484.023
-    z: 61.83
+    z: 58.8103
   rotation:
     z: 0.0
   top_cell: Interposer_ANT_CuPi

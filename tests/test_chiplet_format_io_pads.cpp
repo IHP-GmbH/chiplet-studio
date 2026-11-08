@@ -4,8 +4,10 @@
 
 #include <gtest/gtest.h>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include "formats/ChipletFormat.h"
@@ -157,6 +159,127 @@ TEST(ChipletFormatIOPads, LoadRealHypToGdsOutput)
         seen_nets.insert(p.net());
     }
     EXPECT_EQ(seen_nets, expected_nets);
+}
+
+// `io_class` and `layer` are OPTIONAL in the schema (io_pad.required
+// is exactly id and position), and this program used to invent both: IOPad
+// defaulted them to wire_bond and TopMetal2, the loader assigned them only when
+// declared, and the writer emitted them unconditionally. Load and save a pad
+// that declared neither and it came back declaring both.
+//
+// That is not cosmetic. Validation rule 8 is vacuous for a pad with no
+// io_class, and it skips any pad whose layer is not the interface's port layer,
+// so stamping the two turns the rule from vacuous to binding on a document
+// whose author never said any of it. A reader that enforces rule 8 then refuses
+// a file this program wrote from one it had just accepted, and no control in
+// this program can repair it.
+//
+// The distinction the test has to make is between "kept" and "unchanged". A
+// writer that echoed the whole pad back would pass a check that only looks at
+// the pad it declared something for, so both halves are asserted on the same
+// document: the pad that declared nothing must still declare nothing, and the
+// pad that declared exactly one field must still declare exactly that one, with
+// no partner field appearing beside it.
+TEST(ChipletFormatIOPads, OnlyDeclaredPadFieldsAreWrittenBack)
+{
+    const std::string src =
+        (std::filesystem::temp_directory_path() / "pad_declaredness.chiplet").string();
+    {
+        std::ofstream f(src);
+        f << R"(format_version: "1.0"
+
+assembly:
+  name: "Pad declaredness"
+  units: "um"
+
+technologies:
+  intm4tm2:
+    description: "Interposer"
+    dbu: 0.001
+
+components:
+  - id: interposer
+    type: interposer
+    technology: intm4tm2
+    dimensions: {width: 4000, height: 3000, thickness: 10.8103}
+    position: {x: 0, y: 0, z: 0}
+    io_pads:
+      - id: BARE
+        position: {x: 10.0, y: 20.0}
+        size: {x: 100.0, y: 100.0}
+      - id: CLASS_ONLY
+        io_class: flipped_bump
+        position: {x: 30.0, y: 40.0}
+        size: {x: 100.0, y: 100.0}
+      - id: LAYER_ONLY
+        position: {x: 50.0, y: 60.0}
+        size: {x: 100.0, y: 100.0}
+        layer: TopMetal1
+)";
+    }
+
+    ChipletFormat fmt;
+    auto assembly = fmt.load(src);
+    ASSERT_TRUE(assembly);
+
+    auto* interposer = assembly->component(ComponentID("interposer"));
+    ASSERT_NE(interposer, nullptr);
+    const auto& pads = interposer->io_pads();
+    ASSERT_EQ(pads.size(), 3u);
+
+    // The model carries absence, which is what makes writing it back possible.
+    EXPECT_FALSE(pads[0].io_class().has_value());
+    EXPECT_FALSE(pads[0].layer().has_value());
+    EXPECT_EQ(pads[1].io_class(), IOClass::FlippedBump);
+    EXPECT_FALSE(pads[1].layer().has_value());
+    EXPECT_FALSE(pads[2].io_class().has_value());
+    EXPECT_EQ(pads[2].layer(), "TopMetal1");
+
+    const std::string out =
+        (std::filesystem::temp_directory_path() / "pad_declaredness_out.chiplet").string();
+    ASSERT_NO_THROW(fmt.save(*assembly, out));
+
+    std::ifstream in(out);
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const std::string written = buf.str();
+
+    // Per pad, count what the emitted document declares for it. Slicing by pad
+    // id rather than searching the whole file is what lets one pad's declared
+    // field prove the other pad's is absent, instead of a single global find
+    // that any one occurrence satisfies.
+    auto padBlock = [&written](const std::string& id) {
+        const auto at = written.find("id: \"" + id + "\"");
+        EXPECT_NE(at, std::string::npos) << "pad " << id << " is gone:\n" << written;
+        if (at == std::string::npos) return std::string();
+        const auto next = written.find("- id:", at);
+        return written.substr(at, next == std::string::npos ? std::string::npos : next - at);
+    };
+
+    const std::string bare = padBlock("BARE");
+    EXPECT_EQ(bare.find("io_class"), std::string::npos)
+        << "a pad that declared no io_class was written with one:\n" << bare;
+    EXPECT_EQ(bare.find("layer"), std::string::npos)
+        << "a pad that declared no layer was written with one:\n" << bare;
+
+    const std::string classOnly = padBlock("CLASS_ONLY");
+    EXPECT_NE(classOnly.find("io_class: \"flipped_bump\""), std::string::npos) << classOnly;
+    EXPECT_EQ(classOnly.find("layer"), std::string::npos)
+        << "a layer appeared beside a declared io_class:\n" << classOnly;
+
+    const std::string layerOnly = padBlock("LAYER_ONLY");
+    EXPECT_NE(layerOnly.find("layer: \"TopMetal1\""), std::string::npos) << layerOnly;
+    EXPECT_EQ(layerOnly.find("io_class"), std::string::npos)
+        << "an io_class appeared beside a declared layer:\n" << layerOnly;
+
+    // And the document still reloads, so "emit less" did not drop a field the
+    // reader requires.
+    ChipletFormat reader;
+    auto reloaded = reader.load(out);
+    ASSERT_TRUE(reloaded);
+
+    std::filesystem::remove(src);
+    std::filesystem::remove(out);
 }
 
 }  // namespace

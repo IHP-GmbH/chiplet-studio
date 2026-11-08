@@ -57,6 +57,7 @@ bool CommandProcessor::execute(CommandPtr cmd)
         // state would not refresh.
         m_redoStack.clear();
         emit command_executed(QString::fromStdString(m_undoStack.back()->description()));
+        emit model_changed();
         emit_stack_signals();
         return true;
     }
@@ -94,6 +95,7 @@ bool CommandProcessor::execute(CommandPtr cmd)
 
     // Emit signals
     emit command_executed(description);
+    emit model_changed();
     emit_stack_signals();
 
     return true;
@@ -140,6 +142,7 @@ void CommandProcessor::undo()
     // Push to redo stack
     m_redoStack.push_back(std::move(cmd));
 
+    emit model_changed();
     emit_stack_signals();
 }
 
@@ -172,6 +175,7 @@ void CommandProcessor::redo()
     // Push to undo stack
     m_undoStack.push_back(std::move(cmd));
 
+    emit model_changed();
     emit_stack_signals();
 }
 

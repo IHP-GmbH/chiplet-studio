@@ -6,6 +6,8 @@
  */
 
 #include "Assembly.h"
+#include "DecimalText.h"
+#include "TechResolve.h"
 #include "LayerStackup.h"
 #include "Logger.h"
 #include <QDebug>
@@ -16,6 +18,16 @@
 namespace chiplet {
 
 Assembly::Assembly() = default;
+
+const DocumentPersistence& Assembly::document_persistence() const
+{
+    return m_documentPersistence;
+}
+
+void Assembly::set_document_persistence(DocumentPersistence state)
+{
+    m_documentPersistence = std::move(state);
+}
 Assembly::~Assembly() = default;
 
 // Getters - metadata
@@ -167,13 +179,19 @@ void Assembly::add_component(std::unique_ptr<Component> component)
     m_component_index[id] = ptr;
 }
 
-Component* Assembly::component(const ComponentID& id) const
+const Component* Assembly::component(const ComponentID& id) const
 {
     auto it = m_component_index.find(id);
     if (it != m_component_index.end()) {
         return it->second;
     }
     return nullptr;
+}
+
+Component* Assembly::component(const ComponentID& id)
+{
+    return const_cast<Component*>(
+        static_cast<const Assembly*>(this)->component(id));
 }
 
 bool Assembly::has_component(const ComponentID& id) const
@@ -193,7 +211,7 @@ bool Assembly::remove_component(const ComponentID& id)
 
     // Remove from vector
     auto vec_it = std::find_if(m_components.begin(), m_components.end(),
-        [&id](const std::unique_ptr<Component>& c) {
+        [&id](const owning_ptr<Component>& c) {
             return c->id() == id;
         });
 
@@ -209,6 +227,11 @@ const Assembly::component_list_type& Assembly::components() const
     return m_components;
 }
 
+Assembly::component_list_type& Assembly::components()
+{
+    return m_components;
+}
+
 // Interfaces
 
 void Assembly::add_interface(std::unique_ptr<Interface> iface)
@@ -216,7 +239,7 @@ void Assembly::add_interface(std::unique_ptr<Interface> iface)
     m_interfaces.push_back(std::move(iface));
 }
 
-Interface* Assembly::interface(const string_type& id) const
+const Interface* Assembly::interface(const string_type& id) const
 {
     for (const auto& i : m_interfaces) {
         if (i->id() == id) {
@@ -226,7 +249,18 @@ Interface* Assembly::interface(const string_type& id) const
     return nullptr;
 }
 
+Interface* Assembly::interface(const string_type& id)
+{
+    return const_cast<Interface*>(
+        static_cast<const Assembly*>(this)->interface(id));
+}
+
 const Assembly::interface_list_type& Assembly::interfaces() const
+{
+    return m_interfaces;
+}
+
+Assembly::interface_list_type& Assembly::interfaces()
 {
     return m_interfaces;
 }
@@ -257,11 +291,13 @@ Netlist& Assembly::netlist()
 
 void Assembly::set_flow_definition(const FlowDefinition& def)
 {
+    m_flowSourceText.clear();
     m_flowDefinition = def;
 }
 
 void Assembly::set_flow_definition(FlowDefinition&& def)
 {
+    m_flowSourceText.clear();
     m_flowDefinition = std::move(def);
 }
 
@@ -275,6 +311,28 @@ bool Assembly::has_flow() const
     return !m_flowDefinition.empty();
 }
 
+void Assembly::set_flow_block_uncaptured(bool uncaptured)
+{
+    m_flowBlockUncaptured = uncaptured;
+}
+
+bool Assembly::flow_block_uncaptured() const
+{
+    return m_flowBlockUncaptured;
+}
+
+void Assembly::set_flow_definition_from_source(FlowDefinition&& def,
+                                              const string_type& sourceText)
+{
+    m_flowDefinition = std::move(def);
+    m_flowSourceText = sourceText;
+}
+
+const Assembly::string_type& Assembly::flow_source_text() const
+{
+    return m_flowSourceText;
+}
+
 // Technologies
 
 void Assembly::add_technology(std::unique_ptr<Technology> tech)
@@ -282,7 +340,7 @@ void Assembly::add_technology(std::unique_ptr<Technology> tech)
     m_technologies.push_back(std::move(tech));
 }
 
-Technology* Assembly::technology(const string_type& id) const
+const Technology* Assembly::technology(const string_type& id) const
 {
     for (const auto& t : m_technologies) {
         if (t->id() == id) {
@@ -317,7 +375,7 @@ const Assembly::connection_stack_map_type& Assembly::connection_stacks() const
 
 double Assembly::calculate_component_z(const ComponentID& id) const
 {
-    Component* comp = component(id);
+    const Component* comp = component(id);
     if (!comp) {
         return 0.0;
     }
@@ -352,27 +410,18 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             if (c->type() != ComponentType::Interposer) continue;
             const std::string& techId = c->technology();
             if (techId.empty()) break;
-            // An explicit stackup on the technology wins over the built-in
-            // BlenderGDSConfigs lookup, so z-mounting matches the render path
-            // (AssemblyView Priority -1) for unsupported PDKs.
-            std::string stackupYaml;
-            const Technology* itech = technology(techId);
-            if (itech && !itech->stackup_path().empty()) {
-                stackupYaml = itech->stackup_path();
-            } else {
-                stackupYaml = BlenderGDSConfigs::stackupPath(techId);
-            }
-            if (stackupYaml.empty()) {
-                qCWarning(lcStackup) << "no stackup config for interposer technology"
+            // The same resolver the 3D view draws with, so a die seats on the
+            // stackup its bumps are drawn on. (Seating used to read the
+            // declared file and, if that failed to load, fall back to the
+            // interposer thickness, while the view fell back to the built-in
+            // file: the two could disagree by the whole stack.)
+            TechStackup resolved = resolveTechnologyStackup(technology(techId), techId);
+            if (resolved.source == StackupSource::NotModeled) {
+                qCWarning(lcStackup) << "no stackup for interposer technology"
                                      << techId.c_str() << "; using interposer thickness for z";
                 break;
             }
-            LayerStackup stackup;
-            if (!stackup.loadFromBlenderGDS(stackupYaml)) {
-                qCWarning(lcStackup) << "failed to load interposer stackup"
-                                     << stackupYaml.c_str() << "; using interposer thickness for z";
-                break;
-            }
+            LayerStackup& stackup = resolved.stackup;
             // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap or a
             // vendor's microbump), which the interconnect PDK owns rather than
             // the interposer stackup. Additive: it brings in bodies the
@@ -387,7 +436,10 @@ double Assembly::calculate_component_z(const ComponentID& id) const
             // Option-3 body heights even when other dies use other methods.
             // The assembly-level adapter is the fallback for stacks whose id
             // is not a method id (legacy/custom stacks).
-            stackup.mergeInterconnectFragments(
+            //
+            // The fragments rebase on the file's plane when the interposer
+            // declares one (mergeBodiesOnInterposer), as in the render.
+            mergeBodiesOnInterposer(stackup, *c,
                 LayerStackup::resolveInterconnectKeys(
                     {comp->connection()}, m_interconnect_adapter));
             for (const auto& layer : stackup.sortedLayers()) {
@@ -420,19 +472,21 @@ double Assembly::calculate_component_z(const ComponentID& id) const
         }
     }
 
+    // Summed as decimals, so a die on 10.8103 under an 18 um stack is at
+    // 28.8103 and is written so, not 28.810299999999998.
     const double connection_height = stack ? stack->total_height() : 0.0;
-    return mounting_surface + connection_height;
+    return decimalSum(mounting_surface, connection_height);
 }
 
 // Validation
 
-Technology* Assembly::resolve_component_technology(const ComponentID& id) const
+const Technology* Assembly::resolve_component_technology(const ComponentID& id) const
 {
     if (!is_valid_id(id)) {
         return nullptr;
     }
 
-    Component* comp = component(id);
+    const Component* comp = component(id);
     if (!comp) {
         return nullptr;
     }

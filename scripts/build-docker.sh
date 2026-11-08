@@ -55,32 +55,29 @@ docker run --rm \
     bash -c "
         set -e
 
-        # Try to build KLayout libraries (optional)
+        # Build KLayout. This is not optional: without it the 2D view is a stub
+        # and the geometry path is untested, while the build still succeeds and
+        # reads as green. A KLayout failure has to stop the build here, where
+        # the log that explains it is still on screen.
         # KLayout installs libraries to bin-release
         KLAYOUT_DIR=/workspace/extern/klayout/bin-release
         if [ -f \"\$KLAYOUT_DIR/libklayout_db.so\" ]; then
             echo 'KLayout libraries already built'
         else
-            echo 'Attempting to build KLayout libraries...'
+            echo 'Building KLayout libraries...'
             cd /workspace/extern/klayout
-            ./build.sh -j$PARALLEL -without-qtbinding 2>&1 || true
-            # Check if core libraries were installed
-            if [ -f \"\$KLAYOUT_DIR/libklayout_db.so\" ]; then
-                echo 'KLayout libraries built and installed successfully'
-            else
-                echo 'KLayout build failed - continuing without KLayout'
-                KLAYOUT_DIR=''
+            ./build.sh -j$PARALLEL -without-qtbinding 2>&1
+            if [ ! -f \"\$KLAYOUT_DIR/libklayout_db.so\" ]; then
+                echo 'KLayout build produced no libklayout_db.so' >&2
+                exit 1
             fi
+            echo 'KLayout libraries built and installed successfully'
         fi
 
         echo 'Building Chiplet Studio...'
         cd /workspace
         mkdir -p build && cd build
-        if [ -n \"\$KLAYOUT_DIR\" ]; then
-            cmake .. -DKLAYOUT_BUILD_DIR=\$KLAYOUT_DIR
-        else
-            cmake ..
-        fi
+        cmake .. -DKLAYOUT_BUILD_DIR=\$KLAYOUT_DIR -DCHIPLET_REQUIRE_KLAYOUT=ON
         make -j$PARALLEL
     "
 

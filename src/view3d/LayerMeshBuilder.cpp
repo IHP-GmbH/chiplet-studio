@@ -6,10 +6,12 @@
  */
 
 #include "LayerMeshBuilder.h"
+#include "core/CountText.h"
 #include "core/GenericLayers.h"
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <set>
 #include <QDebug>
 
 // GDS3D tessellation engine - must include in this order
@@ -147,6 +149,98 @@ size_t Component3DGeometry::totalTriangles() const
     return total;
 }
 
+void setFillVisible(Component3DGeometry& geometry, bool visible)
+{
+    for (LayerMesh& layer : geometry.layers) {
+        if (layer.fill) {
+            layer.visible = visible;
+        }
+    }
+}
+
+bool standardMeshDrawn(const LayerMesh& mesh)
+{
+    return mesh.visible && !mesh.fill;
+}
+
+std::vector<ShapeCount> shapeCounts(const std::map<LayerKey, LayerShapeTally>& tally,
+                                    const ExtractionConfig& config,
+                                    const LayerStackup& stackup,
+                                    const LayerMeshBuilder& builder)
+{
+    std::vector<ShapeCount> out;
+    for (const auto& [key, t] : tally) {
+        bool borrowed = false;
+        const LayerElevation* elev = stackup.heightFor(key, &borrowed);
+        if (!elev) {
+            continue;
+        }
+        ShapeCount c;
+        c.key = key;
+        c.name = elev->name;
+        c.borrowed = borrowed;
+        c.fill = !borrowed && elev->isFiller();
+        c.inGds = t.inGds;
+        c.underArea = t.underArea;
+        c.areaFloor = config.min_polygon_area;
+        c.pastRead = t.pastRead;
+        c.readLimit = config.max_polygons_per_layer;
+        c.viaSkipped = t.viaSkipped;
+        c.viaLimit = config.via_max_cuts;
+        c.drawn = builder.builtOf(t.kept);
+        c.pastMesh = t.kept - c.drawn;
+        c.meshLimit = builder.maxPolygonsPerLayer();
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
+std::vector<LayerRow> layerRows(const std::string& componentId,
+                                const Component3DGeometry& geometry,
+                                const std::vector<ShapeCount>& counts)
+{
+    std::map<LayerKey, const ShapeCount*> byKey;
+    for (const ShapeCount& c : counts) {
+        byKey[c.key] = &c;
+    }
+    std::vector<LayerRow> rows;
+    std::set<LayerKey> meshed;
+    for (const LayerMesh& mesh : geometry.layers) {
+        LayerRow row;
+        row.key = mesh.key;
+        row.name = mesh.name;
+        row.fill = mesh.fill;
+        if (auto it = byKey.find(mesh.key); it != byKey.end()) {
+            if (it->second->fill) {
+                // Its mesh is never drawn, so the read limit says nothing about it.
+                row.count = groupedCount(it->second->inGds) + " shapes";
+            } else {
+                row.count = shapeCountLabel(*it->second);
+                row.countNote = shapeCountNote(componentId, *it->second);
+            }
+        }
+        meshed.insert(mesh.key);
+        rows.push_back(std::move(row));
+    }
+    for (const ShapeCount& c : counts) {
+        if (meshed.count(c.key) || c.drawn >= c.inGds) {
+            continue;
+        }
+        LayerRow row;
+        row.key = c.key;
+        row.name = c.name;
+        row.meshed = false;
+        if (c.fill) {
+            row.count = groupedCount(c.inGds) + " shapes";
+        } else {
+            row.count = shapeCountLabel(c);
+            row.countNote = shapeCountNote(componentId, c);
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
 // =============================================================================
 // LayerMeshBuilder implementation
 // =============================================================================
@@ -226,8 +320,7 @@ Component3DGeometry LayerMeshBuilder::build(
     // when viewed from the back. If the stackup declares Substrate (40/0),
     // we always render it full-bbox -- the GDS may contain partial or no
     // Substrate polygons (sg13g2 dies do; the interposer GDS does not).
-    // The slab thickness comes from the stackup YAML and is intentionally
-    // far thinner than the real 750 um wafer (see the YAML comments).
+    // The slab thickness comes from the stackup YAML (see its comments).
     std::map<LayerKey, LayerPolygons> polygons_with_substrate;
     const LayerElevation* substrate_elev = stackup.find(40, 0);
     if (has_polygons && substrate_elev) {
@@ -253,91 +346,39 @@ Component3DGeometry LayerMeshBuilder::build(
                                                                       : polygons_with_substrate;
 
     for (const auto& [key, layer_polys] : effective_polygons) {
-        // Find layer elevation
-        const LayerElevation* elev = stackup.find(key);
-
-        // Fallback: try matching by layer number only (different datatypes
-        // of the same layer share the same physical z position)
-        if (!elev) {
-            elev = stackup.findByLayer(key.layer);
-        }
+        const LayerPlacement place = placeLayer(key, stackup, lyp, colorScheme, flipZ, beolTop);
 
         // If neither exact-key nor layer-only lookup found this layer in
         // the stackup, it is not a fabrication layer the PDK models -- skip
-        // it. Auto-elevating these would inject random colored slabs at
-        // arbitrary Z (often negative after flipZ), which visually
-        // obscures the cu-pillar / die contact area.
-        if (!elev) {
+        // it, and record the skip so the view can say so. Auto-elevating
+        // these would inject random colored slabs at arbitrary Z (often
+        // negative after flipZ), which visually obscures the cu-pillar / die
+        // contact area.
+        if (!place.placed) {
+            if (!layer_polys.polygons.empty()) {
+                result.unmodeled.push_back(key);
+            }
             continue;
         }
         (void)auto_z;
         (void)default_layer_thickness;
 
-        // Color priority chain:
-        // 0: color scheme by layer name. Post-cleanup the only scheme passed is
-        //    the generic black-box one (outline/pad roles) for a no-.lyp die;
-        //    the per-PDK "realistic" schemes were removed (color = the .lyp).
-        // 1: PDK .lyp fill color -- the default color source for supported PDKs.
-        // 2: hardcoded role fallback (blue body / yellow pads) when the generic
-        //    scheme file is absent, then a deterministic hashed color.
-        QColor color(128, 128, 128, 200);  // Default gray
-        float metallic = 0.0f;
-        float roughness = 0.5f;
-
-        const LayerColorEntry* schemeColor = nullptr;
-        if (colorScheme && !elev->name.empty()) {
-            schemeColor = colorScheme->find(elev->name);
-        }
-
-        if (schemeColor) {
-            // Priority 0: BlenderGDS color scheme
-            color = QColor::fromRgbF(schemeColor->color[0], schemeColor->color[1],
-                                     schemeColor->color[2], schemeColor->color[3]);
-            metallic = schemeColor->metallic;
-            roughness = schemeColor->roughness;
-        } else if (lyp) {
-            // Priority 1: .lyp file
-            const LayerStyle* style = lyp->find(key);
-            if (style) {
-                color = QColor(style->fill_color.r, style->fill_color.g,
-                               style->fill_color.b, style->fill_color.a);
-            }
-        } else if (elev->name == GenericLayers::OUTLINE_ROLE) {
-            // Priority 2a: black-box die body (canonical outline role) -- blue.
-            // Hardcoded fallback for when the generic color scheme file is
-            // absent (configs/stackups/colors/generic/blackbox.yaml overrides).
-            color = QColor(26, 82, 217, 255);
-        } else if (elev->name == GenericLayers::PAD_ROLE) {
-            // Priority 2b: black-box pads (canonical pad role) -- yellow.
-            color = QColor(255, 214, 0, 255);
-        } else {
-            // Priority 3: Generate a unique color based on layer number
-            int hue = (key.layer * 47 + key.datatype * 31) % 360;
-            color = QColor::fromHsv(hue, 200, 200, 200);
-        }
-
-        // Z-inversion for flip-chip dies: TopMetal2 goes to z=0 (bottom),
-        // Metal1 goes to the top. Thickness is unchanged.
-        double layer_z = elev->z_bottom;
-        if (flipZ) {
-            layer_z = beolTop - (elev->z_bottom + elev->thickness);
-        }
-
         // Build mesh for this layer
         LayerMesh layer_mesh = buildLayerMesh(
             layer_polys,
-            layer_z,
-            elev->thickness,
-            color,
+            place.zBottom,
+            place.thickness,
+            place.color,
             unit_scale,
             center_offset_x,
             center_offset_y);
 
         layer_mesh.key = key;
-        layer_mesh.name = elev->name;
-        layer_mesh.visible = elev->visible;
-        layer_mesh.metallic = metallic;
-        layer_mesh.roughness = roughness;
+        layer_mesh.name = place.name;
+        layer_mesh.visible = place.visible;
+        layer_mesh.fill = place.fill;
+        layer_mesh.metallic = place.metallic;
+        layer_mesh.roughness = place.roughness;
 
         if (layer_mesh.z_top > max_z) {
             max_z = layer_mesh.z_top;
@@ -355,6 +396,87 @@ Component3DGeometry LayerMeshBuilder::build(
         });
 
     return result;
+}
+
+LayerPlacement LayerMeshBuilder::placeLayer(const LayerKey& key,
+                                            const LayerStackup& stackup,
+                                            const LayerPropertiesFile* lyp,
+                                            const LayerColorScheme* colorScheme,
+                                            bool flipZ,
+                                            double beolTop)
+{
+    LayerPlacement place;
+    // Its own entry, else the layer number's: different datatypes of the
+    // same layer share its physical z position.
+    bool borrowed = false;
+    const LayerElevation* elev = stackup.heightFor(key, &borrowed);
+
+    if (!elev) {
+        return place;
+    }
+
+    // Color priority chain:
+    // 0: color scheme by layer name. Post-cleanup the only scheme passed is
+    //    the generic black-box one (outline/pad roles) for a no-.lyp die;
+    //    the per-PDK "realistic" schemes were removed (color = the .lyp).
+    // 1: PDK .lyp fill color -- the default color source for supported PDKs.
+    // 2: hardcoded role fallback (blue body / yellow pads) when the generic
+    //    scheme file is absent, then a deterministic hashed color.
+    QColor color(128, 128, 128, 200);  // Default gray
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+
+    const LayerColorEntry* schemeColor = nullptr;
+    if (colorScheme && !elev->name.empty()) {
+        schemeColor = colorScheme->find(elev->name);
+    }
+
+    if (schemeColor) {
+        // Priority 0: BlenderGDS color scheme
+        color = QColor::fromRgbF(schemeColor->color[0], schemeColor->color[1],
+                                 schemeColor->color[2], schemeColor->color[3]);
+        metallic = schemeColor->metallic;
+        roughness = schemeColor->roughness;
+    } else if (lyp) {
+        // Priority 1: .lyp file
+        const LayerStyle* style = lyp->find(key);
+        if (style) {
+            color = QColor(style->fill_color.r, style->fill_color.g,
+                           style->fill_color.b, style->fill_color.a);
+        }
+    } else if (elev->name == GenericLayers::OUTLINE_ROLE) {
+        // Priority 2a: black-box die body (canonical outline role) -- blue.
+        // Hardcoded fallback for when the generic color scheme file is
+        // absent (configs/stackups/colors/generic/blackbox.yaml overrides).
+        color = QColor(26, 82, 217, 255);
+    } else if (elev->name == GenericLayers::PAD_ROLE) {
+        // Priority 2b: black-box pads (canonical pad role) -- yellow.
+        color = QColor(255, 214, 0, 255);
+    } else {
+        // Priority 3: Generate a unique color based on layer number
+        int hue = (key.layer * 47 + key.datatype * 31) % 360;
+        color = QColor::fromHsv(hue, 200, 200, 200);
+    }
+
+    // Z-inversion for flip-chip dies: TopMetal2 goes to z=0 (bottom),
+    // Metal1 goes to the top. Thickness is unchanged.
+    double layer_z = elev->z_bottom;
+    if (flipZ) {
+        layer_z = beolTop - (elev->z_bottom + elev->thickness);
+    }
+
+    place.placed = true;
+    place.name = elev->name;
+    place.zBottom = layer_z;
+    place.thickness = elev->thickness;
+    place.color = color;
+    place.metallic = metallic;
+    place.roughness = roughness;
+    place.visible = elev->visible;
+    // Fill only by its own key: a datatype that borrows its metal's
+    // height through the layer-number fallback is not fill.
+    place.fill = !borrowed && elev->isFiller();
+    return place;
 }
 
 LayerMesh LayerMeshBuilder::buildLayerMesh(
@@ -386,6 +508,7 @@ LayerMesh LayerMeshBuilder::buildLayerMesh(
                           center_offset_x, center_offset_y);
         ++poly_count;
     }
+    result.shapes = poly_count;
 
     result.mesh.setVertices(vertices);
     result.mesh.setIndices(indices);

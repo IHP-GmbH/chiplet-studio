@@ -260,9 +260,9 @@ TEST(RenderSortingTest, BackToFrontOrder)
 // per-component via the Hierarchy panel / CmdSetRenderMode.
 //
 // History: an auto-Detailed promotion for flip-chip dies was tried
-// in c7db675 but rolled back after visual testing on the wire-bond
-// demo — opening time and overview clarity won over default
-// cu-pillar-contact detail. The data-class purity guard
+// once and rolled back after visual testing on the wire-bond demo:
+// opening time and overview clarity won over default cu-pillar-contact
+// detail. The data-class purity guard
 // (Component::set_orientation does not mutate render_mode) is kept
 // so a future persisted render_mode value is the single source of
 // truth.
@@ -275,28 +275,17 @@ std::string renderModeFixturePath(const std::string& filename)
 }
 
 // Locate the canonical wire-bond demo .chiplet so the integration
-// test below can pin the post-Gate-7 invariant "U1 (flip_chip) loads
+// test below can pin the invariant "U1 (flip_chip) loads
 // with render_mode == Detailed" on the real demo, not just synthetics.
-// Resolution order: env var (set by CI/Docker), then the bundled
-// examples/ copy in the adk-tools umbrella (both umbrella-root depths
-// tried, image vs dev), then GTEST_SKIP so the test stays portable.
+// Only $WIREBOND_DEMO_CHIPLET, which the gate binds to a hash-bound copy;
+// the umbrella's example was renamed and no longer matches that copy, so
+// there is no fallback path. Unset or naming no file: GTEST_SKIP naming it.
 std::optional<std::string> locateWirebondDemoChiplet()
 {
     if (const char* env = std::getenv("WIREBOND_DEMO_CHIPLET")) {
         std::filesystem::path p(env);
         if (std::filesystem::exists(p))
             return p.string();
-    }
-    const std::filesystem::path rel =
-        std::filesystem::path("examples") / "interposer_wire_bonding_demo"
-        / "outputs" / "interposer_wire_bonding_demo.chiplet";
-    const std::filesystem::path studioDir =
-        std::filesystem::path(FIXTURES_DIR).parent_path().parent_path();
-    for (const std::filesystem::path& umbrella :
-         {studioDir.parent_path(), studioDir.parent_path().parent_path()}) {
-        std::filesystem::path candidate = umbrella / rel;
-        if (std::filesystem::exists(candidate))
-            return candidate.string();
     }
     return std::nullopt;
 }
@@ -355,8 +344,8 @@ TEST(RenderModeTest, WirebondDemoLoadsWithTransparentDefaults)
     // need to inspect the cu-pillar contact visually.
     auto path = locateWirebondDemoChiplet();
     if (!path) {
-        GTEST_SKIP() << "wire-bond demo .chiplet not located (set "
-                        "WIREBOND_DEMO_CHIPLET to enable this test)";
+        GTEST_SKIP() << "wire-bond demo .chiplet not found: "
+                        "WIREBOND_DEMO_CHIPLET is unset or names no file";
     }
 
     ChipletFormat format;

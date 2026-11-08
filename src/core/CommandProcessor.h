@@ -124,6 +124,10 @@ public:
     static constexpr size_t MAX_UNDO_DEPTH = 100;
 
 signals:
+    // Current model changed successfully (execute/coalesced execute/undo/redo).
+    // Not emitted for clear(), failed operations or unavailable undo/redo.
+    void model_changed();
+
     /**
      * Emitted after a command is executed.
      * @param description Human-readable command description

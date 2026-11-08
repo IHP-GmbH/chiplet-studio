@@ -2,8 +2,10 @@
 #
 # IHP 130-nm IntM4TM2 aluminum BEOL interposer stackup
 #
-# Based on SG13G2 process spec Rev 1.2 (BEOL thicknesses) and
-# SG13G2 Layout Rules Rev 2.1.
+# Every z and height of a layer the interposer PDK's stack key carries is the
+# key's (libs.tech/intm4tm2_stack.json): z = 0 at the substrate top, Metal4 on
+# the base oxide at 0.64. tests/fixtures/intm4tm2.stackup.yaml is the PDK's own
+# copy, and the suite compares every layer the two share.
 #
 # 3D interconnect bodies (cu-pillar/solder-bump, layers 500+) are owned by the
 # interconnect PDK and merged in at render time per the assembly's
@@ -12,68 +14,96 @@
 # The surface this interposer offers to interconnect bodies: the exposed pad
 # top (TopMetal2 top, through the passivation opening). Fragments declaring
 # z_reference: attachment_surface are offset by this value at merge time.
-# NOT max_z: the passivation around the opening (Passiv top, 15.73) rises
-# above the real mounting surface.
-attachment_surface_z: 13.83
+# NOT max_z: the passivation around the opening (Passiv top, 12.7103) rises
+# above the real mounting surface. The key's beol.attachment_surface_z_um.
+attachment_surface_z: 10.8103
 
-# --- Si bulk substrate (visualized at 50 um -- aesthetic, NOT physical) ---
-# True wafer is 750 um per SG13G2 spec. We render a much thinner slab so
-# RDL routing, cu-pillars, and chiplets sitting on top remain visible at
-# usable camera distances. For physically-accurate rendering (thermal/
-# mechanical sims), restore height: 750.0 here.
+# --- Si substrate ---
+# 250 um, the thickness the interposer PDK's stack key gives it
+# (libs.tech/intm4tm2_stack.json). The 3D view can hide the slab named
+# Substrate.
 Substrate:
   index: 40
   type: 0
-  z: -50.0
-  height: 50.0
+  z: -250.0
+  height: 250.0
 
 # --- Interposer RDL routing layers (Metal4 through TopMetal2) ---
+# Each metal's fill (datatype 22) sits at the metal's own z. `purpose: filler`
+# is what marks it as fill: the views list it and start with it hidden.
 
 Metal4:
   index: 50
   type: 0
-  z: 3.66
+  z: 0.64
+  height: 0.49
+Metal4Filler:
+  index: 50
+  type: 22
+  purpose: filler
+  z: 0.64
   height: 0.49
 Via4:
   index: 66
   type: 0
-  z: 4.15
+  z: 1.13
   height: 0.54
 Metal5:
   index: 67
   type: 0
-  z: 4.69
+  z: 1.67
+  height: 0.49
+Metal5Filler:
+  index: 67
+  type: 22
+  purpose: filler
+  z: 1.67
   height: 0.49
 TopVia1:
   index: 125
   type: 0
-  z: 5.18
-  height: 0.85
+  z: 2.16
+  height: 0.8503
 TopMetal1:
   index: 126
   type: 0
-  z: 6.03
+  z: 3.0103
+  height: 2.00
+TopMetal1Filler:
+  index: 126
+  type: 22
+  purpose: filler
+  z: 3.0103
   height: 2.00
 TopVia2:
   index: 133
   type: 0
-  z: 8.03
+  z: 5.0103
   height: 2.80
 TopMetal2:
   index: 134
   type: 0
-  z: 10.83
+  z: 7.8103
+  height: 3.00
+TopMetal2Filler:
+  index: 134
+  type: 22
+  purpose: filler
+  z: 7.8103
   height: 3.00
 
 # --- Passivation (1500nm oxide + 400nm SiN = 1.9um total) ---
 # Note: Passiv:pillar (9/35) openings are holes in this layer.
 # The 3D viewer extrudes this as a solid; the openings in the
 # passivation are not rendered as cutouts (limitation of 2.5D extrusion).
+# Render only: the stack key carries no passivation, so this layer is Studio's
+# own, on the key's plane, and is left out of the comparison with the PDK copy.
 
 Passiv:
   index: 9
   type: 0
-  z: 13.83
+  purpose: render_only
+  z: 10.8103
   height: 1.90
 
 # --- Cu-Pillar fabrication layers (datatype 35 = pillar variant) ---
@@ -84,17 +114,17 @@ Passiv:
 Passiv_pillar:
   index: 9
   type: 35
-  z: 10.83
+  z: 7.8103
   height: 3.00
 
 dfpad_pillar:
   index: 41
   type: 35
-  z: 10.83
+  z: 7.8103
   height: 3.00
 
 Recog_pillar:
   index: 99
   type: 35
-  z: 10.83
+  z: 7.8103
   height: 3.00

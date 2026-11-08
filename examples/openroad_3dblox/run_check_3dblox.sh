@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 IHP GmbH
 # Run OpenROAD's check_3dblox on an exported 3Dblox assembly inside a
 # locally built OpenROAD image (see README.md). Exits non-zero if the
 # linter reports any warning or error, so a flow step turns red on

@@ -47,10 +47,18 @@ qrc_*.cpp
 # Session logs (timestamped, written in the invocation directory at runtime)
 chiplet-studio_*.log
 
+# Python bytecode. tests/ carries .py that get imported as modules, by the
+# cross-reader check's own controls among others, and the tree had no rule
+# for the __pycache__ that leaves behind.
+__pycache__/
+*.pyc
+
+# What a local pytest run of tests/contracts/ leaves (CONTRIBUTING.md).
+.venv/
+.pytest_cache/
+*.egg-info/
+
 # OS
 .DS_Store
 Thumbs.db
 
-# Local session tracking (not for the git tree)
-SESSION_LOG.md
-docs/

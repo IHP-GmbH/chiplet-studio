@@ -21,6 +21,9 @@
 #include <memory>
 
 #include "ViewBox.h"
+#include "AssemblySheet.h"
+
+#include <map>
 
 // Forward declarations (avoid KLayout headers in our header)
 namespace lay {
@@ -45,6 +48,9 @@ struct LayerInfo {
     QColor fillColor;   // Fill color for display
     QColor frameColor;  // Frame/outline color
     int index = -1;     // Index in the layer list (for setLayerVisible)
+    bool isGroup = false;  // a heading node (technology or Shared), not a layer
+    QString group;         // heading the layer is listed under; empty at top level
+    bool fill = false;     // a stackup marks it `purpose: filler`
 };
 
 /**
@@ -67,6 +73,36 @@ public:
      * @return true if load succeeded
      */
     bool loadLayout(const QString& path, const QString& lypPath = QString());
+
+    /**
+     * @brief Load a layout styled by every technology it involves
+     *
+     * Each technology's sheet is read, the layout's layers are attributed to
+     * the carrier or to the dies (see AssemblySheet.h), and one grouped list
+     * is applied. Fill starts hidden. What could not be honoured is in
+     * notes() afterwards.
+     */
+    bool loadComposedLayout(const QString& path, const LoadSpec& spec);
+
+    /**
+     * @brief What the last composed load could not do as declared
+     */
+    const QStringList& notes() const { return m_notes; }
+
+    /**
+     * @brief Show or hide every fill layer at once (per-layer state is kept otherwise)
+     *
+     * The first time it shows fill on a composed load whose spec names a
+     * carrierFillPath, it first reads the carrier's fill layers from that file
+     * into a second cellview and lists them with the carrier. A file that does
+     * not share the shown layout's frame is not drawn; notes() says why.
+     */
+    void setFillVisible(bool visible);
+
+    /**
+     * @brief Whether the loaded list has any fill layer
+     */
+    bool hasFill() const;
 
     /**
      * @brief Clear the current layout
@@ -150,6 +186,10 @@ public:
      */
     int maxHierLevels() const;
 
+    // Descendant depth below the active cell (-1 when unavailable).
+    // Full contents need maxHierLevels() >= this value + 1.
+    int currentCellHierarchyDepth() const;
+
     /**
      * @brief Set the maximum hierarchy level displayed (clamped to >= 0)
      *
@@ -227,6 +267,11 @@ signals:
      */
     void viewportChanged();
 
+    /**
+     * @brief Emitted when notes() changed without a new layout (a lazy read)
+     */
+    void notesChanged();
+
 private:
     void setupUI();
     void connectSignals();
@@ -244,6 +289,17 @@ private:
     std::unique_ptr<ViewportEventBridge> m_viewportBridge;
 #endif
     QString m_currentPath;
+    QStringList m_notes;
+    struct RowMeta {
+        QString group;
+        bool fill = false;
+    };
+    // (cellview, layer) of every row of the last composed load. Cellview 1 is
+    // the carrier fill, whose numbers can repeat a die's fill in cellview 0.
+    std::map<std::pair<int, LayerNum>, RowMeta> m_rowMeta;
+    struct CarrierFill;
+    std::unique_ptr<CarrierFill> m_carrierFill;  // pending or read; null: none
+    bool addCarrierFill();
     bool m_viewAvailable = false;
     bool m_initAttempted = false;
     bool m_blockCellNavigation = false;

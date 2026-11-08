@@ -177,6 +177,13 @@ void ComponentMesh::release()
         return;
     }
 
+    // A move transfers live handles but not this object's GL function table.
+    // Rebuilds can destroy that moved mesh before its first render/upload.
+    if (!m_initialized && (m_vao != 0 || m_vbo != 0 || m_ebo != 0)) {
+        initializeOpenGLFunctions();
+        m_initialized = true;
+    }
+
     if (m_vao != 0) {
         glDeleteVertexArrays(1, &m_vao);
         m_vao = 0;

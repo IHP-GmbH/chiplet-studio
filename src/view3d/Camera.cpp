@@ -28,6 +28,7 @@ Camera::Camera()
 
 void Camera::orbit(float deltaYaw, float deltaPitch)
 {
+    m_followFit = false;
     m_yaw += deltaYaw * m_orbitSensitivity;
     m_pitch += deltaPitch * m_orbitSensitivity;
     clampPitch();
@@ -39,6 +40,7 @@ void Camera::orbit(float deltaYaw, float deltaPitch)
 
 void Camera::pan(float deltaX, float deltaY)
 {
+    m_followFit = false;
     // Calculate camera's right and up vectors in world space
     VECTOR3D pos = position();
     VECTOR3D forward = m_target - pos;
@@ -57,6 +59,7 @@ void Camera::pan(float deltaX, float deltaY)
 
 void Camera::zoom(float delta)
 {
+    m_followFit = false;
     // Exponential zoom for smooth feel at all distances
     float factor = 1.0f - delta * m_zoomSensitivity;
 
@@ -71,40 +74,74 @@ void Camera::zoom(float delta)
     updateClipPlanes();
 }
 
-void Camera::fitToBox(const AA_BOUNDING_BOX& box)
+void Camera::fitToBox(const AA_BOUNDING_BOX& box, float aspectRatio)
 {
-    // Set target to box center
-    VECTOR3D center = (box.mins + box.maxes) * 0.5f;
-    m_target = center;
-
-    // Calculate distance to fit box in view
-    VECTOR3D size = box.maxes - box.mins;
-
-    float maxDim = std::max({size.x, size.y, size.z});
-
-    // Guard against a degenerate or empty box (maxDim <= 0, e.g. an assembly
-    // with no geometry, or an uninitialized bbox where mins > maxes). Without
-    // this m_distance becomes 0 (or negative/NaN), yielding a singular view
-    // matrix and a blank, unrecoverable 3D view.
-    if (!(maxDim > 0.0f)) {  // also catches NaN
-        m_distance = 1000.0f;  // same sane default as reset()
-        updateClipPlanes();
+    m_followFit = false;
+    const auto finite = [](const VECTOR3D& v) {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+    };
+    const VECTOR3D size = box.maxes - box.mins;
+    if (!finite(box.mins) || !finite(box.maxes) || !finite(size)
+            || size.x < 0 || size.y < 0 || size.z < 0
+            || !(std::max({size.x, size.y, size.z}) > 0)
+            || !std::isfinite(aspectRatio) || aspectRatio <= 0
+            || !std::isfinite(m_fov) || m_fov <= 0 || m_fov >= 180) {
+        reset();
         return;
     }
-
-    // Distance to fit object in view based on FOV
-    float fovRad = static_cast<float>(m_fov * M_PI / 180.0);
-    m_distance = (maxDim * 0.5f) / std::tan(fovRad * 0.5f) * 1.5f;
-
+    const VECTOR3D center = box.mins * 0.5f + box.maxes * 0.5f;
+    // Same basis as viewMatrix; preserve the user's viewing direction.
+    VECTOR3D forward = m_target - position();
+    forward.Normalize();
+    VECTOR3D right = forward.CrossProduct(m_up);
+    right.Normalize();
+    VECTOR3D up = right.CrossProduct(forward);
+    up.Normalize();
+    const double tanY = std::tan(m_fov * M_PI / 360.0);
+    const double tanX = tanY * aspectRatio;
+    double distance = 0;
+    for (int i = 0; i < 8; ++i) {
+        const VECTOR3D corner((i & 1) ? box.maxes.x : box.mins.x,
+                              (i & 2) ? box.maxes.y : box.mins.y,
+                              (i & 4) ? box.maxes.z : box.mins.z);
+        const VECTOR3D relative = corner - center;
+        const double towardEye = -relative.DotProduct(forward);
+        // 10% screen-space margin, including depth of each individual corner.
+        distance = std::max(distance, 1.1 * std::max(0.0, towardEye) + 1.1 * std::max(
+            std::abs(relative.DotProduct(right)) / tanX,
+            std::abs(relative.DotProduct(up)) / tanY));
+    }
+    if (!std::isfinite(distance) || distance <= 0 || distance > 1e7) {
+        reset();
+        return;
+    }
+    m_target = center;
+    m_distance = static_cast<float>(distance);
+    m_viewportAspect = aspectRatio;
+    m_fittedBox = box;
+    m_followFit = true;
     updateClipPlanes();
+}
+
+void Camera::setViewportAspect(float aspectRatio)
+{
+    // Transient zero-sized widgets must not destroy either fit or user state.
+    if (!std::isfinite(aspectRatio) || aspectRatio <= 0) return;
+    if (m_viewportAspect == aspectRatio) return;
+    m_viewportAspect = aspectRatio;
+    if (m_followFit) fitToBox(m_fittedBox, aspectRatio);
 }
 
 void Camera::reset()
 {
+    m_followFit = false;
+    m_viewportAspect = 1.0f;
     m_target = VECTOR3D(0.0f, 0.0f, 0.0f);
     m_distance = 1000.0f;
     m_yaw = 0.0f;      // Face forward for top-down view
     m_pitch = 89.0f;   // Near-vertical for top-down view
+    m_fov = 45.0f;
+    updateClipPlanes();
 }
 
 VECTOR3D Camera::position() const
@@ -173,11 +210,13 @@ MATRIX4X4 Camera::projectionMatrix(float aspectRatio) const
 
 void Camera::setTarget(const VECTOR3D& target)
 {
+    m_followFit = false;
     m_target = target;
 }
 
 void Camera::setDistance(float distance)
 {
+    m_followFit = false;
     // Match zoom() range: 0.00001 (10nm) to 10,000,000
     m_distance = std::max(0.00001f, std::min(distance, 10000000.0f));
     updateClipPlanes();
@@ -196,6 +235,16 @@ void Camera::updateClipPlanes()
 float Camera::fcoef() const
 {
     return 2.0f / log2f(m_far + 1.0f);
+}
+
+void Camera::setOrientation(float yaw, float pitch)
+{
+    m_followFit = false;
+    m_yaw = yaw;
+    m_pitch = pitch;
+    clampPitch();
+    while (m_yaw < 0.0f) m_yaw += 360.0f;
+    while (m_yaw >= 360.0f) m_yaw -= 360.0f;
 }
 
 void Camera::clampPitch()

@@ -28,6 +28,19 @@ protected:
     static char* g_argv[];
     static QApplication* g_app;
 
+    // An independent capability expectation, not the widget's pre-init flag.
+    // Linked KLayout on a real Qt display (including Xvfb/xcb) must initialize;
+    // an unexpected dispatcher/widget failure there is a test failure.
+    static bool nativeViewExpected() {
+#ifdef HAVE_KLAYOUT
+        const auto platform = QGuiApplication::platformName();
+        return platform != "offscreen" && platform != "minimal"
+            && !QGuiApplication::screens().isEmpty();
+#else
+        return false;
+#endif
+    }
+
     static void SetUpTestSuite() {
         if (!QApplication::instance()) {
             g_app = new QApplication(g_argc, g_argv);
@@ -101,14 +114,17 @@ TEST_F(KLayout2DViewTest, LoadLayoutBehavior) {
     // If display is available, result depends on whether file exists
 }
 
-// Test that layerControlFrame returns nullptr when view not available
+// The getter performs lazy initialization; initial unavailability is not failure.
 TEST_F(KLayout2DViewTest, LayerControlFrameWhenUnavailable) {
     KLayout2DView view;
-
-    // In headless mode, should return nullptr
-    if (!view.isViewAvailable()) {
-        EXPECT_EQ(view.layerControlFrame(), nullptr);
-    }
+    EXPECT_FALSE(view.isViewAvailable());
+    QWidget* first = view.layerControlFrame();
+    EXPECT_EQ(view.isViewAvailable(), nativeViewExpected());
+    if (nativeViewExpected()) EXPECT_NE(first, nullptr);
+    else EXPECT_EQ(first, nullptr);  // Genuine stub/offscreen/unavailable backend.
+    EXPECT_EQ(view.layerControlFrame(), first);
+    EXPECT_EQ(view.isViewAvailable(), nativeViewExpected());
+    EXPECT_FALSE(view.hasLayout());
 }
 
 // Test multiple operations don't crash
@@ -161,9 +177,14 @@ TEST_F(KLayout2DViewTest, SetCurrentCellReturnsFalseWhenNoLayout) {
 
 TEST_F(KLayout2DViewTest, HierarchyControlFrameNullWhenUnavailable) {
     KLayout2DView view;
-    if (!view.isViewAvailable()) {
-        EXPECT_EQ(view.hierarchyControlFrame(), nullptr);
-    }
+    EXPECT_FALSE(view.isViewAvailable());
+    QWidget* first = view.hierarchyControlFrame();
+    EXPECT_EQ(view.isViewAvailable(), nativeViewExpected());
+    if (nativeViewExpected()) EXPECT_NE(first, nullptr);
+    else EXPECT_EQ(first, nullptr);
+    EXPECT_EQ(view.hierarchyControlFrame(), first);
+    EXPECT_EQ(view.isViewAvailable(), nativeViewExpected());
+    EXPECT_FALSE(view.hasLayout());
 }
 
 // -- Layer control API tests (safe in all environments) --
@@ -214,24 +235,24 @@ TEST_F(KLayout2DViewTest, KLayoutAvailableCompiles) {
     SUCCEED();
 }
 
-// Test loading a real GDS file (requires physical display - skip in CI/headless)
-// Note: KLayout's GUI components crash with Xvfb, this test requires real X11
+// Test loading a real GDS file, including on the native Xvfb/xcb gate.
 TEST_F(KLayout2DViewTest, LoadRealGdsIfDisplayAvailable) {
     KLayout2DView view;
-
-    // Skip in headless/CI environments - KLayout GUI requires physical display
-    // The DISPLAY check with QGuiApplication::screens() isn't sufficient
-    // because KLayout crashes even with Xvfb virtual display
-    if (!view.isViewAvailable()) {
-        GTEST_SKIP() << "Physical display required (KLayout GUI test)";
+    EXPECT_FALSE(view.isViewAvailable());
+    const QString testFile = QString(FIXTURES_DIR) + "/sample_minimal.gds";
+    ASSERT_TRUE(QFile::exists(testFile)) << testFile.toStdString();
+    const bool result = view.loadLayout(testFile);  // Exercises initialization.
+    if (!nativeViewExpected()) {
+        ASSERT_FALSE(view.isViewAvailable());
+        ASSERT_FALSE(result);
+        ASSERT_FALSE(view.hasLayout());
+        GTEST_SKIP() << "Native KLayout view unavailable: Qt platform "
+                     << QGuiApplication::platformName().toStdString()
+                     << ", screen count " << QGuiApplication::screens().size();
     }
 
-    // Try loading test fixture (FIXTURES_DIR defined via CMake)
-    QString testFile = QString(FIXTURES_DIR) + "/sample_minimal.gds";
-    bool result = view.loadLayout(testFile);
-
-    // File should exist and load successfully with display available
-    EXPECT_TRUE(result) << "Failed to load " << testFile.toStdString();
+    ASSERT_TRUE(view.isViewAvailable()) << "Linked KLayout failed to initialize on the available Qt display";
+    ASSERT_TRUE(result) << "Failed to load " << testFile.toStdString();
     EXPECT_TRUE(view.hasLayout());
     EXPECT_EQ(view.currentPath(), testFile);
 }

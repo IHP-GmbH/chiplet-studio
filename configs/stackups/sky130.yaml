@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 aesc silicon
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# Vendored from aesc-silicon/BlenderGDS, import_gdsii/configs/sky130.yaml at
+# commit a984b4518d1ce6f9fa61fb3c5d903197454018be.
+# Unchanged.
 
 nwell:
   index: 64

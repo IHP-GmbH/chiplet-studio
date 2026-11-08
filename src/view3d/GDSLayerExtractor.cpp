@@ -8,6 +8,7 @@
 #include "GDSLayerExtractor.h"
 #include "core/Logger.h"
 #include <QDebug>
+#include <algorithm>
 #include <cmath>
 
 #ifdef HAVE_KLAYOUT
@@ -16,6 +17,8 @@
 #include "dbCell.h"
 #include "dbRecursiveShapeIterator.h"
 #include "dbLayerProperties.h"
+#include "dbPolygonGenerators.h"
+#include "dbPolygonTools.h"
 #include "dbRegion.h"
 #include "tlStream.h"
 #include "tlException.h"
@@ -89,6 +92,7 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
     m_lastLayerCount = 0;
     m_lastPolygonCount = 0;
     m_lastPointCount = 0;
+    m_lastTally.clear();
 
     if (!layout) {
         return result;
@@ -144,22 +148,28 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
     // pillars, as fab builds them. Dense layers are skipped by count so a
     // standard-cell die (~5e5 cuts per via layer) cannot stall load or swamp the
     // view; those internal vias are not the targeted connector and drew nothing
-    // before this path existed.
-    auto emitViaCuts = [&](unsigned int layer_index, LayerPolygons& out) {
-        if (m_config.via_max_cuts > 0) {
-            // Pre-count with an early-out (bounded to cap+1 iterations).
-            size_t n = 0;
-            for (db::RecursiveShapeIterator ci(*layout, cell, layer_index);
-                 !ci.at_end(); ++ci) {
-                if (++n > m_config.via_max_cuts) break;
-            }
-            if (n > m_config.via_max_cuts) {
-                const db::LayerProperties& vp = layout->get_properties(layer_index);
-                qCInfo(lcGds) << "via layer" << vp.layer << "/" << vp.datatype
-                              << "skipped:" << (int)m_config.via_max_cuts
-                              << "+ cuts exceed the via cap; not drawn (as before)";
-                return;
-            }
+    // before this path existed. The whole layer is counted first, so the tally
+    // says how many cuts a skipped layer held.
+    auto drawable = [](const db::Shape& s) {
+        return s.is_polygon() || s.is_box() || s.is_path();
+    };
+    auto emitViaCuts = [&](unsigned int layer_index, LayerPolygons& out,
+                           LayerShapeTally& tally) {
+        size_t n = 0;
+        for (db::RecursiveShapeIterator ci(*layout, cell, layer_index);
+             !ci.at_end(); ++ci) {
+            if (drawable(ci.shape())) ++n;
+        }
+        tally.inGds = n;
+        tally.underArea = 0;
+        tally.pastRead = 0;
+        if (m_config.via_max_cuts > 0 && n > m_config.via_max_cuts) {
+            tally.viaSkipped = n;
+            const db::LayerProperties& vp = layout->get_properties(layer_index);
+            qCInfo(lcGds) << "via layer" << vp.layer << "/" << vp.datatype
+                          << "skipped:" << (qulonglong)n << "cuts exceed the via cap of"
+                          << (qulonglong)m_config.via_max_cuts;
+            return;
         }
         // No bound needed here: the pre-count above already skipped layers
         // over the cap, so a layer that reaches this loop draws all its cuts
@@ -167,7 +177,7 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         for (db::RecursiveShapeIterator it(*layout, cell, layer_index);
              !it.at_end(); ++it) {
             const db::Shape& shape = it.shape();
-            if (!(shape.is_polygon() || shape.is_box() || shape.is_path())) {
+            if (!drawable(shape)) {
                 continue;
             }
             db::Polygon db_poly;
@@ -192,6 +202,11 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         LayerPolygons layer_data;
         layer_data.key = key;
         layer_data.name = lp.name;
+        LayerShapeTally tally;
+        auto record = [&]() {
+            tally.kept = layer_data.polygons.size();
+            if (tally.inGds > 0) m_lastTally[key] = tally;
+        };
 
         // Via/contact layers: draw the individual cuts (physical pillars),
         // exempt from the area cull. Their cuts are sub-micron (interposer
@@ -200,7 +215,8 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         // "no pillars" bug. The caller marks these from the stackup by name
         // (contains "via"/"con").
         if (m_config.via_layers.count(key) > 0) {
-            emitViaCuts(li, layer_data);
+            emitViaCuts(li, layer_data, tally);
+            record();
             if (!layer_data.polygons.empty()) {
                 result[key] = std::move(layer_data);
                 ++m_lastLayerCount;
@@ -216,11 +232,17 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         size_t poly_count = 0;
         bool saw_shape = false;
 
-        for (; !shapes.at_end() && poly_count < m_config.max_polygons_per_layer; ++shapes) {
+        // Every shape is counted; past the limit it is not read.
+        for (; !shapes.at_end(); ++shapes) {
             const db::Shape& shape = shapes.shape();
 
             // Convert shape to simple polygon
-            if (shape.is_polygon() || shape.is_box() || shape.is_path()) {
+            if (drawable(shape)) {
+                ++tally.inGds;
+                if (poly_count >= m_config.max_polygons_per_layer) {
+                    ++tally.pastRead;
+                    continue;
+                }
                 saw_shape = true;
                 db::Polygon db_poly;
                 shape.polygon(db_poly);
@@ -244,6 +266,7 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
                 if (m_config.min_polygon_area > 0) {
                     double area = std::abs(poly.area());
                     if (area < m_config.min_polygon_area) {
+                        ++tally.underArea;
                         continue;
                     }
                 }
@@ -263,8 +286,9 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extract(
         // cull; they carry no z and would not render anyway.
         if (saw_shape && layer_data.polygons.empty() &&
             m_config.modeled_layers.count(key) > 0) {
-            emitViaCuts(li, layer_data);
+            emitViaCuts(li, layer_data, tally);
         }
+        record();
 
         if (!layer_data.polygons.empty()) {
             result[key] = std::move(layer_data);
@@ -346,10 +370,19 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
         m_lastLayerCount = 0;
         m_lastPolygonCount = 0;
         m_lastPointCount = 0;
+        std::map<LayerKey, LayerShapeTally> tally;
 
         // Extract from each cell and merge results
         for (const auto& cell_name : cell_names) {
             auto cell_result = extract(&layout, cell_name, {});
+            for (const auto& [key, t] : m_lastTally) {
+                LayerShapeTally& sum = tally[key];
+                sum.inGds += t.inGds;
+                sum.kept += t.kept;
+                sum.underArea += t.underArea;
+                sum.pastRead += t.pastRead;
+                sum.viaSkipped += t.viaSkipped;
+            }
 
             // Merge into combined result
             for (auto& [key, layer_data] : cell_result) {
@@ -369,6 +402,7 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
         }
 
         // Update statistics
+        m_lastTally = std::move(tally);
         m_lastLayerCount = result.size();
         m_lastPolygonCount = 0;
         m_lastPointCount = 0;
@@ -391,6 +425,149 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
         qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.what();
         return result;
     }
+}
+
+namespace {
+
+// Collects KLayout's trapezoids as records, in um.
+class TrapezoidSink : public db::SimplePolygonSink {
+public:
+    TrapezoidSink(std::vector<TileTrap>& out, double dbu) : m_out(out), m_dbu(dbu) {}
+
+    void put(const db::SimplePolygon& p) override
+    {
+        db::Coord yb = 0, yt = 0;
+        bool first = true;
+        for (const db::Point& pt : p.hull()) {
+            if (first) {
+                yb = yt = pt.y();
+                first = false;
+            } else {
+                yb = std::min(yb, pt.y());
+                yt = std::max(yt, pt.y());
+            }
+        }
+        if (first) return;
+        db::Coord xbl = 0, xbr = 0, xtl = 0, xtr = 0;
+        bool seenB = false, seenT = false;
+        for (const db::Point& pt : p.hull()) {
+            if (pt.y() == yb) {
+                xbl = seenB ? std::min(xbl, pt.x()) : pt.x();
+                xbr = seenB ? std::max(xbr, pt.x()) : pt.x();
+                seenB = true;
+            }
+            if (pt.y() == yt) {
+                xtl = seenT ? std::min(xtl, pt.x()) : pt.x();
+                xtr = seenT ? std::max(xtr, pt.x()) : pt.x();
+                seenT = true;
+            }
+        }
+        const auto um = [this](db::Coord c) { return static_cast<float>(c * m_dbu); };
+        m_out.push_back({um(yb), um(yt), um(xbl), um(xbr), um(xtl), um(xtr)});
+    }
+
+private:
+    std::vector<TileTrap>& m_out;
+    double m_dbu;
+};
+
+}  // namespace
+
+std::map<LayerKey, LayerRecords> extractRecords(db::Layout* layout,
+                                                const std::string& cell_name,
+                                                const std::set<LayerKey>& layers,
+                                                std::size_t& recordBudget)
+{
+    std::map<LayerKey, LayerRecords> result;
+    if (!layout) {
+        return result;
+    }
+    db::cell_index_type cell_index;
+    if (cell_name.empty()) {
+        auto top_it = layout->begin_top_down();
+        if (top_it == layout->end_top_cells()) {
+            qCWarning(lcGds) << "No cells in layout";
+            return result;
+        }
+        cell_index = *top_it;
+    } else {
+        auto found = layout->cell_by_name(cell_name.c_str());
+        if (!found.first) {
+            qCWarning(lcGds) << "Cell not found:" << cell_name.c_str();
+            return result;
+        }
+        cell_index = found.second;
+    }
+    const db::Cell& cell = layout->cell(cell_index);
+    const double dbu = layout->dbu();
+    const auto um = [dbu](db::Coord c) { return static_cast<float>(c * dbu); };
+
+    std::vector<TileTrap> parts;
+    bool full = recordBudget == 0;
+    for (unsigned int li = 0; li < layout->layers(); ++li) {
+        if (!layout->is_valid_layer(li)) {
+            continue;
+        }
+        const db::LayerProperties& lp = layout->get_properties(li);
+        const LayerKey key(lp.layer, lp.datatype);
+        if (layers.count(key) == 0) {
+            continue;
+        }
+        LayerRecords records;
+        for (db::RecursiveShapeIterator it(*layout, cell, li); !it.at_end(); ++it) {
+            const db::Shape& shape = it.shape();
+            if (!(shape.is_polygon() || shape.is_box() || shape.is_path())) {
+                continue;
+            }
+            ++records.inGds;
+            if (full) {
+                continue;
+            }
+            db::Polygon poly;
+            shape.polygon(poly);
+            poly = poly.transformed(it.trans());
+            if (poly.is_box()) {
+                const db::Box b = poly.box();
+                records.boxes.push_back({um(b.left()), um(b.bottom()), um(b.right()), um(b.top())});
+                --recordBudget;
+                full = recordBudget == 0;
+                continue;
+            }
+            parts.clear();
+            TrapezoidSink sink(parts, dbu);
+            db::decompose_trapezoids(poly, db::TD_simple, sink);
+            if (parts.size() > recordBudget) {
+                full = true;
+                continue;
+            }
+            records.addShape(parts);
+            recordBudget -= parts.size();
+            full = recordBudget == 0;
+        }
+        if (records.inGds > 0) {
+            result[key] = std::move(records);
+        }
+    }
+    return result;
+}
+
+std::map<LayerKey, LayerRecords> extractRecordsFromFile(const std::string& gds_path,
+                                                        const std::string& cell_name,
+                                                        const std::set<LayerKey>& layers,
+                                                        std::size_t& recordBudget)
+{
+    try {
+        tl::InputStream stream(gds_path);
+        db::Reader reader(stream);
+        db::Layout layout;
+        reader.read(layout);
+        return extractRecords(&layout, cell_name, layers, recordBudget);
+    } catch (const tl::Exception& e) {
+        qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.msg().c_str();
+    } catch (const std::exception& e) {
+        qCWarning(lcGds) << "Error loading" << gds_path.c_str() << ":" << e.what();
+    }
+    return {};
 }
 
 GDSBoundingBox GDSLayerExtractor::extractBoundingBox(
@@ -463,6 +640,15 @@ std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFile(
 std::map<LayerKey, LayerPolygons> GDSLayerExtractor::extractFromFileCells(
     const std::string& /*gds_path*/,
     const std::vector<std::string>& /*cell_names*/)
+{
+    qCWarning(lcGds) << "KLayout not available";
+    return {};
+}
+
+std::map<LayerKey, LayerRecords> extractRecordsFromFile(const std::string& /*gds_path*/,
+                                                        const std::string& /*cell_name*/,
+                                                        const std::set<LayerKey>& /*layers*/,
+                                                        std::size_t& /*recordBudget*/)
 {
     qCWarning(lcGds) << "KLayout not available";
     return {};

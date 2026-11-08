@@ -1,11 +1,24 @@
 # SPDX-FileCopyrightText: 2025 aesc silicon
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# Vendored from aesc-silicon/BlenderGDS, import_gdsii/configs/gf180mcu.yaml at
+# commit a984b4518d1ce6f9fa61fb3c5d903197454018be.
+# Changed here: added the <layer>_Dummy fill entries and their comment.
+
+# Each <layer>_Dummy entry is the fill the PDK's fill scripts write on
+# datatype 4, named as in its gf180mcu.lyp, at its drawn layer's z and height.
 
 Comp:
   index: 22
   type: 0
   z: -0.3  # Estimated value
+  height: 0.25
+COMP_Dummy:
+  index: 22
+  type: 4
+  purpose: filler
+  z: -0.3
   height: 0.25
 Nwell:
   index: 21
@@ -15,6 +28,12 @@ Nwell:
 Poly2:
   index: 30
   type: 0
+  z: -0.2
+  height: 0.2
+Poly2_Dummy:
+  index: 30
+  type: 4
+  purpose: filler
   z: -0.2
   height: 0.2
 Contact:
@@ -27,6 +46,12 @@ Metal1:
   type: 0
   z: 0.7
   height: 0.55
+Metal1_Dummy:
+  index: 34
+  type: 4
+  purpose: filler
+  z: 0.7
+  height: 0.55
 Via1:
   index: 35
   type: 0
@@ -35,6 +60,12 @@ Via1:
 Metal2:
   index: 36
   type: 0
+  z: 1.85
+  height: 0.55
+Metal2_Dummy:
+  index: 36
+  type: 4
+  purpose: filler
   z: 1.85
   height: 0.55
 Via2:
@@ -47,6 +78,12 @@ Metal3:
   type: 0
   z: 3.3
   height: 0.55
+Metal3_Dummy:
+  index: 42
+  type: 4
+  purpose: filler
+  z: 3.3
+  height: 0.55
 Via3:
   index: 40
   type: 0
@@ -55,6 +92,12 @@ Via3:
 Metal4:
   index: 46
   type: 0
+  z: 4.45
+  height: 0.55
+Metal4_Dummy:
+  index: 46
+  type: 4
+  purpose: filler
   z: 4.45
   height: 0.55
 Via4:
@@ -67,6 +110,12 @@ Metal5:
   type: 0
   z: 5.6
   height: 0.55
+Metal5_Dummy:
+  index: 81
+  type: 4
+  purpose: filler
+  z: 5.6
+  height: 0.55
 Via5:
   index: 82
   type: 0
@@ -75,5 +124,11 @@ Via5:
 MetalTop:
   index: 53
   type: 0
+  z: 6.75
+  height: 0.69
+MetalTop_Dummy:
+  index: 53
+  type: 4
+  purpose: filler
   z: 6.75
   height: 0.69

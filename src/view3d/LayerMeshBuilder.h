@@ -15,7 +15,9 @@
 #include "GDSLayerExtractor.h"
 #include "core/Component.h"   // Anchor enum
 #include "core/LayerStackup.h"
+#include "core/TechResolve.h"   // ShapeCount
 #include "view2d/LayerProperties.h"
+#include <algorithm>
 #include <map>
 #include <vector>
 
@@ -32,6 +34,8 @@ struct LayerMesh {
     double z_bottom = 0.0;
     double z_top = 0.0;
     bool visible = true;
+    bool fill = false;      // the stackup marks this exact key `purpose: filler`
+    size_t shapes = 0;      // polygons extruded into the mesh
     float opacity = 1.0f;   // 1.0 = solid; < 1.0 routes the layer into the transparent pass
     float metallic = 0.0f;
     float roughness = 0.5f;
@@ -47,6 +51,10 @@ struct Component3DGeometry {
     std::vector<LayerMesh> layers;
     double total_height = 0.0;
 
+    // GDS layers with shapes that the stackup places at no height, so no mesh
+    // was built for them. Sorted by key.
+    std::vector<LayerKey> unmodeled;
+
     // Component transform (position + rotation)
     QMatrix4x4 transform;
 
@@ -56,6 +64,37 @@ struct Component3DGeometry {
 
     size_t layerCount() const { return layers.size(); }
     size_t totalTriangles() const;
+};
+
+/**
+ * Show or hide every fill layer of `geometry` (LayerMesh::fill). The per-layer
+ * user overrides are applied after this, so they still win.
+ */
+void setFillVisible(Component3DGeometry& geometry, bool visible);
+
+/**
+ * Whether the standard view draws a layer's mesh. Never a fill mesh: it holds
+ * the first shapes in read order up to the read limit, which are one region,
+ * not a sample. Fill is drawn from a read of every fill shape instead, as
+ * coverage tiles (fillSource in SceneLoad.h).
+ */
+bool standardMeshDrawn(const LayerMesh& mesh);
+
+/**
+ * Where and how build() places one GDS layer: its height from the stackup
+ * (exact key, else the layer number), its colour and material, and whether
+ * it is fill. `placed` is false when the stackup has no height for it.
+ */
+struct LayerPlacement {
+    bool placed = false;
+    std::string name;
+    double zBottom = 0.0;    // um, after the flip-chip inversion
+    double thickness = 0.0;  // um
+    QColor color;
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+    bool visible = true;
+    bool fill = false;
 };
 
 /**
@@ -107,6 +146,17 @@ public:
         Anchor anchor = Anchor::BboxCenter);
 
     /**
+     * The placement build() gives `key`. The fast view places its layers with
+     * it too, so both views put a layer at the same height in the same colour.
+     */
+    static LayerPlacement placeLayer(const LayerKey& key,
+                                     const LayerStackup& stackup,
+                                     const LayerPropertiesFile* lyp,
+                                     const LayerColorScheme* colorScheme,
+                                     bool flipZ,
+                                     double beolTop);
+
+    /**
      * Build a single layer mesh
      * @param center_offset_x X offset to subtract (um) to center geometry at origin
      * @param center_offset_y Y offset to subtract (um) to center geometry at origin
@@ -135,6 +185,10 @@ public:
 
     // Configuration
     void setMaxPolygonsPerLayer(size_t max) { m_maxPolygonsPerLayer = max; }
+    size_t maxPolygonsPerLayer() const { return m_maxPolygonsPerLayer; }
+    // How many of `given` polygons buildLayerMesh extrudes: it stops at the
+    // per-layer limit.
+    size_t builtOf(size_t given) const { return std::min(given, m_maxPolygonsPerLayer); }
     void setGenerateSideWalls(bool gen) { m_generateSideWalls = gen; }
 
 private:
@@ -185,6 +239,36 @@ private:
     // Tessellation mode (default: GDS3D)
     static TessellatorMode s_tessellatorMode;
 };
+
+/**
+ * What 3D draws of each layer the stackup places, against what the GDS holds:
+ * the extractor's tally under `config`, then the builder's own limit. A layer
+ * is placed as placeLayer places it (LayerStackup::heightFor), so a datatype
+ * drawn at its layer number's height is counted too. Layers the stackup does
+ * not place are left out; the unmodeled note names them. Sorted by key.
+ */
+std::vector<ShapeCount> shapeCounts(const std::map<LayerKey, LayerShapeTally>& tally,
+                                    const ExtractionConfig& config,
+                                    const LayerStackup& stackup,
+                                    const LayerMeshBuilder& builder);
+
+/**
+ * One row of a component's layer list: each built mesh, then each placed
+ * layer 3D built no mesh for but the GDS has shapes on. `count` and
+ * `countNote` are empty when 3D draws every shape of the layer. A fill
+ * layer's mesh is never drawn, so its count is the GDS's and it has no note.
+ */
+struct LayerRow {
+    LayerKey key;
+    std::string name;
+    bool fill = false;
+    bool meshed = true;
+    std::string count;      // shapeCountLabel
+    std::string countNote;  // shapeCountNote
+};
+std::vector<LayerRow> layerRows(const std::string& componentId,
+                                const Component3DGeometry& geometry,
+                                const std::vector<ShapeCount>& counts);
 
 } // namespace chiplet
 

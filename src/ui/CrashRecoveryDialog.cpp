@@ -1,203 +1,159 @@
 // SPDX-FileCopyrightText: 2026 IHP GmbH
 // SPDX-License-Identifier: GPL-3.0-or-later
-
-/**
- * CrashRecoveryDialog.cpp - Implementation
- */
-
 #include "CrashRecoveryDialog.h"
 #include "core/Assembly.h"
 #include "core/CommandJournal.h"
-#include "core/CommandFactory.h"
-
-#include <QVBoxLayout>
+#include "core/RecoveryCheckpoint.h"
+#include "formats/ChipletFormat.h"
+#include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QTextEdit>
+#include <QListWidget>
 #include <QPushButton>
+#include <QVBoxLayout>
 #include <QMessageBox>
-#include <QStyle>
-#include <QApplication>
-#include <QDateTime>
-#include <QFileInfo>
-
+#include <algorithm>
 namespace chiplet {
-
-CrashRecoveryDialog::Result CrashRecoveryDialog::check_and_recover(
-    const std::filesystem::path& directory,
-    Assembly* assembly)
+std::unique_ptr<Assembly> CrashRecoveryDialog::check_and_recover(
+    const std::filesystem::path& directory, bool include_closed,
+    const std::filesystem::path& exclude_current)
 {
-    // Check for orphaned journal
-    if (!CommandJournal::has_orphaned_journal(directory)) {
-        return Result::NoJournalFound;
+    const auto recovery_directory = directory / "recovery";
+    auto checkpoints = std::filesystem::exists(recovery_directory)
+        ? RecoveryCheckpoint::find(recovery_directory)
+        : std::vector<std::filesystem::path>{};
+    if (include_closed && std::filesystem::exists(recovery_directory / "closed")) {
+        const auto closed = RecoveryCheckpoint::find(recovery_directory / "closed");
+        checkpoints.insert(checkpoints.end(), closed.begin(), closed.end());
     }
-
-    auto journalPath = CommandJournal::find_orphaned_journal(directory);
-    if (journalPath.empty()) {
-        return Result::NoJournalFound;
+    // Recovering the current window's own checkpoint would immediately update
+    // and archive the selected input while retiring that same open document.
+    // Other sessions and closed copies remain available and are never adopted.
+    if (!exclude_current.empty()) {
+        checkpoints.erase(std::remove_if(checkpoints.begin(), checkpoints.end(),
+            [&](const auto& path) {
+                std::error_code error;
+                return path == exclude_current ||
+                    std::filesystem::equivalent(path, exclude_current, error);
+            }), checkpoints.end());
     }
-
-    // Show dialog
-    CrashRecoveryDialog dialog(journalPath);
-    dialog.exec();
-
-    if (dialog.result() == Result::Recovered && assembly) {
-        // Replay commands into the assembly
-        for (auto& cmd : dialog.recovered_commands()) {
-            if (cmd) {
-                cmd->execute(*assembly);
-            }
-        }
-    }
-
-    return dialog.result();
+    const bool legacy = CommandJournal::has_orphaned_journal(directory);
+    if (checkpoints.empty() && !legacy && !include_closed) return {};
+    CrashRecoveryDialog dialog(checkpoints, legacy);
+    if (dialog.exec() != QDialog::Accepted) return {};
+    return dialog.take_recovered_assembly();
 }
-
-CrashRecoveryDialog::CrashRecoveryDialog(const std::filesystem::path& journal_path,
-                                         QWidget* parent)
-    : QDialog(parent)
-    , m_journalPath(journal_path)
+CrashRecoveryDialog::CrashRecoveryDialog(
+    const std::vector<std::filesystem::path>& checkpoints, bool legacy, QWidget* parent)
+    : QDialog(parent), m_checkpoints(checkpoints)
 {
-    setWindowTitle("Crash Recovery");
-    setMinimumWidth(450);
-    setupUI();
-    loadJournalInfo();
+    std::sort(m_checkpoints.begin(), m_checkpoints.end(), [](const auto& a, const auto& b) {
+        const auto ta = QFileInfo(QString::fromStdString(a.string())).lastModified();
+        const auto tb = QFileInfo(QString::fromStdString(b.string())).lastModified();
+        return ta == tb ? a < b : ta > tb;
+    });
+    setWindowTitle(tr("Recovery checkpoints"));
+    setMinimumSize(560, 340);
+    auto* layout = new QVBoxLayout(this);
+    auto* description = new QLabel(tr(
+        "Select a complete checkpoint to open. It may belong to another running "
+        "session; its existence does not prove a crash.\n\n"
+        "Recovery restores the saved state and file-preservation information "
+        "with empty undo/redo history. New edits get a separate recovery copy. "
+        "Recovery leaves all existing files unchanged. Cleanly closed copies are "
+        "archived and available through File > Recovery Checkpoints. They are kept "
+        "until you explicitly move a selected copy to the system trash."), this);
+    description->setWordWrap(true);
+    layout->addWidget(description);
+    if (legacy) {
+        auto* warning = new QLabel(tr(
+            "An older command journal was also found. It has no complete document "
+            "baseline and does not record undo/redo, so it cannot safely restore "
+            "the document. It has been left untouched."), this);
+        warning->setObjectName("legacyRecoveryWarning");
+        warning->setWordWrap(true);
+        layout->addWidget(warning);
+    }
+    m_list = new QListWidget(this);
+    m_list->setObjectName("recoveryCheckpointList");
+    for (const auto& path : m_checkpoints) {
+        const QFileInfo info(QString::fromStdString(path.string()));
+        auto* item = new QListWidgetItem(
+            info.lastModified().toString("yyyy-MM-dd hh:mm:ss") + "  " + info.fileName(),
+            m_list);
+        item->setToolTip(info.absoluteFilePath());
+    }
+    layout->addWidget(m_list);
+    m_problem = new QLabel(this);
+    m_problem->setObjectName("recoveryProblem");
+    m_problem->setWordWrap(true);
+    layout->addWidget(m_problem);
+    auto* buttons = new QHBoxLayout();
+    m_trashButton = new QPushButton(tr("Move selected to trash..."), this);
+    m_trashButton->setObjectName("trashCheckpointButton");
+    m_trashButton->setEnabled(false);
+    connect(m_trashButton, &QPushButton::clicked, this, &CrashRecoveryDialog::onTrash);
+    buttons->addWidget(m_trashButton);
+    auto* keep = new QPushButton(tr("Keep files and continue"), this);
+    keep->setDefault(true);
+    connect(keep, &QPushButton::clicked, this, &QDialog::reject);
+    buttons->addWidget(keep);
+    buttons->addStretch();
+    m_recoverButton = new QPushButton(tr("Open selected checkpoint"), this);
+    m_recoverButton->setObjectName("recoverCheckpointButton");
+    m_recoverButton->setEnabled(false);
+    connect(m_list, &QListWidget::currentRowChanged, this, [this](int row) {
+        m_recoverButton->setEnabled(row >= 0);
+        m_trashButton->setEnabled(row >= 0);
+        m_problem->clear();
+    });
+    connect(m_recoverButton, &QPushButton::clicked, this, &CrashRecoveryDialog::onRecover);
+    buttons->addWidget(m_recoverButton);
+    layout->addLayout(buttons);
 }
-
 CrashRecoveryDialog::~CrashRecoveryDialog() = default;
-
-void CrashRecoveryDialog::setupUI()
+std::unique_ptr<Assembly> CrashRecoveryDialog::take_recovered_assembly()
 {
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setSpacing(12);
-
-    // Warning icon and info text
-    QHBoxLayout* headerLayout = new QHBoxLayout();
-    QLabel* iconLabel = new QLabel();
-    iconLabel->setPixmap(QApplication::style()->standardIcon(
-        QStyle::SP_MessageBoxWarning).pixmap(48, 48));
-    headerLayout->addWidget(iconLabel);
-
-    QVBoxLayout* textLayout = new QVBoxLayout();
-    m_infoLabel = new QLabel(
-        "It appears the application was not shut down properly.\n"
-        "A recovery journal was found that can restore your previous session.");
-    m_infoLabel->setWordWrap(true);
-    textLayout->addWidget(m_infoLabel);
-
-    m_commandCountLabel = new QLabel("Loading...");
-    m_commandCountLabel->setStyleSheet("color: #666;");
-    textLayout->addWidget(m_commandCountLabel);
-
-    headerLayout->addLayout(textLayout);
-    mainLayout->addLayout(headerLayout);
-
-    // Details text (hidden by default)
-    m_detailsText = new QTextEdit();
-    m_detailsText->setReadOnly(true);
-    m_detailsText->setMaximumHeight(200);
-    m_detailsText->setVisible(false);
-    mainLayout->addWidget(m_detailsText);
-
-    // Buttons
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-
-    m_detailsButton = new QPushButton("View Details");
-    m_detailsButton->setCheckable(true);
-    connect(m_detailsButton, &QPushButton::toggled,
-            m_detailsText, &QTextEdit::setVisible);
-    buttonLayout->addWidget(m_detailsButton);
-
-    buttonLayout->addStretch();
-
-    m_discardButton = new QPushButton("Discard");
-    m_discardButton->setToolTip("Delete the recovery journal and start fresh");
-    connect(m_discardButton, &QPushButton::clicked,
-            this, &CrashRecoveryDialog::onDiscard);
-    buttonLayout->addWidget(m_discardButton);
-
-    m_recoverButton = new QPushButton("Recover");
-    m_recoverButton->setDefault(true);
-    m_recoverButton->setToolTip("Replay the recovery journal to restore your session");
-    connect(m_recoverButton, &QPushButton::clicked,
-            this, &CrashRecoveryDialog::onRecover);
-    buttonLayout->addWidget(m_recoverButton);
-
-    mainLayout->addLayout(buttonLayout);
+    return std::move(m_recovered);
 }
-
-void CrashRecoveryDialog::loadJournalInfo()
-{
-    try {
-        // Get file info
-        QFileInfo fi(QString::fromStdString(m_journalPath.string()));
-        QString dateStr = fi.lastModified().toString("yyyy-MM-dd hh:mm:ss");
-
-        // Load and parse commands
-        m_commands = CommandJournal::replay(
-            m_journalPath,
-            CommandFactory::get_journal_factory());
-
-        m_commandCountLabel->setText(
-            QString("Found %1 command(s) from %2")
-                .arg(m_commands.size())
-                .arg(dateStr));
-
-        // Build details text
-        QString details;
-        details += QString("Journal file: %1\n")
-            .arg(QString::fromStdString(m_journalPath.string()));
-        details += QString("Last modified: %1\n").arg(dateStr);
-        details += QString("Commands found: %1\n\n").arg(m_commands.size());
-
-        details += "Commands:\n";
-        details += "─────────────────────────────\n";
-
-        for (size_t i = 0; i < m_commands.size(); ++i) {
-            if (m_commands[i]) {
-                details += QString("%1. [%2] %3\n")
-                    .arg(i + 1)
-                    .arg(QString::fromStdString(m_commands[i]->type()))
-                    .arg(QString::fromStdString(m_commands[i]->description()));
-            }
-        }
-
-        m_detailsText->setPlainText(details);
-
-    } catch (const std::exception& e) {
-        m_commandCountLabel->setText(
-            QString("Error reading journal: %1").arg(e.what()));
-        m_recoverButton->setEnabled(false);
-    }
-}
-
 void CrashRecoveryDialog::onRecover()
 {
-    m_result = Result::Recovered;
-    accept();
-}
-
-void CrashRecoveryDialog::onDiscard()
-{
-    // Confirm discard
-    int ret = QMessageBox::question(
-        this,
-        "Confirm Discard",
-        "Are you sure you want to discard the recovery journal?\n"
-        "Your previous work will be lost.",
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No);
-
-    if (ret == QMessageBox::Yes) {
-        // Delete the journal file
-        try {
-            std::filesystem::remove(m_journalPath);
-        } catch (...) {
-            // Ignore errors during deletion
-        }
-        m_result = Result::Discarded;
+    const int row = m_list->currentRow();
+    if (row < 0 || static_cast<size_t>(row) >= m_checkpoints.size()) return;
+    try {
+        // Re-read and validate at selection time, not from a stale preview.
+        ChipletFormat format;
+        m_recovered = format.decode_recovery(RecoveryCheckpoint::read(m_checkpoints[row]));
         accept();
+    } catch (const std::exception& e) {
+        m_recovered.reset();
+        m_problem->setText(tr("This checkpoint cannot be opened: %1\n"
+            "No recovery file was changed. Select another checkpoint or continue.")
+            .arg(QString::fromUtf8(e.what())));
     }
 }
 
-} // namespace chiplet
+void CrashRecoveryDialog::onTrash()
+{
+    const int row = m_list->currentRow();
+    if (row < 0 || static_cast<size_t>(row) >= m_checkpoints.size()) return;
+    const QString path = QString::fromStdString(m_checkpoints[row].string());
+    const QString activeWarning = m_checkpoints[row].parent_path().filename() != "closed"
+        ? tr("\nThis pending copy may belong to a running session. That session will "
+             "need to write a new recovery copy on its next checkpoint.") : QString();
+    if (QMessageBox::question(this, tr("Move checkpoint to trash?"),
+            tr("Move only this recovery copy to the system trash?\n%1%2\n\n"
+               "The document and other recovery copies are not changed. "
+               "You can restore this copy from your system trash.").arg(path, activeWarning),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+    if (!QFile::moveToTrash(path)) {
+        m_problem->setText(tr("Could not move this checkpoint to trash. "
+                             "There is no permanent-deletion fallback."));
+        return;
+    }
+    m_checkpoints.erase(m_checkpoints.begin() + row);
+    delete m_list->takeItem(row);
+}
+}

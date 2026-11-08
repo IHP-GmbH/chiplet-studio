@@ -61,6 +61,8 @@ public:
     // Debug getters
     size_t vertexCount() const { return m_vertices.size(); }
     size_t indexCount() const { return m_indices.size(); }
+    const std::vector<Vertex>& vertices() const { return m_vertices; }
+    const std::vector<GLuint>& indices() const { return m_indices; }
     GLuint vao() const { return m_vao; }
 
     // Bounding box

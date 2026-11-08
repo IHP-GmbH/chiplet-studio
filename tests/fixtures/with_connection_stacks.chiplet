@@ -26,7 +26,7 @@ components:
   - id: interposer
     type: interposer
     technology: test_tech
-    dimensions: {width: 8000, height: 8000, thickness: 13.83}
+    dimensions: {width: 8000, height: 8000, thickness: 10.8103}
     position: {x: 0, y: 0, z: 0}
 
   - id: die_a

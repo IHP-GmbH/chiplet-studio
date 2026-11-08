@@ -1,0 +1,67 @@
+name: ci
+
+# Chiplet Studio is verified locally, not here: the build needs Qt6 and an
+# in-tree KLayout (848 MB of vendored sources), which is not viable on a 14 GB
+# hosted runner, and the native ctest suite is the gate that compiles it and
+# runs the cases. What is left for hosted CI is what needs neither a compiler
+# nor a build: a source nobody listed, a vendored copy somebody edited in place,
+# and a launcher that stopped passing a flag it has to pass. All three are
+# quiet, all three have happened, and all three cost seconds to detect.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the checkers
+        # Run first, and in the same job. A checker that cannot fail is
+        # indistinguishable from `exit 0`, and this one guards a merge.
+        run: |
+          python3 ci/check_source_list.py --self-test
+          python3 ci/check_vendored.py --self-test
+
+      - name: Every source on disk is named in a CMakeLists
+        run: python3 ci/check_source_list.py
+
+      - name: The demo launchers pass the flags they have to pass
+        # Shell only. docker and xhost are mocked, no container starts, no
+        # display is opened, and the test supplies its own PDK directories, so
+        # this needs nothing the runner does not already have. It guards the
+        # argv the launchers build, which is where a missing -e flag is visible
+        # and the only place it is.
+        run: bash tests/shell/test_demo_entrypoints.sh
+
+      - name: Vendored chiplet_format_io matches its recorded digest
+        # Offline on purpose. VENDORED.md records a content digest, not an
+        # upstream commit id, so this needs no chiplet-system-spec checkout.
+        # It proves the copy matches the note, not the note upstream; that
+        # lookup is the tests/contracts sibling case, which needs an export.
+        run: python3 ci/check_vendored.py
+
+  # The one required status check. A single collector context per repository
+  # means a ruleset names `ci-gate` everywhere and never has to be edited when
+  # the job list inside a workflow changes.
+  ci-gate:
+    needs: [contracts]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every gating job to have succeeded
+        # `needs` alone does not gate: with `if: always()` this job runs even
+        # when a dependency failed, so the result has to be compared
+        # explicitly. Without the comparison the gate reports green after its
+        # dependencies went red.
+        run: |
+          echo "contracts: ${{ needs.contracts.result }}"
+          test "${{ needs.contracts.result }}" = "success"

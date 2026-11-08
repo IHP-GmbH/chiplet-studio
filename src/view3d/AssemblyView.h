@@ -14,11 +14,16 @@
 #include <QRubberBand>
 #include <QImage>
 #include <QSize>
+#include <QStringList>
+#include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <memory>
+#include <optional>
 
 #include "Camera.h"
+#include "FastShapesGL.h"
 #include "ShaderProgram.h"
 #include "ComponentMesh.h"
 #include "SceneManager.h"
@@ -27,10 +32,13 @@
 #include "core/LayerStackup.h"
 #include "view2d/LayerProperties.h"
 #include "LayerMeshBuilder.h"
+#include "SceneLoad.h"
 #include "ShapeFilter.h"
 #include "SceneOverview.h"
+#include "TileChoice.h"
 
 class QTimer;
+template <typename T> class QFutureWatcher;
 
 namespace chiplet {
 
@@ -55,6 +63,10 @@ public:
     // Visibility control
     void setComponentVisibility(const QString& componentId, bool visible);
     bool isComponentVisible(const QString& componentId) const;
+    // Whether the view draws a component's layers, its fill among them:
+    // Detailed, with or without its substrate, and shown. The frame and
+    // fillPrepared both ask this.
+    bool layersDrawn(const Component& comp) const;
 
     // Per-layer visibility within a component (drives LayerMode/Detailed rendering).
     // No-op if the component has no built geometry or no layer with the given
@@ -75,8 +87,30 @@ public:
     // when the technology ships no .lyp (e.g. a supported-PDK Import GDS), where
     // the layers come from the resolved PDK stackup rather than a properties
     // file. Empty if the component has no built layer geometry.
-    struct LayerListEntry { int layer; int datatype; QString name; };
+    // `count` and `countNote` say how many of the layer's GDS shapes 3D shows,
+    // empty when it shows them all. A layer with `meshed` false has no mesh to
+    // show or hide: 3D drew none of it.
+    struct LayerListEntry {
+        int layer;
+        int datatype;
+        QString name;
+        bool fill = false;
+        QString count;
+        QString countNote;
+        bool meshed = true;
+    };
     std::vector<LayerListEntry> componentLayers(const QString& componentId) const;
+
+    // A component's built mesh for one layer: its bottom and top in scene
+    // units (mm) in the component's own frame, and how many shapes it
+    // extrudes. Empty if the component has no mesh for that layer.
+    struct DrawnLayer {
+        double zBottom;
+        double zTop;
+        std::size_t shapes;
+    };
+    std::optional<DrawnLayer> drawnLayer(const QString& componentId, int layer,
+                                         int datatype) const;
 
     // Visualization-only Z exaggeration for Detailed-mode stackups: each layer's
     // baked Z is spread by this factor (gaps grow, layer thickness unchanged) so
@@ -98,8 +132,48 @@ public:
     // greys the spacing control out otherwise. False when there is no assembly.
     bool layerZSpacingApplicable() const;
 
+    // Fill (layers the stackup marks `purpose: filler`) starts hidden on every
+    // open. Switching it overrides any per-layer choice made on a fill layer
+    // before, the way the 2D list does; per-layer toggles still work after.
+    // Standard never draws its fill meshes, which hold only the first shapes
+    // read: switched on, it reads every fill shape in the background and
+    // draws them as hatched coverage tiles (fillPrepared).
+    void setShowFill(bool show);
+    bool showFill() const { return m_showFill; }
+    // Whether any built component has a fill layer.
+    bool hasFill() const;
+
+    // What 3D could not draw as the file asks, one line each: a declared layer
+    // sheet that would not read, and per component the GDS layers its stackup
+    // does not place. Refreshed on every build; notesChanged() says when.
+    // Under Fast or Every shape the first line names the setting (viewNotes).
+    QStringList notes() const;
+
+    // View > 3D Shapes. Standard, the default at every start, is the view as
+    // it was before the other two. Fast and Every shape read every shape of
+    // the placed layers in the background on the first switch and draw the
+    // standard view until then; the standard meshes stay loaded, so going
+    // back is immediate. Under Fast, a tile too small on screen, or past the
+    // frame budget, is drawn as coverage; the rows and the notes say how much,
+    // recomputed once the camera has settled (layerRowsChanged, notesChanged).
+    void setShapeMode(ShapeMode mode);
+    ShapeMode shapeMode() const { return m_shapeMode; }
+    // Whether Fast or Every shape is drawing its own shapes: every component
+    // with a layout has been read.
+    bool shapesPrepared() const;
+    // Whether Standard can draw fill: every component whose layers are drawn
+    // (layersDrawn) and that has a fill layer has its fill read, alone or
+    // with the rest of its layers. A die not drawn is not waited for.
+    bool fillPrepared() const;
+
+    // Place the camera as it is, for a capture at a given view.
+    void setCamera(const Camera& camera);
+
     // Camera control
     void fitToAssembly();
+    // Read-only consumed camera/geometry for diagnostics and projected-corner checks.
+    const Camera& camera() const { return m_scene.camera(); }
+    AA_BOUNDING_BOX sceneBounds() const { return m_scene.sceneBounds(); }
     void fitToComponent(const QString& componentId);
 
     // Top-down mini-map (SceneMiniMap) support. buildSceneOverview() returns the
@@ -148,6 +222,12 @@ signals:
     // footprint floor-plan.
     void cameraChanged();
     void overviewChanged();
+    void notesChanged();
+    // componentLayers() says something else: the setting changed, or the
+    // camera settled under Fast or Every shape with other counts.
+    void layerRowsChanged();
+    // The shapes Fast and Every shape draw are read.
+    void shapesRead();
 
 protected:
     // OpenGL lifecycle
@@ -191,6 +271,15 @@ private:
     // Visualization-only Z exaggeration for Detailed stackups (1.0 = physical).
     float m_layerZSpacing = 1.0f;
 
+    // Fill layers' visibility default, under the per-layer overrides.
+    bool m_showFill = false;
+
+    // notes(): sheets that would not read, then per component.
+    std::vector<std::string> m_sheetNotes;
+    std::map<QString, std::string> m_componentNotes;
+    // Per component: what 3D draws of each placed layer against the GDS.
+    std::map<QString, std::vector<ShapeCount>> m_shapeCounts;
+
     // Layer properties cache (technology_id -> LayerPropertiesFile)
     std::map<std::string, LayerPropertiesFile> m_layerProps;
 
@@ -230,13 +319,11 @@ private:
     // Layer geometry for 2.5D rendering (component_id -> geometry)
     std::map<QString, Component3DGeometry> m_layerGeometry;
 
-    // Layer stackup cache (technology_id -> stackup)
-    std::map<std::string, LayerStackup> m_stackups;
-    // Whether the cached stackup came from a real PDK source (explicit
-    // technology.stackup, BlenderGDS config, techfile, or a predefined PDK) as
-    // opposed to the generic Priority-4 fallback. Gates the black-box stackup
-    // augmentation: a real PDK stackup must NOT be augmented with stacked slabs.
-    std::map<std::string, bool> m_stackupModeled;
+    // Render stackup cache (technology_id -> stackup, whether it came from a
+    // stackup file, and what the notes call it). RenderStackup::modeled gates
+    // the black-box stackup augmentation: a real PDK stackup must NOT be
+    // augmented with stacked slabs.
+    std::map<std::string, RenderStackup> m_stackups;
 
     // Shape filter: polygon cache and area statistics per component.
     // m_shapeFilterByComponent stores the user's chosen percent per component
@@ -251,6 +338,7 @@ private:
 
     // Helper to build layer geometry for a component
     void buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp);
+    void adoptStandardComponent(const QString& compId, StandardComponent&& loaded);
     void applyLayerOverrides(const QString& componentId);
     void applyShapeFilter();
     void rebuildFilteredGeometry(const QString& compId);
@@ -265,6 +353,45 @@ private:
     void sortBackToFront(std::vector<QString>& ids);
     VECTOR3D getComponentCenter(const QString& id) const;
     void setupShaderUniforms();
+
+    // Fast and Every shape (setShapeMode). What each component's layers are
+    // read from is kept from the standard load; the shapes are read in the
+    // background, in assembly order, against one memory budget.
+    struct FastRead {
+        int generation = 0;
+        std::map<QString, FastComponent> components;
+        std::size_t budget = 0;  // left after these
+    };
+    ShapeMode m_shapeMode = ShapeMode::Standard;
+    std::map<QString, FastSource> m_fastSources;
+    std::map<QString, FastComponent> m_fast;
+    std::size_t m_fastBudget = kMaxPreparedRecords;
+    bool m_fastReading = false;
+    int m_fastGeneration = 0;  // a read started for an older assembly is dropped
+    QFutureWatcher<std::shared_ptr<FastRead>>* m_fastWatcher = nullptr;
+    FastShapesGL m_fastGL;
+    bool m_fastUploaded = false;
+    // This frame: the layers, the choice and what GL draws.
+    bool m_fastActive = false;
+    FastFrame m_fastFrame;
+    TileChoice m_fastChoice;
+    TileChoiceMemory m_tileMemory;
+    std::vector<FastDrawLayer> m_fastDraws;
+    std::map<QString, std::set<LayerKey>> m_fastKeys;  // the meshes the fast layers replace
+    // As last settled: what the rows and the notes say.
+    QTimer* m_settleTimer = nullptr;
+    std::map<QString, std::map<LayerKey, LayerBuckets>> m_settledBuckets;
+    std::map<std::string, std::string> m_settledCoverage;
+    std::vector<std::string> m_settledRows;
+    QStringList m_settledNotes;
+    double m_everyFrameSeconds = -1.0;
+
+    void readFastShapes();
+    void onFastRead();
+    void dropFastFrame();
+    void prepareFastFrame();
+    void drawFastLayers(bool translucent);
+    void settleFast();
 
     // BVH for spatial acceleration
     std::unique_ptr<BVH> m_bvh;
