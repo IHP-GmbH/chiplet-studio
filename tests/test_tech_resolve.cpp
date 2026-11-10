@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -472,8 +473,34 @@ TEST(TechResolve, NoStackupAnywhereNamesWhat3DDerivesInstead)
     EXPECT_EQ(stackupLabel(r, true), "layer-sheet");
     EXPECT_EQ(stackupLabel(r, false), "generic interposer");
 
-    // Nothing declared: no note, whatever the fallback.
-    EXPECT_EQ(stackupNote("acme-node", resolveTechnologyStackup(nullptr, "acme-node"), false), "");
+    // Nothing declared and an id Studio does not know: the note says the 3D
+    // stack is a stand-in (it used to say nothing).
+    EXPECT_EQ(stackupNote("acme-node", resolveTechnologyStackup(nullptr, "acme-node"), false),
+              "acme-node stackup not loaded: Studio has no stackup for this technology id. "
+              "3D uses a generic interposer stackup; fill is not recognised.");
+}
+
+TEST(TechResolve, AKnownIdWithNothingDeclaredHasNoStackupNote)
+{
+    ConfigsDir configs(CONFIGS_DIR);
+    for (const char* id : {"intm4tm2", "sg13g2", "ihp-sg13g2", "sg13cmos5l", "sky130",
+                           "gf180mcu", "gf180"}) {
+        const TechStackup r = resolveTechnologyStackup(nullptr, id);
+        EXPECT_EQ(r.source, StackupSource::BuiltIn) << id;
+        EXPECT_EQ(stackupNote(id, r, false), "") << id;
+    }
+
+    // Its bundled file missing (a configs dir without it): still no note,
+    // while an unknown id in the same dir gets one.
+    TempDir dir("chiplet_known_id_no_file");
+    ConfigsDir empty(dir.path.string());
+    for (const char* id : {"intm4tm2", "sg13g2", "gf180mcu"}) {
+        const TechStackup r = resolveTechnologyStackup(nullptr, id);
+        EXPECT_EQ(r.source, StackupSource::NotModeled) << id;
+        EXPECT_EQ(stackupNote(id, r, false), "") << id;
+    }
+    const TechStackup unknown = resolveTechnologyStackup(nullptr, "acme-node");
+    EXPECT_NE(stackupNote("acme-node", unknown, false), "");
 }
 
 TEST(TechResolve, SheetNoteNamesTheBuiltInSheetOrDefaultStyling)
@@ -538,19 +565,43 @@ fs::path writeMergeZWithMissingStackup(const fs::path& dir)
     writeText(file, text);
     return file;
 }
+
+// An interconnect PDK whose relative cupillar fragment starts 0.5 um above the
+// plane. A die seated on the merged bodies then sits 0.5 um higher than one
+// seated on the bare plane plus its stack, so a test can tell the two apart.
+fs::path writeRaisedPillarPdk(const fs::path& dir)
+{
+    const fs::path pdk = dir / "pdk_raised";
+    writeText(pdk / "libs.tech" / "chiplet_studio" / "stackup_fragments"
+                  / "ihp_cupillar.stackup.yaml",
+              "z_reference: attachment_surface\n"
+              "CuPillar:\n  index: 500\n  type: 35\n  z: 0.5\n  height: 32.0\n"
+              "SnAgCap:\n  index: 501\n  type: 35\n  z: 32.5\n  height: 16.0\n");
+    return pdk;
+}
+
+std::string guessNote(const std::string& source)
+{
+    return source + ": interposer interposer declares no attachment_surface_z, so Studio "
+           "takes its dimensions.thickness (200 um) as the mount plane: bumps are drawn there "
+           "and dies without a z are seated there. The mount plane is a guess; declare "
+           "attachment_surface_z.";
+}
 } // namespace
 
-// Before the shared resolver, seating read the declared file and, when it
-// failed, used the interposer thickness (200 + 48 = 248) while the view drew
-// the bumps on the built-in file. Now both use the built-in file.
+// The name is from when seating read the declared stackup file and, when it
+// failed, skipped the bodies the view drew from the built-in file. Seating now
+// reads no stackup; it merges the same fragment bodies the view draws, on the
+// same plane, whichever stackup file resolves. The raised pillar tells a seat
+// on the merged bodies (200 + 0.5 + 48) from one on the bare plane (200 + 48).
 TEST(TechResolve, SeatingFallsBackToTheBuiltInStackupLikeTheView)
 {
     EnvGuard env("INTERCONNECT_PDK_ROOT");
     const std::string base = fixture("interconnect_merge");
     ConfigsDir configs(base + "/configs");
-    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk").c_str(), 1);
 
     TempDir dir("chiplet_seat_fallback");
+    setenv("INTERCONNECT_PDK_ROOT", writeRaisedPillarPdk(dir.path).c_str(), 1);
     const fs::path file = writeMergeZWithMissingStackup(dir.path);
     ASSERT_FALSE(file.empty()) << "merge_z.chiplet no longer has the anchor line";
 
@@ -561,13 +612,46 @@ TEST(TechResolve, SeatingFallsBackToTheBuiltInStackupLikeTheView)
     ASSERT_EQ(assembly->technology("intm4tm2")->stackup_path(),
               "/nonexistent/intm4tm2.stackup.yaml");
 
-    // CuPillar on the built-in surface 13.83, plus the 48 um stack.
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.01);
+    // The file declares no plane: CuPillar 0.5 above the 200 um thickness,
+    // plus the 48 um stack. The built-in stackup's own plane is not used.
+    EXPECT_EQ(assembly->calculate_component_z("die_a"), 248.5);
+    const DrawnStackup drawn = drawnStackup(assembly.get(), "intm4tm2", nullptr);
+    ASSERT_NE(drawn.stackup.find(501, 35), nullptr);
+    EXPECT_DOUBLE_EQ(drawn.stackup.find(501, 35)->z_top(), 248.5);
 
     const std::vector<std::string> notes = technologyNotes(*assembly);
     EXPECT_TRUE(contains(notes,
         "intm4tm2 stackup not loaded: file not found: /nonexistent/intm4tm2.stackup.yaml. "
         "Using Studio's built-in stackup intm4tm2.yaml.")) << dump(notes);
+}
+
+// Seating and the render use one interposer, the mount one, and merge bodies
+// only when it has a technology. A second intm4tm2 interposer does not get the
+// bodies drawn on it while the dies seat on the first.
+TEST(TechResolve, TheMountInterposerAloneSeatsAndDraws)
+{
+    EnvGuard env("INTERCONNECT_PDK_ROOT");
+    const std::string base = fixture("interconnect_merge");
+    ConfigsDir configs(base + "/configs");
+    TempDir dir("chiplet_mount_interposer");
+    setenv("INTERCONNECT_PDK_ROOT", writeRaisedPillarPdk(dir.path).c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/merge_z.chiplet");
+    ASSERT_NE(assembly, nullptr);
+    ASSERT_EQ(assembly->mount_interposer(), assembly->component("interposer"));
+    EXPECT_EQ(assembly->calculate_component_z("die_a"), 248.5);
+    EXPECT_EQ(drawnStackup(assembly.get(), "intm4tm2", nullptr).bodiesMerged, 2u);
+
+    auto second = std::make_unique<Component>("interposer_b", ComponentType::Interposer);
+    second->set_technology("intm4tm2");
+    assembly->add_component(std::move(second));
+    assembly->component("interposer")->set_technology("");
+    ASSERT_EQ(assembly->mount_interposer(), assembly->component("interposer"));
+
+    // The mount interposer has no technology: no bodies drawn, none seated on.
+    EXPECT_EQ(assembly->calculate_component_z("die_a"), 248.0);
+    EXPECT_EQ(drawnStackup(assembly.get(), "intm4tm2", nullptr).bodiesMerged, 0u);
 }
 
 TEST(TechResolve, PlacementNoteForADieTheFilePlacesOffItsBumps)
@@ -582,6 +666,8 @@ TEST(TechResolve, PlacementNoteForADieTheFilePlacesOffItsBumps)
     ASSERT_NE(assembly, nullptr);
     Component* die = assembly->component("die_a");
     ASSERT_NE(die, nullptr);
+    // Case data: the plane the fixture's stackup also has, so no other note.
+    assembly->component("interposer")->set_attachment_surface_z(13.83);
 
     Position3D p = die->position();
     p.z = 57.83;
@@ -589,8 +675,8 @@ TEST(TechResolve, PlacementNoteForADieTheFilePlacesOffItsBumps)
     std::vector<std::string> notes = placementNotes(*assembly);
     ASSERT_EQ(notes.size(), 1u) << dump(notes);
     EXPECT_EQ(notes[0],
-              "die_a is placed at z 57.83 um, but its cupillar bumps end at 61.83 um on "
-              "intm4tm2.yaml. Drawn where the file places it.");
+              "die_a is placed at z 57.83 um, but its cupillar bumps end at 61.83 um. "
+              "Drawn where the file places it.");
 
     // On its bumps: nothing to say.
     p.z = 61.83;
@@ -605,7 +691,8 @@ TEST(TechResolve, PlacementNoteForADieTheFilePlacesOffItsBumps)
 
 // The merge fixture's stackup puts the plane at 13.83. An interposer that
 // declares its own plane seats its dies on that plane, and the notes say the
-// two differ.
+// two differ. One that declares none seats them on its thickness, never on the
+// stackup's plane, and the notes say the plane is a guess.
 TEST(TechResolve, TheFilesPlaneWinsOverTheStackups)
 {
     EnvGuard env("INTERCONNECT_PDK_ROOT");
@@ -622,12 +709,24 @@ TEST(TechResolve, TheFilesPlaneWinsOverTheStackups)
     Component* die = assembly->component("die_a");
     ASSERT_NE(die, nullptr);
 
-    // No plane in the file: the stackup's, under the 48 um stack.
-    EXPECT_EQ(assembly->calculate_component_z("die_a"), 61.83);
-    EXPECT_TRUE(placementNotes(*assembly).empty()) << dump(placementNotes(*assembly));
+    // No plane in the file: the 200 um thickness, under the 48 um stack.
+    EXPECT_EQ(assembly->calculate_component_z("die_a"), 248.0);
+    std::vector<std::string> guessed = placementNotes(*assembly, "merge_z.chiplet");
+    ASSERT_EQ(guessed.size(), 1u) << dump(guessed);
+    EXPECT_EQ(guessed[0], guessNote("merge_z.chiplet"));
+    guessed = placementNotes(*assembly);
+    ASSERT_EQ(guessed.size(), 1u) << dump(guessed);
+    EXPECT_EQ(guessed[0], guessNote("This design"));
+    EXPECT_EQ(mountPlaneGuessNote(*assembly, "merge_z.chiplet"), guessNote("merge_z.chiplet"));
+
+    // The reader seated the die at open and said so once, in the same words.
+    const std::vector<std::string>& warned = format.warnings();
+    EXPECT_EQ(std::count(warned.begin(), warned.end(), guessNote("merge_z.chiplet")), 1)
+        << dump(warned);
 
     // The die moves with the plane, as a file that declares it places the die.
     interposer->set_attachment_surface_z(10.8103);
+    EXPECT_EQ(mountPlaneGuessNote(*assembly, "merge_z.chiplet"), "");
     EXPECT_EQ(assembly->calculate_component_z("die_a"), 58.8103);
     Position3D p = die->position();
     p.z = 58.8103;
@@ -662,12 +761,16 @@ TEST(TechResolve, TheViewDrawsTheBumpsOnTheFilesPlane)
     Component* interposer = assembly->component("interposer");
     ASSERT_NE(interposer, nullptr);
 
-    // No plane in the file: the stackup's.
+    // No plane in the file: the bumps sit on the thickness the die seats on,
+    // not on the stackup's 13.83.
     DrawnStackup drawn = drawnStackup(assembly.get(), "intm4tm2", nullptr);
     ASSERT_TRUE(drawn.modeled);
     EXPECT_EQ(drawn.bodiesMerged, 2u);
     ASSERT_NE(drawn.stackup.find(500, 35), nullptr);
-    EXPECT_EQ(drawn.stackup.find(500, 35)->z_bottom, 13.83);
+    ASSERT_NE(drawn.stackup.find(501, 35), nullptr);
+    EXPECT_EQ(drawn.stackup.find(500, 35)->z_bottom, 200.0);
+    EXPECT_DOUBLE_EQ(drawn.stackup.find(501, 35)->z_top(),
+                     assembly->calculate_component_z("die_a"));
 
     interposer->set_attachment_surface_z(10.8103);
     drawn = drawnStackup(assembly.get(), "intm4tm2", nullptr);

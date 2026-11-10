@@ -6,6 +6,8 @@
 #include <QTemporaryDir>
 #include "core/LayerStackup.h"
 #include <cstdlib>
+#include <string>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 
@@ -116,7 +118,7 @@ TEST(BlenderGDSConfigs, ResolveStackupPath) {
     EXPECT_FALSE(path.empty());
     EXPECT_NE(path.find("gf180mcu.yaml"), std::string::npos);
 
-    path = BlenderGDSConfigs::stackupPath("IHP_SG13G2");
+    path = BlenderGDSConfigs::stackupPath("ihp-sg13g2");
     EXPECT_FALSE(path.empty());
     EXPECT_NE(path.find("ihp-sg13g2.yaml"), std::string::npos);
 }
@@ -222,33 +224,32 @@ TEST(InterconnectFragmentMerge, RelativeFragmentOffsetByDeclaredSurface) {
     unsetenv("INTERCONNECT_PDK_ROOT");
 }
 
-TEST(InterconnectFragmentMerge, RelativeFragmentFallsBackToTotalHeight) {
+TEST(InterconnectFragmentMerge, RelativeFragmentWithNoPlaneIsLeftOut) {
     QTemporaryDir temporary;
     ASSERT_TRUE(temporary.isValid());
     const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
-    // No attachment_surface_z declared: best-effort totalHeight() = 5.0
-    // (warned about), instead of seating the body at z = 0.
+    // No plane: nothing to offset by. The stack's height (5.0) is not one.
     LayerStackup base;
     base.addLayer(134, 0, 2.0, 3.0, "Pad");
 
-    EXPECT_EQ(base.mergeInterconnectFragment("unit_rel"), 1u);
-    const LayerElevation* body = base.find(500, 35);
-    ASSERT_NE(body, nullptr);
-    EXPECT_NEAR(body->z_bottom, 5.0, 1e-9);
+    std::vector<std::string> leftOut;
+    EXPECT_EQ(base.mergeInterconnectFragments({"unit_rel"}, &leftOut), 0u);
+    EXPECT_EQ(leftOut, std::vector<std::string>{"unit_rel"});
+    EXPECT_EQ(base.find(500, 35), nullptr);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
 }
 
-TEST(InterconnectFragmentMerge, LegacyAbsoluteFragmentIgnoresDeclaredSurface) {
+TEST(InterconnectFragmentMerge, AbsoluteFragmentIsLeftOut) {
     QTemporaryDir temporary;
     ASSERT_TRUE(temporary.isValid());
     const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
-    // Even with a declared surface, a markerless fragment keeps its
-    // absolute z (deprecation path).
+    // A markerless fragment bakes its own plane (7.5 here), which never
+    // stands in for the declared one: it is left out, declared surface or not.
     LayerStackup base;
     {
         namespace fs = std::filesystem;
@@ -260,10 +261,10 @@ TEST(InterconnectFragmentMerge, LegacyAbsoluteFragmentIgnoresDeclaredSurface) {
         ASSERT_TRUE(base.loadFromBlenderGDS(baseYaml.string()));
     }
 
-    EXPECT_EQ(base.mergeInterconnectFragment("unit_abs"), 1u);
-    const LayerElevation* body = base.find(500, 35);
-    ASSERT_NE(body, nullptr);
-    EXPECT_NEAR(body->z_bottom, 7.5, 1e-9);
+    std::vector<std::string> leftOut;
+    EXPECT_EQ(base.mergeInterconnectFragments({"unit_abs"}, &leftOut), 0u);
+    EXPECT_EQ(leftOut, std::vector<std::string>{"unit_abs"});
+    EXPECT_EQ(base.find(500, 35), nullptr);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
 }

@@ -79,7 +79,7 @@ ImportGdsDialog::ImportGdsDialog(QWidget* parent)
     m_techCombo->addItem(tr("IHP SG13G2 (130nm BiCMOS)"), QStringLiteral("sg13g2"));
     m_techCombo->addItem(tr("IHP SG13CMOS5L (130nm CMOS)"), QStringLiteral("sg13cmos5l"));
     m_techCombo->addItem(tr("SkyWater SKY130"), QStringLiteral("sky130"));
-    m_techCombo->addItem(tr("GlobalFoundries GF180MCU"), QStringLiteral("gf180"));
+    m_techCombo->addItem(tr("GlobalFoundries GF180MCU"), QStringLiteral("gf180mcu"));
     m_techCombo->addItem(tr("IHP IntM4TM2 interposer"), QStringLiteral("intm4tm2"));
     m_techCombo->addItem(tr("Custom (unsupported PDK)..."), QString());
     connect(m_techCombo, &QComboBox::currentIndexChanged,

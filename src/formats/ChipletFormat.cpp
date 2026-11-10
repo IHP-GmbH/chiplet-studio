@@ -18,6 +18,7 @@
 #include "core/ConnectionStack.h"
 #include "core/DecimalText.h"
 #include "core/IOPad.h"
+#include "core/TechResolve.h"
 #include "core/flow/FlowConfig.h"
 #include "YamlScalarEmit.h"
 #include "TopLevelKeyIntent.h"
@@ -620,7 +621,7 @@ std::unique_ptr<Assembly> ChipletFormat::load_buffer(
     // Auto-calculate z for components with connection stacks and z == 0.0.
     // A checkpoint records the CURRENT state, including an intentionally zero z.
     // Normal file opening retains the existing automatic-placement convention.
-    if (!restore_current_state) auto_calculate_z(*assembly);
+    if (!restore_current_state) auto_calculate_z(*assembly, filePath.filename().string());
 
     // --- Interfaces ---
     for (const auto& i : doc.interfaces) {
@@ -812,8 +813,9 @@ std::unique_ptr<Technology> ChipletFormat::build_technology(
     return out;
 }
 
-void ChipletFormat::auto_calculate_z(Assembly& assembly)
+void ChipletFormat::auto_calculate_z(Assembly& assembly, const std::string& sourceName)
 {
+    bool seated = false;
     for (auto& comp : assembly.components()) {
         if (comp->connection().empty()) continue;
         if (comp->position().z != 0.0) continue;
@@ -823,7 +825,17 @@ void ChipletFormat::auto_calculate_z(Assembly& assembly)
             Position3D pos = comp->position();
             pos.z = z;
             comp->set_position(pos);
+            seated = true;
         }
+    }
+
+    // A z computed on a guessed plane is written back on save, so the load
+    // says so once, in the viewing note's words.
+    if (!seated) return;
+    const std::string note = mountPlaneGuessNote(assembly, sourceName);
+    if (!note.empty()) {
+        qWarning("[chiplet] %s", note.c_str());
+        m_warnings.push_back(note);
     }
 }
 

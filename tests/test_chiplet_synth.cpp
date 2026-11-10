@@ -130,7 +130,7 @@ TEST(ChipletSynth, TheTechnologyDecidesWhetherAnImportIsADieOrAnInterposer)
         {"sg13g2", ComponentType::Die},
         {"sg13cmos5l", ComponentType::Die},
         {"sky130", ComponentType::Die},
-        {"gf180", ComponentType::Die},
+        {"gf180mcu", ComponentType::Die},
         {"", ComponentType::Die},
     };
     for (const auto& [techId, want] : rows) {
@@ -318,7 +318,7 @@ TEST(ChipletSynth, DefaultsForInvalidBbox)
     spec.widthUm = 0.0;
     spec.heightUm = 0.0;
     spec.thicknessUm = 0.0;
-    spec.techId = "gf180";
+    spec.techId = "gf180mcu";
 
     const auto path = dir / "import.chiplet";
     ASSERT_EQ(saveImport(spec, path), "");

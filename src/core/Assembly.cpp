@@ -373,6 +373,14 @@ const Assembly::connection_stack_map_type& Assembly::connection_stacks() const
     return m_connectionStacks;
 }
 
+const Component* Assembly::mount_interposer() const
+{
+    for (const auto& c : m_components) {
+        if (c->type() == ComponentType::Interposer) return c.get();
+    }
+    return nullptr;
+}
+
 double Assembly::calculate_component_z(const ComponentID& id) const
 {
     const Component* comp = component(id);
@@ -380,93 +388,35 @@ double Assembly::calculate_component_z(const ComponentID& id) const
         return 0.0;
     }
 
-    // Resolve the connection stack. Missing or unknown stacks fall
-    // back to a zero-height mounting (the die sits directly on the
-    // interposer body) per coord_frame_contract.md §3.4 / §5.5.
-    // Earlier behavior was to return 0.0 for these cases; that put
-    // dies at world z=0 instead of on top of the interposer body,
-    // which the contract calls out as a bug because the formula must
-    // hold in all cases.
+    // A missing or unknown stack is zero height: the die sits on the
+    // interposer, not at world z 0 (coord_frame_contract.md 3.4 / 5.5).
     const ConnectionStack* stack = nullptr;
     if (!comp->connection().empty()) {
         stack = connection_stack(comp->connection());
     }
 
-    // Mounting surface = z_bottom of the chosen connection stack's first
-    // layer (the layer that physically attaches to the interposer pad,
-    // e.g. CuPillar for cu-pillar stacks). Looking it up in the
-    // interposer stackup gives the exact passivation-opening / pad-top
-    // height. Adding stack->total_height() then lands the die on the
-    // tip of the connection.
-    //
-    // Naive max_z(stackup) is wrong: it picks up Passiv (the
-    // passivation around the opening, taller than TopMetal2) and adds
-    // 1.9 um on top of the real mounting surface.
-    double mounting_surface = 0.0;
-    bool mounting_surface_found = false;
-    if (stack && !stack->layers.empty()) {
+    // The die sits on the z_bottom of its stack's first layer (the one that
+    // attaches to the pad, e.g. CuPillar), found among the interconnect
+    // bodies merged on the mount plane: THIS die's connection id selects the
+    // fragment (method ids are fragment keys), the assembly adapter is the
+    // fallback for stacks that are not method ids. The bodies are merged
+    // into an empty stackup: the interposer stackup contributes no height, so
+    // a stack layer named like a stackup layer (TopMetal2) cannot seat on
+    // it. The render merges the same bodies on the same plane
+    // (mergeBodiesOnInterposer), and only for an interposer with a
+    // technology, as the render does. With no such body the die sits on the
+    // plane.
+    const Component* interposer = mount_interposer();
+    double mounting_surface = interposer ? interposerMountPlane(*interposer) : 0.0;
+    if (interposer && !interposer->technology().empty() && stack && !stack->layers.empty()) {
+        LayerStackup bodies;
+        mergeBodiesOnInterposer(bodies, *interposer,
+            LayerStackup::resolveInterconnectKeys({comp->connection()},
+                                                  m_interconnect_adapter));
         const std::string& firstLayerName = stack->layers.front().name;
-        for (const auto& c : m_components) {
-            if (c->type() != ComponentType::Interposer) continue;
-            const std::string& techId = c->technology();
-            if (techId.empty()) break;
-            // The same resolver the 3D view draws with, so a die seats on the
-            // stackup its bumps are drawn on. (Seating used to read the
-            // declared file and, if that failed to load, fall back to the
-            // interposer thickness, while the view fell back to the built-in
-            // file: the two could disagree by the whole stack.)
-            TechStackup resolved = resolveTechnologyStackup(technology(techId), techId);
-            if (resolved.source == StackupSource::NotModeled) {
-                qCWarning(lcStackup) << "no stackup for interposer technology"
-                                     << techId.c_str() << "; using interposer thickness for z";
-                break;
-            }
-            LayerStackup& stackup = resolved.stackup;
-            // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap or a
-            // vendor's microbump), which the interconnect PDK owns rather than
-            // the interposer stackup. Additive: it brings in bodies the
-            // interposer stackup does not define, so the first-layer lookup
-            // below resolves for whatever method the design selected. The
-            // shared helper applies the fragment's z-reference rule (relative
-            // to the stackup's declared attachment surface, or legacy
-            // absolute) identically to the render path.
-            //
-            // Per-die: THIS die's connection id selects the fragment (method
-            // ids are fragment keys), so a die using Option 3 seats on
-            // Option-3 body heights even when other dies use other methods.
-            // The assembly-level adapter is the fallback for stacks whose id
-            // is not a method id (legacy/custom stacks).
-            //
-            // The fragments rebase on the file's plane when the interposer
-            // declares one (mergeBodiesOnInterposer), as in the render.
-            mergeBodiesOnInterposer(stackup, *c,
-                LayerStackup::resolveInterconnectKeys(
-                    {comp->connection()}, m_interconnect_adapter));
-            for (const auto& layer : stackup.sortedLayers()) {
-                if (!firstLayerName.empty() && layer.name == firstLayerName) {
-                    mounting_surface = layer.z_bottom;
-                    mounting_surface_found = true;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-
-    // Fallback for stackups that don't visualize the connection layers
-    // AND for the missing-connection / null-stack cases above: use the
-    // interposer thickness so the die lands on top of the physical
-    // interposer body. (Contract §3.4 collapses all three fallback
-    // paths into the same formula.)
-    if (!mounting_surface_found) {
-        for (const auto& c : m_components) {
-            if (c->type() == ComponentType::Interposer) {
-                // Mount reference = the interposer's declared die-attachment
-                // surface z when present; otherwise dimensions.thickness, which
-                // in legacy files encoded that surface (now the physical body).
-                // Contract §3.4 collapses both onto the same formula.
-                mounting_surface = c->attachment_surface_z().value_or(
-                    c->dimensions().thickness);
+        for (const auto& layer : bodies.sortedLayers()) {
+            if (!firstLayerName.empty() && layer.name == firstLayerName) {
+                mounting_surface = layer.z_bottom;
                 break;
             }
         }

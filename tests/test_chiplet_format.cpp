@@ -28,6 +28,7 @@
 #include <chiplet_format_io/chiplet_format_io.hpp>
 #include "core/DecimalText.h"
 #include "core/LayerStackup.h"
+#include "core/TechResolve.h"
 #include "core/Technology.h"
 #include "core/flow/FlowDefinition.h"
 #include "core/flow/FlowStep.h"
@@ -386,6 +387,23 @@ TEST(ChipletFormat, LoadConnectionStacks)
     EXPECT_DOUBLE_EQ(sbump->total_height(), 80.0);
 }
 
+// The adapter's technology has its bodies from fragments, never from a
+// stackup for its id, so it gets no "no stackup" note; the die technology
+// beside it still does.
+TEST(ChipletFormat, TheAdapterTechnologyHasNoStackupNote)
+{
+    ChipletFormat format;
+    auto assembly = format.load(fixturePath("with_interconnect_adapter.chiplet"));
+    ASSERT_NE(assembly, nullptr);
+    ASSERT_NE(assembly->technology("vendorx_microbump"), nullptr);
+    bool testTechNoted = false;
+    for (const auto& n : technologyNotes(*assembly)) {
+        EXPECT_EQ(n.find("vendorx_microbump"), std::string::npos) << n;
+        if (n.rfind("test_tech stackup not loaded", 0) == 0) testTechNoted = true;
+    }
+    EXPECT_TRUE(testTechNoted);
+}
+
 // Test parsing the optional interconnect.adapter root block
 TEST(ChipletFormat, LoadInterconnectAdapter)
 {
@@ -467,7 +485,7 @@ TEST(ChipletFormat, RoundTripInterconnectTechnology)
     std::filesystem::remove(tempPath);
 }
 
-// Test auto-z calculation from interposer thickness + connection stack
+// Test auto-z calculation from the interposer's attach plane + connection stack
 TEST(ChipletFormat, AutoZCalculation)
 {
     ChipletFormat format;
@@ -476,13 +494,13 @@ TEST(ChipletFormat, AutoZCalculation)
     ASSERT_NE(assembly, nullptr);
 
     // die_a has connection=cupillar_opt1, z was 0 -> auto-calculated
-    // interposer thickness=10.8103, cupillar total=44.0 -> z=54.8103
+    // attachment_surface_z=10.8103, cupillar total=44.0 -> z=54.8103
     auto die_a = assembly->component("die_a");
     ASSERT_NE(die_a, nullptr);
     EXPECT_DOUBLE_EQ(die_a->position().z, 54.8103);
 
     // die_b has connection=sbump_sac305, z was 0 -> auto-calculated
-    // interposer thickness=10.8103, sbump total=80.0 -> z=90.8103
+    // attachment_surface_z=10.8103, sbump total=80.0 -> z=90.8103
     auto die_b = assembly->component("die_b");
     ASSERT_NE(die_b, nullptr);
     EXPECT_DOUBLE_EQ(die_b->position().z, 90.8103);
@@ -1181,23 +1199,38 @@ TEST(InterconnectMergeZ, DieZSourcedFromFragmentAfterBodyRemoval)
 {
     const std::string base = fixturePath("interconnect_merge");
     BlenderGDSConfigs::setConfigsDir(base + "/configs");
-    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk").c_str(), 1);
+
+    // A cupillar fragment raised 0.5 above the plane, so a seat on the merged
+    // pillar differs from a seat on the bare plane.
+    QTemporaryDir pdk;
+    ASSERT_TRUE(pdk.isValid());
+    {
+        const std::filesystem::path frag = std::filesystem::path(pdk.path().toStdString())
+            / "libs.tech" / "chiplet_studio" / "stackup_fragments"
+            / "ihp_cupillar.stackup.yaml";
+        std::filesystem::create_directories(frag.parent_path());
+        std::ofstream(frag) << "z_reference: attachment_surface\n"
+            "CuPillar:\n  index: 500\n  type: 35\n  z: 0.5\n  height: 32.0\n"
+            "SnAgCap:\n  index: 501\n  type: 35\n  z: 32.5\n  height: 16.0\n";
+    }
+    setenv("INTERCONNECT_PDK_ROOT", pdk.path().toStdString().c_str(), 1);
 
     ChipletFormat format;
     auto assembly = format.load(base + "/merge_z.chiplet");
     ASSERT_NE(assembly, nullptr);
     EXPECT_EQ(assembly->interconnect_adapter(), "ihp_cupillar");
+    // Case data: the plane the fixture's stackup also declares.
+    assembly->component("interposer")->set_attachment_surface_z(13.83);
 
-    // CuPillar z_bottom (relative fragment 0.0 + declared
-    // attachment_surface_z 13.83) + stack height (32 + 16 = 48) = 61.83.
-    // If the fragment did not merge, CuPillar would be absent from the
-    // body-less interposer stackup and the result would differ.
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.01);
+    // CuPillar z_bottom (13.83 + 0.5) + stack height (32 + 16 = 48) = 62.33.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 62.33, 0.001);
+    EXPECT_EQ(drawnStackup(assembly.get(), "intm4tm2", nullptr).bodiesMerged, 2u);
 
-    // Negative control: without the adapter there is no merge, CuPillar is not
-    // found, and the die falls back to interposer thickness (200) + stack (48).
+    // Negative control: without the adapter no fragment merges, and the die
+    // sits on the bare plane: 13.83 + 48.
     assembly->set_interconnect_adapter("");
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 248.0, 0.01);
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.001);
+    EXPECT_EQ(drawnStackup(assembly.get(), "intm4tm2", nullptr).bodiesMerged, 0u);
 
     // Restore global state so later tests see the default configs resolution.
     unsetenv("INTERCONNECT_PDK_ROOT");
@@ -1207,10 +1240,8 @@ TEST(InterconnectMergeZ, DieZSourcedFromFragmentAfterBodyRemoval)
 // ---------------------------------------------------------------------
 // F1 decoupling regression (interconnect_render_contract.md, L1): the
 // fragment is method-pure (z relative to the attachment surface), so the
-// SAME fragment must seat dies per whatever surface the interposer stackup
-// declares. Same .chiplet, same PDK fragment, different interposer
-// declaration -> different (correct) die z. Before F1 the fragment baked
-// 13.83 and this was impossible without a fragment per interposer.
+// SAME fragment seats dies on whatever plane the file declares, whatever
+// the interposer stackup says. Here the stackup says 10.0 and the file 12.5.
 // ---------------------------------------------------------------------
 TEST(InterconnectMergeZ, RelativeFragmentSeatsOnDeclaredSurface)
 {
@@ -1221,17 +1252,25 @@ TEST(InterconnectMergeZ, RelativeFragmentSeatsOnDeclaredSurface)
     ChipletFormat format;
     auto assembly = format.load(base + "/merge_z.chiplet");
     ASSERT_NE(assembly, nullptr);
+    assembly->component("interposer")->set_attachment_surface_z(12.5);
 
-    // configs_alt declares attachment_surface_z 10.0: die z = 10 + 48 = 58.
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 58.0, 0.01);
+    // die z = 12.5 + 48 = 60.5, and the bumps are drawn from 12.5 to it.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 60.5, 0.01);
+    const DrawnStackup drawn = drawnStackup(assembly.get(), "intm4tm2", nullptr);
+    ASSERT_NE(drawn.stackup.find(500, 35), nullptr);
+    ASSERT_NE(drawn.stackup.find(501, 35), nullptr);
+    EXPECT_EQ(drawn.stackup.find(500, 35)->z_bottom, 12.5);
+    EXPECT_DOUBLE_EQ(drawn.stackup.find(501, 35)->z_top(),
+                     assembly->calculate_component_z("die_a"));
 
     unsetenv("INTERCONNECT_PDK_ROOT");
     BlenderGDSConfigs::setConfigsDir("");
 }
 
-// Markerless fragments keep the legacy absolute interpretation (deprecation
-// path): z is taken as-is, the base stackup's declared surface is ignored.
-TEST(InterconnectMergeZ, LegacyAbsoluteFragmentKeepsAbsoluteZ)
+// A markerless (absolute) fragment bakes its own plane. That is a PDK value
+// standing in for the file's, so its bodies are not merged: the die seats on
+// the mount plane plus its stack, and the notes say why.
+TEST(InterconnectMergeZ, LegacyAbsoluteFragmentIsNotMerged)
 {
     const std::string base = fixturePath("interconnect_merge");
     BlenderGDSConfigs::setConfigsDir(base + "/configs");
@@ -1241,10 +1280,20 @@ TEST(InterconnectMergeZ, LegacyAbsoluteFragmentKeepsAbsoluteZ)
     auto assembly = format.load(base + "/merge_z.chiplet");
     ASSERT_NE(assembly, nullptr);
 
-    // Legacy fragment bakes CuPillar z=13.83 absolute: 13.83 + 48 = 61.83,
-    // even though the base also declares attachment_surface_z (13.83 here;
-    // absolute values win for markerless fragments by definition).
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 61.83, 0.01);
+    // The fragment would put CuPillar at 13.83. The file has no plane, so
+    // the die seats on the 200 um thickness plus 48.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 248.0, 0.01);
+    EXPECT_EQ(drawnStackup(assembly.get(), "intm4tm2", nullptr).bodiesMerged, 0u);
+    const std::vector<std::string> notes = placementNotes(*assembly);
+    EXPECT_NE(std::find(notes.begin(), notes.end(),
+                        "Interconnect fragment ihp_cupillar does not give its heights "
+                        "relative to the attachment surface, so its bodies are not drawn; dies using it seat on the mount plane plus "
+                        "their connection height."),
+              notes.end());
+
+    // A declared plane does not make the fragment's heights relative either.
+    assembly->component("interposer")->set_attachment_surface_z(10.0);
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 58.0, 0.01);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
     BlenderGDSConfigs::setConfigsDir("");
@@ -1265,6 +1314,10 @@ TEST(InterconnectMergeZ, PerDieMethodFragmentsSeatEachDie)
     ChipletFormat format;
     auto assembly = format.load(base + "/mixed_methods.chiplet");
     ASSERT_NE(assembly, nullptr);
+    Component* interposer = assembly->component("interposer");
+    ASSERT_NE(interposer, nullptr);
+    // The file's plane, not the 13.83 of the fixture's stackup.
+    ASSERT_EQ(interposer->attachment_surface_z(), 10.8103);
 
     // Methods derived from the dies' connections, sorted.
     const auto ids = assembly->interconnect_method_ids();
@@ -1272,20 +1325,25 @@ TEST(InterconnectMergeZ, PerDieMethodFragmentsSeatEachDie)
     EXPECT_EQ(ids[0], "method_a");
     EXPECT_EQ(ids[1], "method_b");
 
-    // die_a: LayerA z (13.83 + 0) + stack 10 = 23.83
-    // die_b: LayerB z (13.83 + 0) + stack 20 = 33.83
-    // If the decoy adapter fragment merged, LayerA would sit at z=5 and
-    // die_a would seat at 15.0 instead.
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 23.83, 0.01);
-    EXPECT_NEAR(assembly->calculate_component_z("die_b"), 33.83, 0.01);
+    // die_a: LayerA z (10.8103 + 0.5) + stack 10 = 21.3103
+    // die_b: LayerB z (10.8103 + 1.0) + stack 20 = 31.8103
+    // A die that missed its body would sit on the bare plane (20.8103,
+    // 30.8103); swapped bodies give 20.8103 + 1.0 and 30.8103 + 0.5. If the
+    // decoy adapter fragment merged, LayerA would sit 5 above the plane:
+    // 25.8103.
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 21.3103, 0.001);
+    EXPECT_NEAR(assembly->calculate_component_z("die_b"), 31.8103, 0.001);
+    // And the open seated them there, on the declared plane, not the body.
+    EXPECT_NEAR(assembly->component("die_a")->position().z, 21.3103, 0.001);
+    EXPECT_NEAR(assembly->component("die_b")->position().z, 31.8103, 0.001);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
     BlenderGDSConfigs::setConfigsDir("");
 }
 
-// A relative fragment on a base stackup that does NOT declare its surface
-// falls back to totalHeight() (loud, best-effort) instead of seating at 0.
-TEST(InterconnectMergeZ, RelativeFragmentWithoutDeclaredSurfaceFallsBack)
+// Neither the file nor the stackup declares a plane. The bodies are drawn on
+// the thickness the die seats on; the stackup's height (15.73) plays no part.
+TEST(InterconnectMergeZ, RelativeFragmentWithNoPlaneAnywhereSitsOnThickness)
 {
     const std::string base = fixturePath("interconnect_merge");
     BlenderGDSConfigs::setConfigsDir(base + "/configs_nosurface");
@@ -1295,10 +1353,35 @@ TEST(InterconnectMergeZ, RelativeFragmentWithoutDeclaredSurfaceFallsBack)
     auto assembly = format.load(base + "/merge_z.chiplet");
     ASSERT_NE(assembly, nullptr);
 
-    // totalHeight() of the body-less base = Passiv top 15.73; 15.73 + 48 =
-    // 63.73. Approximate (the pad top is 13.83) but far better than z=48,
-    // and the warning names the missing key.
-    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 63.73, 0.01);
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 248.0, 0.01);
+    const DrawnStackup drawn = drawnStackup(assembly.get(), "intm4tm2", nullptr);
+    ASSERT_NE(drawn.stackup.find(500, 35), nullptr);
+    EXPECT_EQ(drawn.stackup.find(500, 35)->z_bottom, 200.0);
+
+    unsetenv("INTERCONNECT_PDK_ROOT");
+    BlenderGDSConfigs::setConfigsDir("");
+}
+
+// A stack whose first layer is named like an interposer stackup layer, with no
+// body of that name, sits on the mount plane. The stackup's TopMetal2 (10.83 in
+// the fixture) is not a mount plane.
+TEST(InterconnectMergeZ, AStackLayerNamedLikeAStackupLayerSeatsOnThePlane)
+{
+    const std::string base = fixturePath("interconnect_merge");
+    BlenderGDSConfigs::setConfigsDir(base + "/configs");
+    setenv("INTERCONNECT_PDK_ROOT", (base + "/pdk").c_str(), 1);
+
+    ChipletFormat format;
+    auto assembly = format.load(base + "/merge_z.chiplet");
+    ASSERT_NE(assembly, nullptr);
+    assembly->component("interposer")->set_attachment_surface_z(12.5);
+    ConnectionStack stack;
+    stack.id = "named_like_metal";
+    stack.layers = {{"TopMetal2", "Cu", 5.0, 20.0}};
+    assembly->add_connection_stack(stack);
+    assembly->component("die_a")->set_connection("named_like_metal");
+
+    EXPECT_NEAR(assembly->calculate_component_z("die_a"), 17.5, 0.001);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
     BlenderGDSConfigs::setConfigsDir("");
@@ -1306,17 +1389,24 @@ TEST(InterconnectMergeZ, RelativeFragmentWithoutDeclaredSurfaceFallsBack)
 
 TEST(InterconnectMergeZ, StackupPathResolvesPlainProductIdOnly)
 {
-    // The IHP interposer stackup is keyed on the plain product id
-    // (intm4tm2). Pre-rename spellings must NOT resolve to it.
+    // Technology ids match exactly. An id that only contains a known one, or
+    // spells it in another case, resolves to nothing rather than to a stack
+    // of another technology (any "ihp" id used to get sg13g2's).
     const std::string base = fixturePath("interconnect_merge");
     BlenderGDSConfigs::setConfigsDir(base + "/configs");
 
     const std::string expected = base + "/configs/stackups/intm4tm2.yaml";
     EXPECT_EQ(BlenderGDSConfigs::stackupPath("intm4tm2"), expected);
-    EXPECT_EQ(BlenderGDSConfigs::stackupPath("IntM4TM2"), expected);
-    EXPECT_NE(BlenderGDSConfigs::stackupPath("ihp-interposer"), expected);
-    EXPECT_NE(BlenderGDSConfigs::stackupPath("interposer_tech"), expected);
-    EXPECT_NE(BlenderGDSConfigs::stackupPath("rdl"), expected);
+    for (const char* id : {"IntM4TM2", "ihp-interposer", "interposer_tech", "rdl",
+                           "intm4tm2_x", "ihp_sg13hv", "my_sg13g2", "sg13cmos",
+                           "gf180mcu_x", "IHP_SG13G2"}) {
+        EXPECT_EQ(BlenderGDSConfigs::stackupPath(id), "") << id;
+        EXPECT_EQ(BlenderGDSConfigs::pdkLayerPropertiesPath(id), "") << id;
+        EXPECT_FALSE(BlenderGDSConfigs::isKnownTechnology(id)) << id;
+        EXPECT_EQ(BlenderGDSConfigs::importedComponentType(id), ComponentType::Die) << id;
+    }
+    EXPECT_EQ(BlenderGDSConfigs::importedComponentType("intm4tm2"),
+              ComponentType::Interposer);
 
     BlenderGDSConfigs::setConfigsDir("");
 }

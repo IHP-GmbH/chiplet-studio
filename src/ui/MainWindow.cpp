@@ -564,6 +564,7 @@ void MainWindow::onFileNew()
     m_assembly = std::make_unique<Assembly>();
     m_assembly->set_name("Untitled");
     m_currentFilePath.clear();
+    if (m_viewingNotesBar) m_viewingNotesBar->startDocument();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
@@ -905,6 +906,7 @@ void MainWindow::onAssemblyLoadFinished()
     detectAndSelectCells();
 
     // Update all views (mesh generation happens here on main thread)
+    if (m_viewingNotesBar) m_viewingNotesBar->startDocument();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
@@ -1063,13 +1065,18 @@ void MainWindow::refreshViewingNotes()
 {
     if (!m_viewingNotesBar) return;
     QStringList notes;
+    QStringList opening;
     if (m_assembly) {
         try {
             for (const auto& n : technologyNotes(*m_assembly)) {
                 notes << QString::fromStdString(n);
             }
-            for (const auto& n : placementNotes(*m_assembly)) {
+            const std::string shown = QFileInfo(m_currentFilePath).fileName().toStdString();
+            for (const auto& n : placementNotes(*m_assembly, shown)) {
                 notes << QString::fromStdString(n);
+            }
+            if (!mountPlaneGuessNote(*m_assembly).empty()) {
+                opening << QStringLiteral("mount-plane-guess");
             }
         } catch (const std::exception& e) {
             notes << QString("Viewing notes incomplete: %1").arg(e.what());
@@ -1077,7 +1084,7 @@ void MainWindow::refreshViewingNotes()
     }
     if (m_klayout2DView) notes << m_klayout2DView->notes();
     if (m_assemblyView) notes << m_assemblyView->notes();
-    m_viewingNotesBar->setNotes(notes);
+    m_viewingNotesBar->setNotes(notes, opening);
 }
 
 void MainWindow::applyInitial2DDockWidth()
@@ -1330,6 +1337,7 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
     const auto& persistence = m_assembly->document_persistence();
     m_currentFilePath = persistence.primary
         ? QString::fromStdString(persistence.primary->canonical_path()) : QString();
+    if (m_viewingNotesBar) m_viewingNotesBar->startDocument();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());

@@ -1,7 +1,9 @@
 # Decoy adapter-keyed fragment: redefines LayerA at a WRONG elevation. The
 # resolution policy must use the dies' method fragments and ignore the
 # adapter when any method id resolves -- if this file ever merges, the
-# mixed-methods seating assertions fail loudly.
+# mixed-methods seating assertions fail loudly. Relative, like the method
+# fragments: an absolute fragment is never merged, so it would guard nothing.
+z_reference: attachment_surface
 LayerA:
   index: 600
   type: 10

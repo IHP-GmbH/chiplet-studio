@@ -33,7 +33,7 @@ const StackupCase kStackups[] = {
     {"sg13g2",     "ihp-sg13g2.yaml"},
     {"sg13cmos5l", "ihp-sg13cmos5l.yaml"},
     {"sky130",     "sky130.yaml"},
-    {"gf180",      "gf180mcu.yaml"},
+    {"gf180mcu",   "gf180mcu.yaml"},
     {"intm4tm2",   "intm4tm2.yaml"},
 };
 

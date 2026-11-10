@@ -110,6 +110,11 @@ TechStackup resolveTechnologyStackup(const Technology* tech, const std::string& 
         return out;
     }
     out.stackup.clear();
+    // Nothing declared and an id Studio has no data for: say so, so a 3D view
+    // drawn on a stand-in stack is never mistaken for the technology's own.
+    if (out.problem.empty() && !BlenderGDSConfigs::isKnownTechnology(techId)) {
+        out.problem = "Studio has no stackup for this technology id";
+    }
     return out;
 }
 
@@ -231,6 +236,13 @@ std::vector<std::string> technologyNotes(const Assembly& assembly)
 {
     std::vector<std::string> notes;
     for (const auto& tech : assembly.technologies()) {
+        // interconnect.technology registers under the adapter id. Its bodies
+        // come from fragments, never from a stackup for that id, so there is
+        // no 3D stand-in to warn about.
+        if (!assembly.interconnect_adapter().empty()
+            && tech->id() == assembly.interconnect_adapter()) {
+            continue;
+        }
         const TechSheet sheet = resolveTechnologySheet(tech.get(), tech->id());
         if (std::string n = sheetNote(sheet); !n.empty()) {
             notes.push_back(std::move(n));
@@ -245,13 +257,17 @@ std::vector<std::string> technologyNotes(const Assembly& assembly)
     return notes;
 }
 
-std::size_t mergeBodiesOnInterposer(LayerStackup& stackup, const Component& interposer,
-                                    const std::vector<std::string>& keys)
+double interposerMountPlane(const Component& interposer)
 {
-    if (interposer.attachment_surface_z()) {
-        stackup.setAttachmentSurfaceZ(*interposer.attachment_surface_z());
-    }
-    return stackup.mergeInterconnectFragments(keys);
+    return interposer.attachment_surface_z().value_or(interposer.dimensions().thickness);
+}
+
+std::size_t mergeBodiesOnInterposer(LayerStackup& stackup, const Component& interposer,
+                                    const std::vector<std::string>& keys,
+                                    std::vector<std::string>* leftOut)
+{
+    stackup.setAttachmentSurfaceZ(interposerMountPlane(interposer));
+    return stackup.mergeInterconnectFragments(keys, leftOut);
 }
 
 DrawnStackup drawnStackup(const Assembly* assembly, const std::string& techId,
@@ -260,9 +276,9 @@ DrawnStackup drawnStackup(const Assembly* assembly, const std::string& techId,
     DrawnStackup d;
 
     // Priority 0: a stackup file, the technology's own else Studio's bundled
-    // one for its id. The same resolver seats the dies
-    // (Assembly::calculate_component_z) and writes the notes, so the three
-    // cannot disagree on which file is in use.
+    // one for its id. The same resolver writes the notes, so the two cannot
+    // disagree on which file is in use. (Seating reads no stackup: a die
+    // sits on the merged bodies or the mount plane.)
     d.resolved = resolveTechnologyStackup(assembly ? assembly->technology(techId) : nullptr,
                                           techId);
     if (d.resolved.source != StackupSource::NotModeled) {
@@ -297,41 +313,80 @@ DrawnStackup drawnStackup(const Assembly* assembly, const std::string& techId,
     // which is the flip-chip beolTop -- every layer of a FaceDown die would
     // render shifted up by the whole body-stack height (die floating above its
     // pillars by ~44 um).
+    //
+    // Only on the mount interposer, the one seating uses, so the drawn bumps
+    // and the seated dies cannot come from two different interposers.
     if (!assembly || techId.empty()) return d;
-    for (const auto& c : assembly->components()) {
-        if (c->type() != ComponentType::Interposer || c->technology() != techId) continue;
-        d.bodiesMerged = mergeBodiesOnInterposer(
-            d.stackup, *c,
-            LayerStackup::resolveInterconnectKeys(assembly->interconnect_method_ids(),
-                                                  assembly->interconnect_adapter()));
-        break;
-    }
+    const Component* ip = assembly->mount_interposer();
+    if (!ip || ip->technology() != techId) return d;
+    d.bodiesMerged = mergeBodiesOnInterposer(
+        d.stackup, *ip,
+        LayerStackup::resolveInterconnectKeys(assembly->interconnect_method_ids(),
+                                              assembly->interconnect_adapter()));
     return d;
 }
 
-std::vector<std::string> placementNotes(const Assembly& assembly)
+std::string mountPlaneGuessNote(const Assembly& assembly, const std::string& sourceName)
+{
+    // The mount interposer with no plane of its own, said once per design
+    // when any die has a connection to seat (seated at open or placed by the
+    // file: either way its bumps are drawn on the guessed plane).
+    const Component* ip = assembly.mount_interposer();
+    if (!ip || ip->attachment_surface_z()) return {};
+    for (const auto& comp : assembly.components()) {
+        if (comp->type() == ComponentType::Interposer
+            || comp->type() == ComponentType::Substrate
+            || comp->connection().empty()) continue;
+        return (sourceName.empty() ? std::string("This design") : sourceName)
+               + ": interposer " + ip->id()
+               + " declares no attachment_surface_z, so Studio takes its "
+                 "dimensions.thickness ("
+               + shortestText(ip->dimensions().thickness)
+               + " um) as the mount plane: bumps are drawn there and dies without a z "
+                 "are seated there. The mount plane is a guess; declare "
+                 "attachment_surface_z.";
+    }
+    return {};
+}
+
+std::vector<std::string> placementNotes(const Assembly& assembly,
+                                        const std::string& sourceName)
 {
     std::vector<std::string> notes;
-    std::string stackupName = "interposer thickness";
-    for (const auto& comp : assembly.components()) {
-        if (comp->type() != ComponentType::Interposer || comp->technology().empty()) continue;
-        const TechStackup s = resolveTechnologyStackup(
-            assembly.technology(comp->technology()), comp->technology());
-        if (s.source != StackupSource::NotModeled) {
-            stackupName = fileName(s.path);
-            // Seating and the render take the file's plane over the
-            // stackup's, so a stackup that puts it elsewhere is said once.
-            const std::optional<double>& plane = comp->attachment_surface_z();
-            if (plane && s.stackup.hasAttachmentSurfaceZ()
-                && *plane != s.stackup.attachmentSurfaceZ()) {
-                notes.push_back(comp->id() + " declares its attach plane at "
-                                + shortestText(*plane) + " um, but " + stackupName
-                                + " puts it at "
-                                + shortestText(s.stackup.attachmentSurfaceZ())
-                                + " um. Dies seat on the file's plane.");
-            }
+
+    const std::string guess = mountPlaneGuessNote(assembly, sourceName);
+    if (!guess.empty()) notes.push_back(guess);
+
+    const Component* ip = assembly.mount_interposer();
+    if (ip && !ip->technology().empty()) {
+        // The merge the render and seating make, to learn what it leaves out.
+        LayerStackup bodies;
+        std::vector<std::string> leftOut;
+        mergeBodiesOnInterposer(bodies, *ip,
+            LayerStackup::resolveInterconnectKeys(assembly.interconnect_method_ids(),
+                                                  assembly.interconnect_adapter()),
+            &leftOut);
+        for (const auto& key : leftOut) {
+            notes.push_back("Interconnect fragment " + key + " does not give its heights "
+                            "relative to the attachment surface, so its bodies are not drawn; dies using it seat on the mount plane plus "
+                            "their connection height.");
         }
-        break;
+    }
+
+    if (ip && !ip->technology().empty()) {
+        const TechStackup s = resolveTechnologyStackup(
+            assembly.technology(ip->technology()), ip->technology());
+        // Seating and the render take the file's plane over the stackup's,
+        // so a stackup that puts it elsewhere is said once.
+        const std::optional<double>& plane = ip->attachment_surface_z();
+        if (s.source != StackupSource::NotModeled && plane
+            && s.stackup.hasAttachmentSurfaceZ()
+            && *plane != s.stackup.attachmentSurfaceZ()) {
+            notes.push_back(ip->id() + " declares its attach plane at "
+                            + shortestText(*plane) + " um, but " + fileName(s.path)
+                            + " puts it at " + shortestText(s.stackup.attachmentSurfaceZ())
+                            + " um. Dies seat on the file's plane.");
+        }
     }
 
     for (const auto& comp : assembly.components()) {
@@ -342,7 +397,7 @@ std::vector<std::string> placementNotes(const Assembly& assembly)
         if (std::fabs(z - seat) < 0.005) continue;
         notes.push_back(comp->id() + " is placed at z " + microns(z) + " um, but its "
                         + comp->connection() + " bumps end at " + microns(seat)
-                        + " um on " + stackupName + ". Drawn where the file places it.");
+                        + " um. Drawn where the file places it.");
     }
     return notes;
 }

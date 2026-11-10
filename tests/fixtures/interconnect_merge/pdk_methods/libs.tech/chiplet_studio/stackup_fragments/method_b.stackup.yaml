@@ -1,7 +1,8 @@
-# Hermetic per-method fragment for the mixed-methods test (method_b).
+# Hermetic per-method fragment for the mixed-methods test (method_b). Raised
+# 1.0 above the plane, unlike method_a, so a swap of the two shows too.
 z_reference: attachment_surface
 LayerB:
   index: 601
   type: 10
-  z: 0.00
+  z: 1.00
   height: 20.00

@@ -275,6 +275,25 @@ TechResolve.LastResortStackAgreesWithThePdkStackupOnEveryLayer
 TechResolve.TheFilesPlaneWinsOverTheStackups
 TechResolve.TheViewDrawsTheBumpsOnTheFilesPlane
 #
+# The mount plane is the file's attachment_surface_z, else the interposer's
+# thickness with a note; never a stackup's or a fragment's own plane. Each of
+# these tells a seat on the merged bodies from a seat on the bare plane, or
+# checks a technology id resolves only by its exact spelling and which ids get
+# a stackup note.
+ChipletFormat.TheAdapterTechnologyHasNoStackupNote
+InterconnectFragmentMerge.AbsoluteFragmentIsLeftOut
+InterconnectFragmentMerge.RelativeFragmentWithNoPlaneIsLeftOut
+InterconnectMergeZ.AStackLayerNamedLikeAStackupLayerSeatsOnThePlane
+InterconnectMergeZ.DieZSourcedFromFragmentAfterBodyRemoval
+InterconnectMergeZ.LegacyAbsoluteFragmentIsNotMerged
+InterconnectMergeZ.PerDieMethodFragmentsSeatEachDie
+InterconnectMergeZ.RelativeFragmentSeatsOnDeclaredSurface
+InterconnectMergeZ.RelativeFragmentWithNoPlaneAnywhereSitsOnThickness
+InterconnectMergeZ.StackupPathResolvesPlainProductIdOnly
+TechResolve.AKnownIdWithNothingDeclaredHasNoStackupNote
+TechResolve.TheMountInterposerAloneSeatsAndDraws
+FillAndNotesWidgets.AnOpeningKeyOpensTheListOncePerDocument
+#
 # The fast 3D view set. Fast and Every shape read each shape into tiles and
 # choose per frame which tiles draw as shapes and which as coverage; the
 # counter checks that every layer's buckets add up to what was prepared, the

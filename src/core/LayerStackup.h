@@ -98,8 +98,8 @@ public:
     // around the opening rises above the real mounting surface).
     bool hasAttachmentSurfaceZ() const { return m_hasAttachmentSurfaceZ; }
     double attachmentSurfaceZ() const { return m_attachmentSurfaceZ; }
-    // A file that declares its interposer's plane overrides the stackup's:
-    // seating and the render set it before merging the fragments.
+    // Seating and the render set the mount plane (the file's, else the
+    // interposer's thickness; never the stackup's own) before merging.
     void setAttachmentSurfaceZ(double z)
     {
         m_attachmentSurfaceZ = z;
@@ -143,16 +143,16 @@ public:
     // keys take the taller body (see mergeInterconnectFragments).
     static LayerStackup loadInterconnectFragments(const std::vector<std::string>& keys);
 
-    // Merge the interconnect fragment for one key into this stackup --
-    // THE single entry point for every consumer of the body layers' z
-    // (3D render and die-seating z calculation), so their views cannot
-    // diverge. Offset rule (interconnect render contract, rule L1; stated
-    // here in full for the same reason, and enforced by the
-    // InterconnectFragmentMerge tests):
-    // fragment z_reference == "attachment_surface" -> offset by this
-    // stackup's attachment_surface_z (missing -> warn + best-effort
-    // totalHeight()); no marker -> legacy absolute z + deprecation warning.
-    // Returns the number of body layers merged (0 = no/empty fragment).
+    // Merge the interconnect fragment for one key into this stackup. The
+    // render and die seating both reach it through mergeBodiesOnInterposer
+    // (TechResolve), which sets the mount plane first, so their views cannot
+    // diverge. Rule (interconnect render contract, L1; enforced by the
+    // InterconnectFragmentMerge tests): a fragment with z_reference
+    // "attachment_surface" is offset by this stackup's attachment_surface_z.
+    // Any other fragment carries its own plane, and a stackup with no plane
+    // has none to offset by; both are left out, with a warning, since a
+    // fragment's plane never stands in for the file's.
+    // Returns the number of body layers merged (0 = no/empty/left-out fragment).
     size_t mergeInterconnectFragment(const std::string& key);
 
     // Merge the union of several fragments (one per method in use). Body
@@ -161,15 +161,12 @@ public:
     // per-layer render model can only show one height per key, so on a
     // conflicting duplicate the TALLER body wins, loudly (die seating
     // stays exact per die: calculate_component_z merges only the die's
-    // own method fragment). Returns the number of layers merged.
-    size_t mergeInterconnectFragments(const std::vector<std::string>& keys);
+    // own method fragment). Returns the number of layers merged; leftOut,
+    // when given, receives the keys of fragments left out by the rule above.
+    size_t mergeInterconnectFragments(const std::vector<std::string>& keys,
+                                      std::vector<std::string>* leftOut = nullptr);
 
 private:
-    // The L1 offset rule for one loaded fragment against this base stackup
-    // (shared by the single- and multi-fragment merges).
-    double interconnectFragmentOffset(const LayerStackup& frag,
-                                      const std::string& path) const;
-
     std::map<LayerKey, LayerElevation> m_layers;
     std::string m_zReference;
     double m_attachmentSurfaceZ = 0.0;
@@ -216,7 +213,12 @@ LayerStackup createSimple2Metal();
  */
 namespace BlenderGDSConfigs {
 
-// Resolve stackup YAML path for a technology ID
+// Whether Studio ships data for this technology id. Ids match exactly, case
+// included; the rows are in LayerStackup.cpp.
+bool isKnownTechnology(const std::string& techId);
+
+// Resolve the bundled stackup YAML for a technology id, matched exactly.
+// Empty for an id Studio does not know, so the caller can say so.
 std::string stackupPath(const std::string& techId);
 
 // Resolve the interconnect PDK 3D stackup fragment for a fragment KEY
@@ -238,12 +240,13 @@ std::string interconnectStackupFragmentPath(const std::string& key);
 // shipped under pdks/<pdk>/<file>.lyp (sibling of the configs dir). Lets an
 // Import GDS of a supported PDK carry the real PDK layer table (names, colors,
 // dither) instead of only the stackup-derived layer list. Returns "" when the
-// PDK ships no bundled .lyp (e.g. sg13cmos5l, gf180) or the file is missing.
+// PDK ships no bundled .lyp (e.g. sg13cmos5l, gf180mcu), the id is not one
+// Studio knows, or the file is missing.
 std::string pdkLayerPropertiesPath(const std::string& techId);
 
 // The component type a single GDS imports as (File > Import GDS) for a
-// technology id, matched as stackupPath matches it: Interposer for intm4tm2,
-// Die for every other id, an empty (custom) one included. No technology
+// technology id, matched exactly as stackupPath matches it: Interposer for
+// intm4tm2, Die for every other id, an empty (custom) one included. No technology
 // descriptor or config declares whether a PDK builds interposers or dies, so
 // the role is this registry's, beside the stackup and .lyp it already maps the
 // same ids to. The import and the dialog's "Imports as" line both ask here.

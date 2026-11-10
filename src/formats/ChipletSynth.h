@@ -46,7 +46,7 @@ struct SingleGdsImportSpec {
     double thicknessUm = 200.0;   // synthetic die thickness (um); no 2D source
 
     // Technology. A non-empty techId names a supported PDK (sg13g2, sg13cmos5l,
-    // sky130, gf180, intm4tm2) whose stackup + colors the studio resolves from
+    // sky130, gf180mcu, intm4tm2) whose stackup + colors the studio resolves from
     // the id alone. An empty techId means a custom/unsupported PDK: the emitted
     // technology is "custom_imported", carrying the user-supplied layer
     // properties (.lyp) and/or stackup YAML so the render path can use them.

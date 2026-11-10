@@ -8,7 +8,6 @@
 #include "LayerStackup.h"
 #include "Component.h"
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -330,50 +329,34 @@ LayerStackup LayerStackup::loadInterconnectFragments(
     return result;
 }
 
-double LayerStackup::interconnectFragmentOffset(const LayerStackup& frag,
-                                                const std::string& path) const
-{
-    if (frag.zReference() == "attachment_surface") {
-        if (m_hasAttachmentSurfaceZ) {
-            return m_attachmentSurfaceZ;
-        }
-        const double best = totalHeight();
-        qWarning("Interconnect fragment %s is relative to the attachment "
-                 "surface, but the base stackup does not declare "
-                 "attachment_surface_z; using totalHeight()=%.2f um as a "
-                 "best-effort surface (die seating may be approximate)",
-                 path.c_str(), best);
-        return best;
-    }
-    if (!frag.zReference().empty()) {
-        qWarning("Interconnect fragment %s declares unknown z_reference "
-                 "'%s'; treating its z values as absolute",
-                 path.c_str(), frag.zReference().c_str());
-        return 0.0;
-    }
-    qWarning("Interconnect fragment %s carries absolute z values "
-             "(deprecated: couples the method to one interposer's BEOL "
-             "height). Add 'z_reference: attachment_surface' and rebase "
-             "z to 0 so the method seats on any interposer",
-             path.c_str());
-    return 0.0;
-}
-
 size_t LayerStackup::mergeInterconnectFragment(const std::string& key)
 {
     return mergeInterconnectFragments({key});
 }
 
 size_t LayerStackup::mergeInterconnectFragments(
-    const std::vector<std::string>& keys)
+    const std::vector<std::string>& keys, std::vector<std::string>* leftOut)
 {
     std::map<LayerKey, std::pair<LayerElevation, std::string>> staging;
     for (const auto& k : keys) {
         std::string path;
         LayerStackup frag = loadInterconnectFragment(k, &path);
         if (frag.empty()) continue;
-        stageFragmentLayers(staging, frag,
-                            interconnectFragmentOffset(frag, path), k);
+        if (frag.zReference() != "attachment_surface") {
+            qWarning("Interconnect fragment %s gives absolute heights (z_reference "
+                     "'%s'), which carry one interposer's plane; left out. Add "
+                     "'z_reference: attachment_surface' and rebase z to 0.",
+                     path.c_str(), frag.zReference().c_str());
+            if (leftOut) leftOut->push_back(k);
+            continue;
+        }
+        if (!m_hasAttachmentSurfaceZ) {
+            qWarning("Interconnect fragment %s is relative to the attachment "
+                     "surface, but no plane was set; left out.", path.c_str());
+            if (leftOut) leftOut->push_back(k);
+            continue;
+        }
+        stageFragmentLayers(staging, frag, m_attachmentSurfaceZ, k);
     }
     size_t merged = 0;
     for (const auto& [key, entry] : staging) {
@@ -461,69 +444,67 @@ static std::string getConfigsDir()
 #endif
 }
 
+namespace {
+
+// The technologies Studio ships data for, by exact id. Case matters and no
+// substring matches: an id that is not a row resolves to nothing, and the
+// caller says so, instead of drawing another technology's stack. Two spellings
+// of a die PDK are rows of their own; gf180 is the id the Import GDS dialog
+// wrote before it named gf180mcu, kept so those files still resolve.
+struct KnownTechnology {
+    const char* id;
+    const char* stackup;  // under configs/stackups/
+    const char* lyp;      // under pdks/, or nullptr when none is bundled
+    ComponentType role;
+};
+
+constexpr KnownTechnology kKnownTechnologies[] = {
+    {"sg13g2", "ihp-sg13g2.yaml", "ihp-sg13g2/sg13g2.lyp", ComponentType::Die},
+    {"ihp-sg13g2", "ihp-sg13g2.yaml", "ihp-sg13g2/sg13g2.lyp", ComponentType::Die},
+    {"sg13cmos5l", "ihp-sg13cmos5l.yaml", nullptr, ComponentType::Die},
+    {"ihp-sg13cmos5l", "ihp-sg13cmos5l.yaml", nullptr, ComponentType::Die},
+    {"sky130", "sky130.yaml", "sky130/sky130.lyp", ComponentType::Die},
+    {"gf180mcu", "gf180mcu.yaml", nullptr, ComponentType::Die},
+    {"gf180", "gf180mcu.yaml", nullptr, ComponentType::Die},
+    {"intm4tm2", "intm4tm2.yaml", "interposer/interposer.lyp", ComponentType::Interposer},
+};
+
+const KnownTechnology* knownTechnology(const std::string& techId)
+{
+    for (const auto& row : kKnownTechnologies) {
+        if (techId == row.id) return &row;
+    }
+    return nullptr;
+}
+
+} // anonymous namespace
+
+bool isKnownTechnology(const std::string& techId)
+{
+    return knownTechnology(techId) != nullptr;
+}
+
 std::string stackupPath(const std::string& techId)
 {
+    const KnownTechnology* row = knownTechnology(techId);
+    if (!row) return "";
     std::string base = getConfigsDir();
     if (base.empty()) return "";
-
-    std::string stackupDir = base + "/stackups/";
-
-    // Map techId patterns to YAML files
-    std::string lower = techId;
-    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    if (lower.find("sg13g2") != std::string::npos) {
-        return stackupDir + "ihp-sg13g2.yaml";
-    }
-    if (lower.find("sg13cmos5l") != std::string::npos ||
-        lower.find("sg13cmos") != std::string::npos) {
-        return stackupDir + "ihp-sg13cmos5l.yaml";
-    }
-    if (lower.find("sky130") != std::string::npos) {
-        return stackupDir + "sky130.yaml";
-    }
-    if (lower.find("gf180") != std::string::npos) {
-        return stackupDir + "gf180mcu.yaml";
-    }
-    // IHP 130-nm IntM4TM2 aluminum BEOL interposer. The plain product id
-    // is the only spelling; there are no legacy aliases.
-    if (lower.find("intm4tm2") != std::string::npos) {
-        return stackupDir + "intm4tm2.yaml";
-    }
-
-    // Also try direct match: if techId itself contains a known PDK name
-    if (lower.find("ihp") != std::string::npos) {
-        return stackupDir + "ihp-sg13g2.yaml";
-    }
-
-    return "";
+    return base + "/stackups/" + row->stackup;
 }
 
 std::string pdkLayerPropertiesPath(const std::string& techId)
 {
+    const KnownTechnology* row = knownTechnology(techId);
+    if (!row || !row->lyp) return "";
     std::string base = getConfigsDir();
     if (base.empty()) return "";
-
-    std::string lower = techId;
-    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    // techId -> bundled pdks/<dir>/<file>.lyp (only the PDKs that ship one).
-    std::string rel;
-    if (lower.find("sg13g2") != std::string::npos) {
-        rel = "ihp-sg13g2/sg13g2.lyp";
-    } else if (lower.find("sky130") != std::string::npos) {
-        rel = "sky130/sky130.lyp";
-    } else if (lower.find("intm4tm2") != std::string::npos) {
-        rel = "interposer/interposer.lyp";
-    } else {
-        return "";  // sg13cmos5l, gf180: no bundled .lyp
-    }
 
     namespace fs = std::filesystem;
     std::error_code ec;
     // pdks/ is a sibling of the configs dir in both the dev tree and the
     // installed share/chiplet-studio layout.
-    fs::path cand = fs::path(base).parent_path() / "pdks" / rel;
+    fs::path cand = fs::path(base).parent_path() / "pdks" / row->lyp;
     if (fs::exists(cand, ec)) {
         return cand.string();
     }
@@ -532,18 +513,9 @@ std::string pdkLayerPropertiesPath(const std::string& techId)
 
 ComponentType importedComponentType(const std::string& techId)
 {
-    std::string lower = techId;
-    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    // techId -> the role a lone GDS of that technology plays. One row per
-    // technology that is not a die process; an id no row matches is a Die.
-    static const std::pair<const char*, ComponentType> kRoles[] = {
-        {"intm4tm2", ComponentType::Interposer},
-    };
-    for (const auto& [id, type] : kRoles) {
-        if (lower.find(id) != std::string::npos) return type;
-    }
-    return ComponentType::Die;
+    // An id no row names imports as a Die, an empty (custom) one included.
+    const KnownTechnology* row = knownTechnology(techId);
+    return row ? row->role : ComponentType::Die;
 }
 
 std::string interconnectStackupFragmentPath(const std::string& key)

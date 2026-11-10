@@ -1,7 +1,7 @@
-# LEGACY-format hermetic fragment: absolute z, no z_reference marker. Pins
-# the deprecation path -- consumers must keep interpreting markerless
-# fragments as absolute (z stays 13.83 regardless of the base stackup's
-# declared attachment surface), with a deprecation warning.
+# LEGACY-format hermetic fragment: absolute z, no z_reference marker. Its
+# 13.83 is a plane baked by the PDK, which never stands in for the file's, so
+# Studio does not merge it: dies seat on the mount plane plus their stack and
+# the notes name the fragment.
 CuPillar:
   index: 500
   type: 35

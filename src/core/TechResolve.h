@@ -58,12 +58,22 @@ struct TechStackup {
 // fragments are not merged here; that is a 3D seating concern.
 TechStackup resolveTechnologyStackup(const Technology* tech, const std::string& techId);
 
+// Where dies mount on an interposer: the attachment_surface_z the file
+// declares. A file with none has no mount plane, and Studio, as a viewer,
+// seats on dimensions.thickness instead and says so (placementNotes). No
+// stackup or PDK value stands in for the file's plane.
+double interposerMountPlane(const Component& interposer);
+
 // Merge the interconnect bodies for `keys` into an interposer's stackup, the
-// one merge seating and the 3D view both make. The file's plane wins: when the
-// interposer declares attachment_surface_z, the fragments rebase on it rather
-// than on the stackup's. Returns the number of body layers merged.
+// one merge seating and the 3D view both make. The fragments rebase on
+// interposerMountPlane, never on the stackup's own plane. A fragment whose
+// heights are not relative to the attachment surface is left out (its key
+// goes to leftOut when given), since it carries one interposer's plane inside
+// it. Returns the
+// number of body layers merged.
 std::size_t mergeBodiesOnInterposer(LayerStackup& stackup, const Component& interposer,
-                                    const std::vector<std::string>& keys);
+                                    const std::vector<std::string>& keys,
+                                    std::vector<std::string>* leftOut = nullptr);
 
 // The stackup 3D draws a technology with, before any per-component change.
 struct DrawnStackup {
@@ -135,10 +145,21 @@ std::string shapeCountLabel(const ShapeCount& count);
 // order.
 std::vector<std::string> technologyNotes(const Assembly& assembly);
 
-// A bumped die whose file gives it an explicit z other than where its bumps
-// end on the stackup in use. Studio draws it where the file places it, so the
-// gap is visible; this says how big it is and why.
-std::vector<std::string> placementNotes(const Assembly& assembly);
+// What a viewer should know about where dies sit: an interposer with no
+// attachment_surface_z (its dies seat on a guessed plane, named with
+// sourceName, the file's name, when given), a fragment left out for absolute
+// heights, a stackup that puts the plane elsewhere than the file, and a bumped
+// die whose file gives it a z other than where its bumps end. Studio draws a
+// die where the file places it, so that gap is visible; the note says how big
+// it is and why.
+std::vector<std::string> placementNotes(const Assembly& assembly,
+                                        const std::string& sourceName = {});
+
+// The first of those on its own: the note that the dies sit on a guessed
+// plane, or "" when the mount interposer declares one or no die has a
+// connection. The window opens the notes for it, and the reader's load
+// warning is this text too.
+std::string mountPlaneGuessNote(const Assembly& assembly, const std::string& sourceName = {});
 
 } // namespace chiplet
 

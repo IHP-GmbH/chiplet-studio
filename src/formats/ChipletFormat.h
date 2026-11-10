@@ -157,7 +157,8 @@ private:
         const chiplet_format_io::Technology& tech);
 
     // Auto-calculate z for components that have a connection stack and z == 0.
-    void auto_calculate_z(Assembly& assembly);
+    // sourceName names the file in the guessed-plane warning.
+    void auto_calculate_z(Assembly& assembly, const std::string& sourceName);
 
     // Path resolution: relative-to-.chiplet plus ${VAR} ecosystem-root expansion.
     string_type resolve_path(const string_type& relativePath) const;

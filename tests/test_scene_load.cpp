@@ -512,8 +512,8 @@ private:
 }  // namespace
 
 // The stackup the standard view draws the interposer's technology at puts the
-// bumps on the file's plane when the interposer declares one, so they meet the
-// die where it seats.
+// bumps on the file's plane, else on the interposer's thickness, so they meet
+// the die where it seats.
 TEST(SceneLoad, TheViewDrawsTheBumpsOnTheFilesPlane)
 {
     EnvGuard env("INTERCONNECT_PDK_ROOT");
@@ -527,11 +527,15 @@ TEST(SceneLoad, TheViewDrawsTheBumpsOnTheFilesPlane)
     Component* interposer = assembly->component("interposer");
     ASSERT_NE(interposer, nullptr);
 
-    // No plane in the file: the stackup's.
+    // No plane in the file: the thickness the die seats on, not the
+    // stackup's 13.83.
     RenderStackup drawn = resolveRenderStackup(*assembly, "intm4tm2", nullptr);
     ASSERT_TRUE(drawn.modeled);
     ASSERT_NE(drawn.stackup.find(500, 35), nullptr);
-    EXPECT_EQ(drawn.stackup.find(500, 35)->z_bottom, 13.83);
+    ASSERT_NE(drawn.stackup.find(501, 35), nullptr);
+    EXPECT_EQ(drawn.stackup.find(500, 35)->z_bottom, 200.0);
+    EXPECT_DOUBLE_EQ(drawn.stackup.find(501, 35)->z_top(),
+                     assembly->calculate_component_z("die_a"));
 
     interposer->set_attachment_surface_z(10.8103);
     drawn = resolveRenderStackup(*assembly, "intm4tm2", nullptr);

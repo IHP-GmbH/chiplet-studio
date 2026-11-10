@@ -200,10 +200,16 @@ public:
     const ConnectionStack* connection_stack(const string_type& id) const;
     const connection_stack_map_type& connection_stacks() const;
 
+    // The interposer dies mount on: the first one. Seating, the guessed-plane
+    // note and the load warning all ask this, so they cannot pick different
+    // ones. nullptr when there is none.
+    const Component* mount_interposer() const;
+
     /**
-     * Calculate z-position for a component from interposer stackup + connection stack.
-     * Returns the sum of interposer top z and connection stack total height,
-     * or 0.0 if the component has no connection or the interposer stackup is unavailable.
+     * Where a component's body starts: the z_bottom of its connection stack's
+     * first layer among the merged interconnect bodies, else the mount plane
+     * (interposerMountPlane), plus the stack's total height. 0.0 for an
+     * unknown id or with no interposer and no stack.
      */
     double calculate_component_z(const ComponentID& id) const;
 

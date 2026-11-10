@@ -13,8 +13,15 @@
 #include "formats/ChipletFormat.h"
 #include "core/IOPad.h"
 
+#include <QByteArray>
+#include <QCryptographicHash>
+
 namespace chiplet {
 namespace {
+
+// sha256 of tests/fixtures/pipeline_smoke.chiplet, as its PROVENANCE.md names it.
+const char kPipelineSmokeSha[] =
+    "26fbd6060f44fe99d8ce8c5170e6c1315517582fde127050a86eb19a44b82a7a";
 
 std::string fixturePath(const std::string& filename)
 {
@@ -127,38 +134,85 @@ TEST(ChipletFormatIOPads, ComponentApiAddAndClear)
 
 TEST(ChipletFormatIOPads, LoadRealHypToGdsOutput)
 {
-    // Smoke: parse a .chiplet produced by the actual hyp_to_gds.py pipeline.
+    // Smoke: parse a .chiplet produced by the plugin's real export, ending in
+    // hyp_to_gds.py --update-chiplet-file (see pipeline_smoke.PROVENANCE.md).
     // Asserts schema compatibility end-to-end (hyp_to_gds -> ChipletFormat::load).
+    // The hash comes first: an expectation "fixed" by editing the copy is the
+    // failure this guards against.
+    const std::string path = fixturePath("pipeline_smoke.chiplet");
+    {
+        std::ifstream in(path, std::ios::binary);
+        ASSERT_TRUE(in) << "fixture missing: " << path;
+        std::ostringstream text;
+        text << in.rdbuf();
+        const std::string bytes = text.str();
+        const QByteArray digest = QCryptographicHash::hash(
+            QByteArray(bytes.data(), static_cast<int>(bytes.size())),
+            QCryptographicHash::Sha256).toHex();
+        ASSERT_EQ(digest.toStdString(), kPipelineSmokeSha)
+            << "tests/fixtures/pipeline_smoke.chiplet is not the export its "
+               "PROVENANCE.md names. Re-export it; do not edit it here.";
+    }
+
     ChipletFormat format;
-    auto assembly = format.load(fixturePath("pipeline_smoke.chiplet"));
+    auto assembly = format.load(path);
     ASSERT_NE(assembly, nullptr);
 
     auto* interposer = assembly->component(ComponentID("interposer"));
     ASSERT_NE(interposer, nullptr);
+    // The writer declares the plane, and the dies sit on it as written.
+    ASSERT_TRUE(interposer->attachment_surface_z());
+    EXPECT_DOUBLE_EQ(*interposer->attachment_surface_z(), 10.8103);
+    const Component* u1 = assembly->component(ComponentID("U1"));
+    const Component* u2 = assembly->component(ComponentID("U2"));
+    ASSERT_NE(u1, nullptr);
+    ASSERT_NE(u2, nullptr);
+    EXPECT_DOUBLE_EQ(u1->position().z, 54.8103);
+    EXPECT_DOUBLE_EQ(u2->position().z, 34.8103);
 
     const auto& pads = interposer->io_pads();
-    ASSERT_EQ(pads.size(), 4u);
+    ASSERT_EQ(pads.size(), 35u);
 
-    std::map<std::string, std::pair<double, double>> expected = {
-        {"J1", {500.0, 1000.0}},
-        {"J2", {1500.0, 1000.0}},
-        {"J3", {500.0, 2000.0}},
-        {"J4", {1500.0, 2000.0}},
+    // Three pads pinned by position, as the export wrote them.
+    std::map<std::string, std::pair<double, double>> pinned = {
+        {"J24", {2113.915000000008, 672.7449999999953}},
+        {"J25", {500.5350000000035, 2252.220000000001}},
+        {"J10", {3053.545000000013, 3420.7550000000047}},
     };
-    std::set<std::string> expected_nets = {"VDD_EXT", "GND_EXT", "OUT0", "OUT1"};
-    std::set<std::string> seen_nets;
-
+    std::set<std::string> ids;
+    std::map<std::string, int> nets;
     for (const auto& p : pads) {
-        EXPECT_EQ(p.io_class(), IOClass::WireBond);
-        EXPECT_EQ(p.layer(), "TopMetal2");
-        EXPECT_DOUBLE_EQ(p.size().x, 100.0);
-        EXPECT_DOUBLE_EQ(p.size().y, 100.0);
-        ASSERT_TRUE(expected.count(p.id())) << "unexpected pad id: " << p.id();
-        EXPECT_DOUBLE_EQ(p.position().x, expected[p.id()].first);
-        EXPECT_DOUBLE_EQ(p.position().y, expected[p.id()].second);
-        seen_nets.insert(p.net());
+        EXPECT_EQ(p.io_class(), IOClass::WireBond) << p.id();
+        EXPECT_EQ(p.layer(), "TopMetal2") << p.id();
+        EXPECT_DOUBLE_EQ(p.size().x, 100.0) << p.id();
+        EXPECT_DOUBLE_EQ(p.size().y, 100.0) << p.id();
+        ids.insert(p.id());
+        ++nets[p.net()];
+        if (auto it = pinned.find(p.id()); it != pinned.end()) {
+            EXPECT_DOUBLE_EQ(p.position().x, it->second.first) << p.id();
+            EXPECT_DOUBLE_EQ(p.position().y, it->second.second) << p.id();
+            pinned.erase(it);
+        }
     }
-    EXPECT_EQ(seen_nets, expected_nets);
+    EXPECT_TRUE(pinned.empty()) << "a pinned pad is missing";
+
+    // J2..J43 without J4..J8, J11 and J38.
+    std::set<std::string> expectedIds;
+    for (int n = 2; n <= 43; ++n) {
+        if ((n >= 4 && n <= 8) || n == 11 || n == 38) continue;
+        expectedIds.insert("J" + std::to_string(n));
+    }
+    EXPECT_EQ(ids, expectedIds);
+
+    const std::map<std::string, int> expectedNets = {
+        {"gnd", 14}, {"vcc", 2},
+        {"div_out", 1}, {"div_vcc", 1}, {"fd_vbb", 1}, {"fd_vcc", 1},
+        {"fq_vcc", 1}, {"pa_vbb1", 1}, {"pa_vbb2", 1}, {"pa_vbb3", 1},
+        {"pa_vbb4", 1}, {"pa_vbb5", 1}, {"pa_vcc1", 1}, {"pa_vcc2", 1},
+        {"pa_vcc3", 1}, {"pa_vcc4", 1}, {"pa_vcc5", 1}, {"ref", 1},
+        {"sout", 1}, {"vco_vcm", 1}, {"vco_vth", 1},
+    };
+    EXPECT_EQ(nets, expectedNets);
 }
 
 // `io_class` and `layer` are OPTIONAL in the schema (io_pad.required

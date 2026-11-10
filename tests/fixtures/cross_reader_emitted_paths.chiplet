@@ -68,6 +68,9 @@ components:
     anchor: bbox_center
     technology: tech_a
     dimensions: {width: 10000.0, height: 10000.0, thickness: 100.0}
+    # Case data: tech_a has no attach plane; set to its thickness,
+    # the plane Studio used while the file declared none.
+    attachment_surface_z: 100.0
     position: {x: 0.0, y: 0.0, z: 0.0}
     io_pads:
       - id: "0755"

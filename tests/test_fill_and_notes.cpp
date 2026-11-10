@@ -180,6 +180,33 @@ TEST_F(FillAndNotesWidgets, NotesBarIsHiddenWhenThereIsNothingToSay)
     EXPECT_FALSE(bar.isExpanded());
 }
 
+// A reason to open the list opens it once per document, by its key: the
+// window refreshes the notes often, a note's text can change (it names the
+// file, and Save As renames it), and a list the user closed stays closed.
+TEST_F(FillAndNotesWidgets, AnOpeningKeyOpensTheListOncePerDocument)
+{
+    ViewingNotesBar bar;
+    bar.setNotes({"a"});
+    EXPECT_FALSE(bar.isExpanded());
+
+    bar.setNotes({"a", "x.chiplet: guess"}, {"guess"});
+    EXPECT_TRUE(bar.isExpanded());
+    auto* list = bar.findChild<QPlainTextEdit*>("viewingNotesList");
+    ASSERT_NE(list, nullptr);
+    EXPECT_FALSE(list->isHidden());
+
+    bar.setExpanded(false);
+    bar.setNotes({"a", "y.chiplet: guess"}, {"guess"});
+    EXPECT_FALSE(bar.isExpanded());
+    bar.setNotes({"a"});
+    bar.setNotes({"a", "y.chiplet: guess"}, {"guess"});
+    EXPECT_FALSE(bar.isExpanded());
+
+    bar.startDocument();
+    bar.setNotes({"a", "z.chiplet: guess"}, {"guess"});
+    EXPECT_TRUE(bar.isExpanded());
+}
+
 TEST_F(FillAndNotesWidgets, PropertiesMarksFillAndListsRenderedLayersTheLypLacks)
 {
     QTemporaryDir temp;

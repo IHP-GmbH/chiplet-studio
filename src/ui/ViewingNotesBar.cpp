@@ -41,8 +41,15 @@ ViewingNotesBar::ViewingNotesBar(QWidget* parent)
     setVisible(false);
 }
 
-void ViewingNotesBar::setNotes(const QStringList& notes)
+void ViewingNotesBar::setNotes(const QStringList& notes, const QStringList& opening)
 {
+    bool open = false;
+    for (const QString& key : opening) {
+        if (!key.isEmpty() && !m_openedFor.contains(key)) {
+            m_openedFor << key;
+            open = true;
+        }
+    }
     m_notes.clear();
     for (const QString& n : notes) {
         if (!n.isEmpty() && !m_notes.contains(n)) {
@@ -57,6 +64,8 @@ void ViewingNotesBar::setNotes(const QStringList& notes)
     m_list->setPlainText(lines.join('\n'));
     if (m_notes.isEmpty()) {
         setExpanded(false);
+    } else if (open) {
+        setExpanded(true);
     }
     setVisible(!m_notes.isEmpty());
 }
