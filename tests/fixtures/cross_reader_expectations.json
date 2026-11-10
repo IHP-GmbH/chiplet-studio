@@ -1,0 +1,384 @@
+{
+  "_comment": [
+    "Hand-authored expectations for the cross-reader check. These values are",
+    "written by a person from the fixture, NOT generated from the producer's",
+    "output: a table derived from the writer would agree with the writer by",
+    "construction and could not witness anything.",
+    "",
+    "Addressing is by INDEX inside sequences, never by matching on a field value.",
+    "A selector like components[id=12345] would itself depend on that id surviving",
+    "as a string, so when quoting breaks the lookup fails and the failure reads as",
+    "'path missing' instead of 'wrong type'. Indices keep the diagnosis honest.",
+    "",
+    "Mappings are the exception, and it is a real limitation rather than a choice:",
+    "technologies and connection_stacks are keyed by id, so those two paths address",
+    "through a map key. If a writer ever mangled a map key, these entries would",
+    "report 'absent' rather than naming what happened. Map keys are not schema",
+    "paths and are out of scope here; see tests/CROSS_READER_CHECK.md.",
+    "",
+    "schema_path records which classified path each entry covers, so the check can",
+    "assert its own completeness against cross_reader_classification.json rather",
+    "than trusting this file to be exhaustive. Completeness is two-way: every path",
+    "the classification calls reachable must appear here, and every path here must",
+    "be one the classification calls reachable.",
+    "",
+    "An entry with no type key asserts a string, which is the ordinary case and the",
+    "reason the 48 string entries carry no annotation. The type key is only on the",
+    "four numeric entries, and that polarity is deliberate: a new numeric path added",
+    "without it is checked as a string and goes red, whereas the reverse convention",
+    "would let a forgotten annotation pass unnoticed.",
+    "",
+    "The three integer entries are pinning a disagreement, not blessing one. The",
+    "schema declares number for all four; the writer emits 2000.0 as 2000, so PyYAML",
+    "resolves an int where yaml-cpp had a double. Those four are here because an",
+    "import writes them; the other 24 numeric paths are not covered by this",
+    "check."
+  ],
+  "pyyaml_version": "6.0.3",
+  "expect": [
+    {
+      "path": "format_version",
+      "value": "1.0",
+      "schema_path": ".format_version"
+    },
+    {
+      "path": "assembly.name",
+      "value": "0755",
+      "schema_path": ".assembly.name"
+    },
+    {
+      "path": "assembly.description",
+      "value": "yes",
+      "schema_path": ".assembly.description"
+    },
+    {
+      "path": "assembly.author",
+      "value": "1.0",
+      "schema_path": ".assembly.author"
+    },
+    {
+      "path": "assembly.created",
+      "value": "2026-09-05",
+      "schema_path": ".assembly.created"
+    },
+    {
+      "path": "assembly.modified",
+      "value": "1:30",
+      "schema_path": ".assembly.modified"
+    },
+    {
+      "path": "assembly.units",
+      "value": "um",
+      "schema_path": ".assembly.units"
+    },
+    {
+      "path": "assembly.assembly_gds",
+      "value": "0x1A",
+      "schema_path": ".assembly.assembly_gds"
+    },
+    {
+      "path": "assembly.io_technology",
+      "value": "null",
+      "schema_path": ".assembly.io_technology"
+    },
+    {
+      "path": "components[1].id",
+      "value": "12345",
+      "schema_path": ".components[].id"
+    },
+    {
+      "path": "components[1].type",
+      "value": "die",
+      "schema_path": ".components[].type"
+    },
+    {
+      "path": "components[1].anchor",
+      "value": "bbox_center",
+      "schema_path": ".components[].anchor"
+    },
+    {
+      "path": "components[1].technology",
+      "value": "tech_a",
+      "schema_path": ".components[].technology"
+    },
+    {
+      "path": "components[1].connection",
+      "value": "cupillar_opt1",
+      "schema_path": ".components[].connection"
+    },
+    {
+      "path": "components[1].layout",
+      "value": "1.5e3",
+      "schema_path": ".components[].layout"
+    },
+    {
+      "path": "components[1].top_cell",
+      "value": "no",
+      "schema_path": ".components[].top_cell"
+    },
+    {
+      "path": "components[1].orientation",
+      "value": "flip_chip",
+      "schema_path": ".components[].orientation"
+    },
+    {
+      "path": "components[1].array.pattern",
+      "value": "0b11",
+      "schema_path": ".components[].array.pattern"
+    },
+    {
+      "path": "components[2].cells[0]",
+      "value": "cell_one",
+      "schema_path": ".components[].cells[]"
+    },
+    {
+      "path": "components[2].cells[1]",
+      "value": "cell_two",
+      "schema_path": ".components[].cells"
+    },
+    {
+      "path": "components[0].io_pads[0].id",
+      "value": "0755",
+      "schema_path": ".components[].io_pads[].id"
+    },
+    {
+      "path": "components[0].io_pads[0].io_class",
+      "value": "wire_bond",
+      "schema_path": ".components[].io_pads[].io_class"
+    },
+    {
+      "path": "components[0].io_pads[0].net",
+      "value": "on",
+      "schema_path": ".components[].io_pads[].net"
+    },
+    {
+      "path": "components[0].io_pads[0].layer",
+      "value": "TopMetal2",
+      "schema_path": ".components[].io_pads[].layer"
+    },
+    {
+      "path": "interfaces[0].id",
+      "value": "~",
+      "schema_path": ".interfaces[].id"
+    },
+    {
+      "path": "interfaces[0].type",
+      "value": "micro_bump",
+      "schema_path": ".interfaces[].type"
+    },
+    {
+      "path": "interfaces[0].from.component",
+      "value": "12345",
+      "schema_path": ".interfaces[].from.component"
+    },
+    {
+      "path": "interfaces[0].from.surface",
+      "value": "bottom",
+      "schema_path": ".interfaces[].from.surface"
+    },
+    {
+      "path": "interfaces[0].from.port_layer",
+      "value": "Metal1",
+      "schema_path": ".interfaces[].from.port_layer"
+    },
+    {
+      "path": "interfaces[0].to.component",
+      "value": "interposer",
+      "schema_path": ".interfaces[].to.component"
+    },
+    {
+      "path": "interfaces[0].to.surface",
+      "value": "top",
+      "schema_path": ".interfaces[].to.surface"
+    },
+    {
+      "path": "interfaces[0].to.port_layer",
+      "value": "Metal1",
+      "schema_path": ".interfaces[].to.port_layer"
+    },
+    {
+      "path": "interconnect.adapter",
+      "value": "vendorx_microbump",
+      "schema_path": ".interconnect.adapter"
+    },
+    {
+      "path": "interconnect.technology.description",
+      "value": "no",
+      "schema_path": ".interconnect.technology.description"
+    },
+    {
+      "path": "interconnect.technology.layer_properties",
+      "value": "./cross_reader.lyp",
+      "schema_path": ".interconnect.technology.layer_properties"
+    },
+    {
+      "path": "interconnect.technology.stackup",
+      "value": "./cross_reader_stackup.yaml",
+      "schema_path": ".interconnect.technology.stackup"
+    },
+    {
+      "path": "netlist.nets[0].name",
+      "value": "0b101",
+      "schema_path": ".netlist.nets[].name"
+    },
+    {
+      "path": "netlist.nets[0].class",
+      "value": "power",
+      "schema_path": ".netlist.nets[].class"
+    },
+    {
+      "path": "netlist.nets[0].connections[0].component",
+      "value": "12345",
+      "schema_path": ".netlist.nets[].connections[].component"
+    },
+    {
+      "path": "netlist.nets[0].connections[0].pin",
+      "value": "0755",
+      "schema_path": ".netlist.nets[].connections[].pin"
+    },
+    {
+      "path": "netlist.nets[0].connections[0].layer",
+      "value": "TopMetal2",
+      "schema_path": ".netlist.nets[].connections[].layer"
+    },
+    {
+      "path": "netlist.external_netlist",
+      "value": "cross_reader_netlist.csv",
+      "schema_path": ".netlist.external_netlist"
+    },
+    {
+      "path": "components[0].id",
+      "value": "interposer",
+      "schema_path": ".components[].id"
+    },
+    {
+      "path": "components[0].type",
+      "value": "interposer",
+      "schema_path": ".components[].type"
+    },
+    {
+      "path": "technologies.tech_a.description",
+      "value": "Cross-reader\u2028technology",
+      "schema_path": ".technologies.<id>.description"
+    },
+    {
+      "path": "technologies.tech_a.layer_properties",
+      "value": "0x1F",
+      "schema_path": ".technologies.<id>.layer_properties"
+    },
+    {
+      "path": "technologies.tech_a.stackup",
+      "value": "012",
+      "schema_path": ".technologies.<id>.stackup"
+    },
+    {
+      "path": "connection_stacks.cupillar_opt1.description",
+      "value": "off",
+      "schema_path": ".connection_stacks.<id>.description"
+    },
+    {
+      "path": "connection_stacks.cupillar_opt1.layers[0].name",
+      "value": "true",
+      "schema_path": ".connection_stacks.<id>.layers[].name"
+    },
+    {
+      "path": "connection_stacks.cupillar_opt1.layers[0].material",
+      "value": "010",
+      "schema_path": ".connection_stacks.<id>.layers[].material"
+    },
+    {
+      "path": "components[1].dimensions.width",
+      "value": 2000,
+      "type": "int",
+      "schema_path": ".components[].dimensions.width"
+    },
+    {
+      "path": "components[1].dimensions.height",
+      "value": 2000,
+      "type": "int",
+      "schema_path": ".components[].dimensions.height"
+    },
+    {
+      "path": "components[1].dimensions.thickness",
+      "value": 50,
+      "type": "int",
+      "schema_path": ".components[].dimensions.thickness"
+    },
+    {
+      "path": "technologies.tech_a.dbu",
+      "value": 0.001,
+      "type": "float",
+      "schema_path": ".technologies.<id>.dbu"
+    }
+  ],
+  "import_producer": {
+    "_comment": [
+      "The actual-producer positive. Everything above is about a document this",
+      "check loaded and re-saved; that establishes agreement about a document",
+      "RESEMBLING an import, not about what an import writes. This block drives",
+      "chiplet_studio.write_single_gds_import, which is the same function",
+      "src/ui/MainWindow.cpp calls, and puts its output through both readers.",
+      "",
+      "spec is INPUT and expect is OUTPUT, both hand-authored. thickness_um is",
+      "deliberately ABSENT from the spec: 200 has to arrive from the C++ default",
+      "constructor through py::init<>, so a changed default in ChipletSynth.h",
+      "reddens this instead of leaving it green on a number nothing produces.",
+      "",
+      "These entries are OUTSIDE the coverage arithmetic above, deliberately.",
+      "Folding them into expect would let an import entry for",
+      ".components[].dimensions.width satisfy the two-way coverage assertion",
+      "after the synthetic fixture's entry was deleted, and would inflate the",
+      "48-of-48 figure with paths counted twice.",
+      "",
+      "What this does NOT witness: MainWindow builds the spec from the GDS",
+      "bounding box and the import dialog, and nothing here sees that. The",
+      "positive is about what the writer does with a spec, not about what the",
+      "user's dialog hands the writer."
+    ],
+    "spec": {
+      "gds_path": "/tmp/design.gds",
+      "top_cell": "TOP",
+      "width_um": 800.0,
+      "height_um": 600.0,
+      "tech_id": "sg13g2"
+    },
+    "expect": [
+      {
+        "path": "components[0].dimensions.width",
+        "value": 800,
+        "type": "int"
+      },
+      {
+        "path": "components[0].dimensions.height",
+        "value": 600,
+        "type": "int"
+      },
+      {
+        "path": "components[0].dimensions.thickness",
+        "value": 200,
+        "type": "int"
+      },
+      {
+        "path": "technologies.sg13g2.dbu",
+        "value": 0.001,
+        "type": "float"
+      },
+      {
+        "path": "components[0].anchor",
+        "value": "bbox_center"
+      },
+      {
+        "path": "components[0].layout",
+        "value": "/tmp/design.gds"
+      },
+      {
+        "path": "components[0].top_cell",
+        "value": "TOP"
+      },
+      {
+        "path": "components[0].technology",
+        "value": "sg13g2"
+      }
+    ]
+  }
+}

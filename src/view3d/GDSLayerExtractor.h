@@ -15,6 +15,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include "ShapeTiles.h"
 #include "view2d/LayerProperties.h"
 
 #ifdef HAVE_KLAYOUT
@@ -66,6 +67,18 @@ struct LayerPolygons {
 
     size_t polygonCount() const { return polygons.size(); }
     size_t totalPoints() const;
+};
+
+/**
+ * What the extractor did with one layer's shapes. A shape is a polygon, box
+ * or path under the cell, hierarchy flattened; texts are not counted.
+ */
+struct LayerShapeTally {
+    size_t inGds = 0;       // every shape on the layer
+    size_t kept = 0;        // handed on in LayerPolygons
+    size_t underArea = 0;   // dropped: under min_polygon_area
+    size_t pastRead = 0;    // not read: past max_polygons_per_layer
+    size_t viaSkipped = 0;  // a via layer over via_max_cuts: all of its cuts
 };
 
 /**
@@ -192,6 +205,10 @@ public:
     size_t lastPolygonCount() const { return m_lastPolygonCount; }
     size_t lastPointCount() const { return m_lastPointCount; }
 
+    // Per layer from the last extraction: every layer with a shape, whether
+    // or not any of it was kept.
+    const std::map<LayerKey, LayerShapeTally>& lastTally() const { return m_lastTally; }
+
 private:
     ExtractionConfig m_config;
 
@@ -199,7 +216,30 @@ private:
     size_t m_lastLayerCount = 0;
     size_t m_lastPolygonCount = 0;
     size_t m_lastPointCount = 0;
+    std::map<LayerKey, LayerShapeTally> m_lastTally;
 };
+
+/**
+ * Every drawable shape of the given layers, for the fast 3D view, with none
+ * of the limits ExtractionConfig sets. A shape that is a box once the
+ * hierarchy's transformation is applied is one TileBox; any other is the
+ * horizontal trapezoids KLayout decomposes it into, holes left out. Layers
+ * with no shape are left out of the result.
+ *
+ * `recordBudget` is how many records may still be prepared. Once a shape does
+ * not fit, it and every shape read after it are counted in inGds but not
+ * prepared. The budget is reduced by what was prepared.
+ */
+#ifdef HAVE_KLAYOUT
+std::map<LayerKey, LayerRecords> extractRecords(db::Layout* layout,
+                                                const std::string& cell_name,
+                                                const std::set<LayerKey>& layers,
+                                                std::size_t& recordBudget);
+#endif
+std::map<LayerKey, LayerRecords> extractRecordsFromFile(const std::string& gds_path,
+                                                        const std::string& cell_name,
+                                                        const std::set<LayerKey>& layers,
+                                                        std::size_t& recordBudget);
 
 } // namespace chiplet
 

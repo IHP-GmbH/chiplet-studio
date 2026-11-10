@@ -1,0 +1,405 @@
+// SPDX-FileCopyrightText: 2026 IHP GmbH
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "TechResolve.h"
+
+#include "Assembly.h"
+#include "CountText.h"
+#include "Component.h"
+#include "DecimalText.h"
+#include "Technology.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <sstream>
+
+namespace chiplet {
+
+namespace {
+
+bool isFile(const std::string& path)
+{
+    std::error_code ec;
+    return std::filesystem::is_regular_file(path, ec);
+}
+
+std::string microns(double v)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.2f", v);
+    return buf;
+}
+
+std::string grouped(std::size_t n)
+{
+    return groupedCount(n);
+}
+
+std::string fileName(const std::string& path)
+{
+    return std::filesystem::path(path).filename().string();
+}
+
+// Why a declared path is not usable, or "" when it is. The loader has already
+// recorded a ${VAR} that did not expand; a path that expanded can still name
+// nothing.
+std::string declaredProblem(const std::string& source, const std::string& path,
+                            const std::string& loaderProblem)
+{
+    if (source.empty() && path.empty()) {
+        return {};
+    }
+    if (!loaderProblem.empty()) {
+        return loaderProblem;
+    }
+    if (!isFile(path)) {
+        return "file not found: " + path;
+    }
+    return {};
+}
+
+} // namespace
+
+TechSheet resolveTechnologySheet(const Technology* tech, const std::string& techId)
+{
+    TechSheet out;
+    out.techId = techId;
+    if (tech) {
+        out.problem = declaredProblem(tech->layer_properties_source(),
+                                      tech->layer_properties_path(),
+                                      tech->layer_properties_problem());
+        if (out.problem.empty() && !tech->layer_properties_path().empty()) {
+            out.path = tech->layer_properties_path();
+            out.source = SheetSource::Declared;
+            return out;
+        }
+    }
+    const std::string bundled = BlenderGDSConfigs::pdkLayerPropertiesPath(techId);
+    if (!bundled.empty()) {
+        out.path = bundled;
+        out.source = SheetSource::BuiltIn;
+    }
+    return out;
+}
+
+TechStackup resolveTechnologyStackup(const Technology* tech, const std::string& techId)
+{
+    TechStackup out;
+    if (tech) {
+        out.problem = declaredProblem(tech->stackup_source(), tech->stackup_path(),
+                                      tech->stackup_problem());
+        if (out.problem.empty() && !tech->stackup_path().empty()) {
+            if (out.stackup.loadFromBlenderGDS(tech->stackup_path())) {
+                out.source = StackupSource::Declared;
+                out.path = tech->stackup_path();
+                return out;
+            }
+            out.stackup.clear();
+            out.problem = "could not read " + tech->stackup_path();
+        }
+    }
+    if (techId.empty()) {
+        return out;
+    }
+    const std::string bundled = BlenderGDSConfigs::stackupPath(techId);
+    if (!bundled.empty() && out.stackup.loadFromBlenderGDS(bundled)) {
+        out.source = StackupSource::BuiltIn;
+        out.path = bundled;
+        return out;
+    }
+    out.stackup.clear();
+    // Nothing declared and an id Studio has no data for: say so, so a 3D view
+    // drawn on a stand-in stack is never mistaken for the technology's own.
+    if (out.problem.empty() && !BlenderGDSConfigs::isKnownTechnology(techId)) {
+        out.problem = "Studio has no stackup for this technology id";
+    }
+    return out;
+}
+
+std::vector<LayerKey> fillerKeys(const LayerStackup& stackup)
+{
+    std::vector<LayerKey> keys;
+    for (const auto& elev : stackup.sortedLayers()) {
+        if (elev.isFiller()) {
+            keys.push_back(elev.key());
+        }
+    }
+    return keys;
+}
+
+std::string sheetNote(const TechSheet& sheet)
+{
+    if (sheet.problem.empty()) {
+        return {};
+    }
+    std::string note = sheet.techId + " layer sheet not loaded: " + sheet.problem + ". ";
+    // 3D colours come from the declared sheet only, so a failed declaration
+    // always leaves 3D on generated colours whatever 2D found.
+    if (sheet.source == SheetSource::BuiltIn) {
+        note += "2D uses Studio's built-in sheet " + fileName(sheet.path)
+              + "; 3D uses generated colours.";
+    } else {
+        note += "2D uses default styling; 3D uses generated colours.";
+    }
+    return note;
+}
+
+std::string stackupNote(const std::string& techId, const TechStackup& stackup,
+                        bool sheetFromDeclared)
+{
+    if (stackup.problem.empty()) {
+        return {};
+    }
+    std::string note = techId + " stackup not loaded: " + stackup.problem + ". ";
+    if (stackup.source == StackupSource::BuiltIn) {
+        note += "Using Studio's built-in stackup " + fileName(stackup.path) + ".";
+    } else if (sheetFromDeclared) {
+        note += "3D stacks the layer sheet's layers at a default thickness; fill is not "
+                "recognised.";
+    } else {
+        note += "3D uses a generic interposer stackup; fill is not recognised.";
+    }
+    return note;
+}
+
+std::string stackupLabel(const TechStackup& stackup, bool fromSheet)
+{
+    if (stackup.source != StackupSource::NotModeled) {
+        return fileName(stackup.path);
+    }
+    return fromSheet ? "layer-sheet" : "generic interposer";
+}
+
+std::string unmodeledNote(const std::string& componentId,
+                          const std::vector<LayerKey>& keys,
+                          const std::string& stackupName)
+{
+    if (keys.empty()) {
+        return {};
+    }
+    std::string list;
+    const std::size_t shown = std::min(keys.size(), kNoteKeyLimit);
+    for (std::size_t i = 0; i < shown; ++i) {
+        if (i) list += ", ";
+        list += std::to_string(keys[i].layer) + "/" + std::to_string(keys[i].datatype);
+    }
+    if (keys.size() > shown) {
+        list += " and " + std::to_string(keys.size() - shown) + " more";
+    }
+    return "3D: " + componentId + " has shapes on " + list + ", not in the "
+         + stackupName + " stackup, not drawn.";
+}
+
+std::string shapeCountNote(const std::string& componentId, const ShapeCount& count)
+{
+    if (count.drawn >= count.inGds) {
+        return {};
+    }
+    std::string note = "3D: " + componentId + " " + std::to_string(count.key.layer) + "/"
+                     + std::to_string(count.key.datatype);
+    if (count.borrowed) {
+        note += " has no stackup entry; drawn at " + count.name + "'s height";
+    } else if (!count.name.empty()) {
+        note += " " + count.name;
+    }
+    note += ": " + grouped(count.drawn) + " of " + grouped(count.inGds) + " shapes shown";
+    if (count.underArea) {
+        std::ostringstream floor;
+        floor << count.areaFloor;
+        note += "; " + grouped(count.underArea) + " under " + floor.str() + " um² skipped";
+    }
+    if (count.pastRead) {
+        note += "; " + grouped(count.pastRead) + " past the read limit of "
+              + grouped(count.readLimit) + " per layer";
+    }
+    if (count.viaSkipped) {
+        note += "; a via layer over " + grouped(count.viaLimit) + " cuts is not drawn";
+    }
+    if (count.pastMesh) {
+        note += "; " + grouped(count.pastMesh) + " past the mesh limit of "
+              + grouped(count.meshLimit) + " per layer";
+    }
+    return note + ".";
+}
+
+std::string shapeCountLabel(const ShapeCount& count)
+{
+    if (count.drawn >= count.inGds) {
+        return {};
+    }
+    return "3D shows " + grouped(count.drawn) + " of " + grouped(count.inGds) + " shapes";
+}
+
+std::vector<std::string> technologyNotes(const Assembly& assembly)
+{
+    std::vector<std::string> notes;
+    for (const auto& tech : assembly.technologies()) {
+        // interconnect.technology registers under the adapter id. Its bodies
+        // come from fragments, never from a stackup for that id, so there is
+        // no 3D stand-in to warn about.
+        if (!assembly.interconnect_adapter().empty()
+            && tech->id() == assembly.interconnect_adapter()) {
+            continue;
+        }
+        const TechSheet sheet = resolveTechnologySheet(tech.get(), tech->id());
+        if (std::string n = sheetNote(sheet); !n.empty()) {
+            notes.push_back(std::move(n));
+        }
+        const TechStackup stackup = resolveTechnologyStackup(tech.get(), tech->id());
+        if (std::string n = stackupNote(tech->id(), stackup,
+                                        sheet.source == SheetSource::Declared);
+            !n.empty()) {
+            notes.push_back(std::move(n));
+        }
+    }
+    return notes;
+}
+
+double interposerMountPlane(const Component& interposer)
+{
+    return interposer.attachment_surface_z().value_or(interposer.dimensions().thickness);
+}
+
+std::size_t mergeBodiesOnInterposer(LayerStackup& stackup, const Component& interposer,
+                                    const std::vector<std::string>& keys,
+                                    std::vector<std::string>* leftOut)
+{
+    stackup.setAttachmentSurfaceZ(interposerMountPlane(interposer));
+    return stackup.mergeInterconnectFragments(keys, leftOut);
+}
+
+DrawnStackup drawnStackup(const Assembly* assembly, const std::string& techId,
+                          const LayerPropertiesFile* lyp)
+{
+    DrawnStackup d;
+
+    // Priority 0: a stackup file, the technology's own else Studio's bundled
+    // one for its id. The same resolver writes the notes, so the two cannot
+    // disagree on which file is in use. (Seating reads no stackup: a die
+    // sits on the merged bodies or the mount plane.)
+    d.resolved = resolveTechnologyStackup(assembly ? assembly->technology(techId) : nullptr,
+                                          techId);
+    if (d.resolved.source != StackupSource::NotModeled) {
+        d.stackup = d.resolved.stackup;
+        d.modeled = true;
+    } else if (lyp) {
+        // Priority 1: derive a stackup from the technology's .lyp (default
+        // thickness). A supported PDK never reaches this -- its bundled YAML
+        // resolves at Priority 0 -- but it lets an unsupported PDK that ships
+        // only a .lyp still render with sensible per-layer z.
+        d.stackup = LayerStackup::fromLayerProperties(*lyp);
+    } else {
+        // Priority 2: generic last resort when there is neither a YAML stackup
+        // nor a .lyp -- a plain top-metal interposer stack so geometry still
+        // renders. (The former techfile and hardcoded-name rungs were removed:
+        // the bundled YAMLs at Priority 0 always won, so they were dead. The
+        // golden test test_stackup_order_golden.cpp guards that the surviving
+        // ladder still yields the exact same order for every bundled PDK.)
+        d.stackup = Stackups::createInterposer();
+    }
+
+    // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap, or a vendor
+    // microbump), which the interconnect PDK owns rather than the interposer
+    // stackup, so the layer-render path knows their z and height. Additive and
+    // idempotent (addLayer overwrites by key). The render merges the UNION of
+    // the fragments of all methods the dies use (per-die connection ids are the
+    // keys); the assembly-level adapter is the legacy fallback when no method
+    // id resolves.
+    //
+    // ONLY for the interposer's technology: the bodies physically sit on the
+    // interposer. Merging them into a die's stackup inflates totalHeight(),
+    // which is the flip-chip beolTop -- every layer of a FaceDown die would
+    // render shifted up by the whole body-stack height (die floating above its
+    // pillars by ~44 um).
+    //
+    // Only on the mount interposer, the one seating uses, so the drawn bumps
+    // and the seated dies cannot come from two different interposers.
+    if (!assembly || techId.empty()) return d;
+    const Component* ip = assembly->mount_interposer();
+    if (!ip || ip->technology() != techId) return d;
+    d.bodiesMerged = mergeBodiesOnInterposer(
+        d.stackup, *ip,
+        LayerStackup::resolveInterconnectKeys(assembly->interconnect_method_ids(),
+                                              assembly->interconnect_adapter()));
+    return d;
+}
+
+std::string mountPlaneGuessNote(const Assembly& assembly, const std::string& sourceName)
+{
+    // The mount interposer with no plane of its own, said once per design
+    // when any die has a connection to seat (seated at open or placed by the
+    // file: either way its bumps are drawn on the guessed plane).
+    const Component* ip = assembly.mount_interposer();
+    if (!ip || ip->attachment_surface_z()) return {};
+    for (const auto& comp : assembly.components()) {
+        if (comp->type() == ComponentType::Interposer
+            || comp->type() == ComponentType::Substrate
+            || comp->connection().empty()) continue;
+        return (sourceName.empty() ? std::string("This design") : sourceName)
+               + ": interposer " + ip->id()
+               + " declares no attachment_surface_z, so Studio takes its "
+                 "dimensions.thickness ("
+               + shortestText(ip->dimensions().thickness)
+               + " um) as the mount plane: bumps are drawn there and dies without a z "
+                 "are seated there. The mount plane is a guess; declare "
+                 "attachment_surface_z.";
+    }
+    return {};
+}
+
+std::vector<std::string> placementNotes(const Assembly& assembly,
+                                        const std::string& sourceName)
+{
+    std::vector<std::string> notes;
+
+    const std::string guess = mountPlaneGuessNote(assembly, sourceName);
+    if (!guess.empty()) notes.push_back(guess);
+
+    const Component* ip = assembly.mount_interposer();
+    if (ip && !ip->technology().empty()) {
+        // The merge the render and seating make, to learn what it leaves out.
+        LayerStackup bodies;
+        std::vector<std::string> leftOut;
+        mergeBodiesOnInterposer(bodies, *ip,
+            LayerStackup::resolveInterconnectKeys(assembly.interconnect_method_ids(),
+                                                  assembly.interconnect_adapter()),
+            &leftOut);
+        for (const auto& key : leftOut) {
+            notes.push_back("Interconnect fragment " + key + " does not give its heights "
+                            "relative to the attachment surface, so its bodies are not drawn; dies using it seat on the mount plane plus "
+                            "their connection height.");
+        }
+    }
+
+    if (ip && !ip->technology().empty()) {
+        const TechStackup s = resolveTechnologyStackup(
+            assembly.technology(ip->technology()), ip->technology());
+        // Seating and the render take the file's plane over the stackup's,
+        // so a stackup that puts it elsewhere is said once.
+        const std::optional<double>& plane = ip->attachment_surface_z();
+        if (s.source != StackupSource::NotModeled && plane
+            && s.stackup.hasAttachmentSurfaceZ()
+            && *plane != s.stackup.attachmentSurfaceZ()) {
+            notes.push_back(ip->id() + " declares its attach plane at "
+                            + shortestText(*plane) + " um, but " + fileName(s.path)
+                            + " puts it at " + shortestText(s.stackup.attachmentSurfaceZ())
+                            + " um. Dies seat on the file's plane.");
+        }
+    }
+
+    for (const auto& comp : assembly.components()) {
+        if (comp->type() == ComponentType::Interposer || comp->connection().empty()) continue;
+        const double z = comp->position().z;
+        if (z == 0.0) continue;  // seated by the reader at open
+        const double seat = assembly.calculate_component_z(comp->id());
+        if (std::fabs(z - seat) < 0.005) continue;
+        notes.push_back(comp->id() + " is placed at z " + microns(z) + " um, but its "
+                        + comp->connection() + " bumps end at " + microns(seat)
+                        + " um. Drawn where the file places it.");
+    }
+    return notes;
+}
+
+} // namespace chiplet

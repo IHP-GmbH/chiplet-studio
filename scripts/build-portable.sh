@@ -159,7 +159,7 @@ Corresponding source (per GPL-3.0-or-later, section 6):
   (GPL-3.0-or-later)    commit ${GIT_COMMIT}
 
   KLayout               https://github.com/KLayout/klayout
-  (GPL-3.0-or-later)    commit ${KLAYOUT_COMMIT}
+  (GPL-2.0-or-later)    commit ${KLAYOUT_COMMIT}
 
   GDS3D / libgdsto3d    https://github.com/trilomix/GDS3D
   (LGPL-2.1-or-later)   commit ${GDS3D_COMMIT}

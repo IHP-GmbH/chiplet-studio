@@ -11,6 +11,8 @@
 #include "core/Component.h"
 #include <QApplication>
 #include <QTreeWidget>
+#include <QHeaderView>
+#include <QFontMetrics>
 
 namespace chiplet {
 namespace {
@@ -255,6 +257,66 @@ TEST_F(HierarchyPanelTest, InterposerNeverGetsMethodChildRow)
     QTreeWidgetItem* interposer = findComponentRow(tree, "interposer");
     ASSERT_NE(interposer, nullptr);
     EXPECT_EQ(interposer->childCount(), 0);
+}
+
+// =============================================================================
+// Column sizing: the id column must not be squeezed
+// =============================================================================
+
+TEST_F(HierarchyPanelTest, NameColumnSizesToContentNotToLeftoverWidth)
+{
+    HierarchyPanel panel;
+    auto assembly = createTestAssembly();
+    panel.setAssembly(assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+
+    // Column 0 carries the component id, and it is the one column whose content
+    // the user cannot recover from anywhere else in the row.
+    EXPECT_EQ(tree->header()->sectionResizeMode(0),
+              QHeaderView::ResizeToContents);
+    EXPECT_FALSE(tree->header()->stretchLastSection());
+}
+
+TEST_F(HierarchyPanelTest, NarrowPanelKeepsTheIdColumnWideEnough)
+{
+    const QString longId = "interposer_with_a_deliberately_long_identifier";
+
+    HierarchyPanel panel;
+    auto assembly = createTestAssembly();
+    auto wide = std::make_unique<Component>(longId.toStdString(),
+                                            ComponentType::Die);
+    wide->set_technology("ihp_sg13g2");
+    assembly->add_component(std::move(wide));
+    panel.setAssembly(assembly.get());
+
+    QTreeWidget* tree = panel.findChild<QTreeWidget*>();
+    ASSERT_NE(tree, nullptr);
+
+    // What the id itself needs. Neither obvious reference works here:
+    // QTreeView::sizeHintForColumn is protected, and QHeaderView::sectionSizeHint
+    // answers for the header label rather than the items, returning the same 40 px
+    // under both policies when measured.
+    const int idWidth = QFontMetrics(tree->font()).horizontalAdvance(longId);
+
+    // Half of that, derived rather than hardcoded: a narrower font in some other
+    // image would move a fixed width toward the id and quietly break the
+    // precondition below, which is the one thing here that is font-sensitive.
+    panel.resize(idWidth / 2, 400);
+    panel.show();
+    QCoreApplication::processEvents();
+
+    // Precondition: the panel really is too narrow to hold the id, which is the
+    // only situation where the column policy can be told apart.
+    ASSERT_LT(tree->viewport()->width(), idWidth);
+
+    // Measured against both policies at this width: a stretched column 0 gives
+    // 39 px against a 127 px viewport and a 258 px id, and sizing to content
+    // gives 305 px, so both assertions separate the two.
+    EXPECT_GE(tree->columnWidth(0), idWidth);
+    EXPECT_GT(tree->columnWidth(0), tree->viewport()->width());
+    panel.hide();
 }
 
 } // namespace

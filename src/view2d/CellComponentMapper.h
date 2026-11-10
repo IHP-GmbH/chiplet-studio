@@ -5,7 +5,7 @@
  * CellComponentMapper.h - Maps GDS cell names to component IDs
  *
  * Uses the wrapper cell naming convention from hyp_to_gds:
- * wrapper cells are named "<component_id>_<cell_name>" (e.g., U1_Interposer_ANT_CuPi).
+ * wrapper cells are named "<component_id>_<cell_name>" (e.g., U1_INTERPOSER_A).
  * This allows bidirectional lookup between GDS cells and assembly components.
  */
 

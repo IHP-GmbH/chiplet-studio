@@ -3,8 +3,9 @@ format_version: "1.0"
 # Hermetic fixture for InterconnectMergeZ. die_a attaches via a cu-pillar stack
 # whose first layer (CuPillar) is NOT in the (body-less) interposer stackup; it
 # is supplied by the interconnect PDK fragment selected by interconnect.adapter.
-# Interposer thickness is a distinct 200 so the no-merge fallback (200+48=248)
-# differs clearly from the fragment result (CuPillar z_bottom 13.83 + 48 = 61.83).
+# The interposer declares no attachment_surface_z, so dies seat on its 200 um
+# thickness (a guessed plane, 200 + 48 = 248); tests that need a plane declare
+# one as case data (13.83 + 48 = 61.83, the stackup's own plane).
 # The technology id is the plain product id "intm4tm2" (the only spelling
 # that resolves; there are no legacy aliases).
 interconnect:

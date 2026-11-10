@@ -1,7 +1,9 @@
-# Hermetic per-method fragment for the mixed-methods test (method_a).
+# Hermetic per-method fragment for the mixed-methods test (method_a). Raised
+# 0.5 above the plane so a die that misses its body (seated on the bare plane)
+# is told apart from one seated on it.
 z_reference: attachment_surface
 LayerA:
   index: 600
   type: 10
-  z: 0.00
+  z: 0.50
   height: 10.00

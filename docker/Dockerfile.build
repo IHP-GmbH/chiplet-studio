@@ -45,6 +45,28 @@ RUN apt-get update && apt-get install -y \
     libyaml-cpp-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Cross-reader check dependency (TEST ONLY).
+#
+# A .chiplet written here is read by PyYAML downstream (the KiCad plugin,
+# chiplet-system-spec's reference reader, interposer-pnr), and PyYAML resolves
+# scalars per YAML 1.1 where yaml-cpp does not. tests/cross_reader_check.py
+# drives this studio's real writer output through PyYAML so the two readers are
+# compared by measurement instead of by argument.
+#
+# It lives in its own venv, never in the system interpreter, and it is NOT a
+# Studio runtime dependency: nothing in Dockerfile.runtime installs it and no
+# Studio code imports yaml. The version is pinned because the pin names the
+# reader whose 1.1 resolution the expectations assert; interposer-pnr is the
+# only exact pin in the ecosystem and it is 6.0.3. chiplet-system-spec's
+# reference reader declares PyYAML>=5.1, so this tests one point in a wider
+# declared range.
+RUN apt-get update && apt-get install -y \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/crossreader-venv \
+    && /opt/crossreader-venv/bin/pip install --no-cache-dir "PyYAML==6.0.3" \
+    && /opt/crossreader-venv/bin/python -c "import yaml; assert yaml.__version__ == '6.0.3', yaml.__version__"
+
 # X11 virtual framebuffer for headless GUI testing
 RUN apt-get update && apt-get install -y \
     xvfb \

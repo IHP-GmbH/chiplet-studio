@@ -524,5 +524,67 @@ TEST(CommandFactory, GetJournalFactory)
     EXPECT_EQ(cmd->type(), "MoveComponent");
 }
 
+TEST(CommandProcessor, ModelChangedTracksMergedExecuteUndoRedoAndBranch) {
+    auto assembly = createTestAssembly();
+    CommandProcessor processor(assembly.get());
+    std::vector<double> checkpoints;
+    QObject::connect(&processor, &CommandProcessor::model_changed, [&] {
+        checkpoints.push_back(assembly->component("die_a")->position().x);
+    });
+    auto move = [&](double oldX, double newX) {
+        return std::make_unique<CmdMoveComponent>("die_a", Position3D{oldX,200,50}, Position3D{newX,200,50});
+    };
+    ASSERT_TRUE(processor.execute(move(100, 110)));
+    ASSERT_TRUE(processor.execute(move(110, 120)));
+    EXPECT_EQ(processor.undo_stack_size(), 1u); // Actually exercises coalescing.
+    processor.undo();
+    processor.redo();
+    processor.undo();
+    ASSERT_TRUE(processor.execute(move(100, 130)));
+    EXPECT_FALSE(processor.can_redo());
+    processor.clear();
+    processor.undo(); processor.redo();
+    EXPECT_EQ(checkpoints, (std::vector<double>{110,120,100,120,100,130}));
+}
+
+class CheckpointFailureCommand : public Command {
+public:
+    bool failExecute = false, failUndo = false, failRedo = false;
+    bool execute(Assembly&) override { return !failExecute; }
+    void undo(Assembly&) override { if (failUndo) throw std::runtime_error("undo failure"); }
+    void redo(Assembly&) override { if (failRedo) throw std::runtime_error("redo failure"); }
+    nlohmann::json serialize() const override { return nlohmann::json::object(); }
+    std::string type() const override { return "checkpoint-test"; }
+    std::string description() const override { return "checkpoint-test"; }
+};
+
+TEST(CommandProcessor, ModelChangedDoesNotClaimFailedTransitions) {
+    auto assembly = createTestAssembly();
+    CommandProcessor processor(assembly.get());
+    int snapshots = 0;
+    QObject::connect(&processor, &CommandProcessor::model_changed, [&] { ++snapshots; });
+    EXPECT_FALSE(processor.execute(nullptr));
+    auto rejected = std::make_unique<CheckpointFailureCommand>();
+    rejected->failExecute = true;
+    EXPECT_FALSE(processor.execute(std::move(rejected)));
+    EXPECT_EQ(snapshots, 0);
+    auto successful = std::make_unique<CheckpointFailureCommand>();
+    auto* control = successful.get();
+    ASSERT_TRUE(processor.execute(std::move(successful)));
+    control->failUndo = true;
+    processor.undo();
+    EXPECT_EQ(snapshots, 1);
+    EXPECT_TRUE(processor.can_undo());
+    control->failUndo = false;
+    processor.undo();
+    EXPECT_EQ(snapshots, 2);
+    control->failRedo = true;
+    processor.redo();
+    EXPECT_EQ(snapshots, 2);
+    EXPECT_TRUE(processor.can_redo());
+    processor.clear();
+    EXPECT_EQ(snapshots, 2);
+}
+
 } // namespace
 } // namespace chiplet

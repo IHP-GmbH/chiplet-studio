@@ -10,6 +10,7 @@
 #include "FlowEngine.h"
 #include "core/Assembly.h"
 #include "formats/ChipletFormat.h"  // ChipletFormatException
+#include "formats/YamlScalarEmit.h"
 
 #include <yaml-cpp/yaml.h>
 #include <regex>
@@ -75,18 +76,28 @@ FlowStep FlowConfig::parse_step(const YAML::Node& node,
         step.name = node["name"].as<std::string>();
     }
 
+    // Record the keys the author actually wrote, then derive the runtime view
+    // from them. Reading `script:` only inside `if (node["tool"])` is what used
+    // to drop a script-only step's program entirely (see FlowStep.h).
+    if (node["tool"]) {
+        step.declared_tool = resolve_variables(
+            node["tool"].as<std::string>(), assembly);
+    }
+    if (node["script"]) {
+        step.declared_script = resolve_variables(
+            node["script"].as<std::string>(), assembly);
+    }
+
     // tool/script mapping:
     //   tool + script -> interpreter = tool, tool_path = script
     //   tool only     -> interpreter = "", tool_path = tool
-    if (node["tool"]) {
-        std::string tool = node["tool"].as<std::string>();
-        if (node["script"]) {
-            step.interpreter = tool;
-            step.tool_path = resolve_variables(
-                node["script"].as<std::string>(), assembly);
-        } else {
-            step.tool_path = resolve_variables(tool, assembly);
-        }
+    //   script only   -> neither; step.program() is nullopt and the engine
+    //                    refuses to run it rather than starting "".
+    if (step.declared_tool && step.declared_script) {
+        step.interpreter = *step.declared_tool;
+        step.tool_path = *step.declared_script;
+    } else if (step.declared_tool) {
+        step.tool_path = *step.declared_tool;
     }
 
     if (node["args"] && node["args"].IsSequence()) {
@@ -237,25 +248,38 @@ std::string FlowConfig::resolve_field(const std::string& category,
 void FlowConfig::write_step(const FlowStep& step, YAML::Emitter& out)
 {
     out << YAML::BeginMap;
-    out << YAML::Key << "id" << YAML::Value << step.id;
+    out << YAML::Key << "id" << YAML::Value << ps(step.id);
 
     if (step.name != step.id) {
-        out << YAML::Key << "name" << YAML::Value << step.name;
+        out << YAML::Key << "name" << YAML::Value << ps(step.name);
     }
 
-    // Reconstruct tool/script from interpreter/tool_path
-    if (!step.interpreter.empty()) {
-        out << YAML::Key << "tool" << YAML::Value << step.interpreter;
-        out << YAML::Key << "script" << YAML::Value << step.tool_path;
-    } else if (!step.tool_path.empty()) {
-        out << YAML::Key << "tool" << YAML::Value << step.tool_path;
+    // Exactly the keys the author declared, and no others. Deriving them back
+    // from interpreter/tool_path cannot distinguish `script: Y` from `tool: Y`,
+    // so it renamed the author's key; and for a script-only step it emitted
+    // neither, losing the program altogether.
+    if (step.declared_tool) {
+        out << YAML::Key << "tool" << YAML::Value << ps(*step.declared_tool);
+    }
+    if (step.declared_script) {
+        out << YAML::Key << "script" << YAML::Value << ps(*step.declared_script);
+    }
+    // A step built in memory rather than parsed declares neither, so fall back
+    // to the derived view to keep programmatic flows serialisable.
+    if (!step.declared_tool && !step.declared_script) {
+        if (!step.interpreter.empty()) {
+            out << YAML::Key << "tool" << YAML::Value << ps(step.interpreter);
+            out << YAML::Key << "script" << YAML::Value << ps(step.tool_path);
+        } else if (!step.tool_path.empty()) {
+            out << YAML::Key << "tool" << YAML::Value << ps(step.tool_path);
+        }
     }
 
     if (!step.args.empty()) {
         out << YAML::Key << "args" << YAML::Value
             << YAML::Flow << YAML::BeginSeq;
         for (const auto& arg : step.args) {
-            out << arg;
+            out << ps(arg);
         }
         out << YAML::EndSeq;
     }
@@ -264,7 +288,7 @@ void FlowConfig::write_step(const FlowStep& step, YAML::Emitter& out)
         out << YAML::Key << "input_files" << YAML::Value
             << YAML::Flow << YAML::BeginSeq;
         for (const auto& f : step.input_files) {
-            out << f;
+            out << ps(f);
         }
         out << YAML::EndSeq;
     }
@@ -273,7 +297,7 @@ void FlowConfig::write_step(const FlowStep& step, YAML::Emitter& out)
         out << YAML::Key << "output_files" << YAML::Value
             << YAML::Flow << YAML::BeginSeq;
         for (const auto& f : step.output_files) {
-            out << f;
+            out << ps(f);
         }
         out << YAML::EndSeq;
     }
@@ -282,7 +306,7 @@ void FlowConfig::write_step(const FlowStep& step, YAML::Emitter& out)
         out << YAML::Key << "depends_on" << YAML::Value
             << YAML::Flow << YAML::BeginSeq;
         for (const auto& dep : step.depends_on) {
-            out << dep;
+            out << ps(dep);
         }
         out << YAML::EndSeq;
     }
@@ -296,13 +320,13 @@ void FlowConfig::write_flow(const FlowEngine& engine, YAML::Emitter& out)
 
     if (!engine.working_directory().empty()) {
         out << YAML::Key << "working_directory"
-            << YAML::Value << engine.working_directory();
+            << YAML::Value << ps(engine.working_directory());
     }
 
     if (!engine.environment().empty()) {
         out << YAML::Key << "environment" << YAML::Value << YAML::BeginMap;
         for (const auto& [key, value] : engine.environment()) {
-            out << YAML::Key << key << YAML::Value << value;
+            out << YAML::Key << ps(key) << YAML::Value << ps(value);
         }
         out << YAML::EndMap;
     }
@@ -363,13 +387,13 @@ void FlowConfig::write_flow_definition(const FlowDefinition& def,
 
     if (!def.working_directory.empty()) {
         out << YAML::Key << "working_directory"
-            << YAML::Value << def.working_directory;
+            << YAML::Value << ps(def.working_directory);
     }
 
     if (!def.environment.empty()) {
         out << YAML::Key << "environment" << YAML::Value << YAML::BeginMap;
         for (const auto& [key, value] : def.environment) {
-            out << YAML::Key << key << YAML::Value << value;
+            out << YAML::Key << ps(key) << YAML::Value << ps(value);
         }
         out << YAML::EndMap;
     }

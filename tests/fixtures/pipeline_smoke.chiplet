@@ -1,19 +1,17 @@
 format_version: '1.0'
 assembly:
-  name: pipeline_smoke
+  name: interposer_wire_bonding_demo
   units: um
+interposer:
+  adapter: intm4tm2
 technologies:
   intm4tm2:
     description: Imported from KiCad
-    layer_properties: ./intm4tm2.lyp
+    layer_properties: ${INTERPOSER_PDK_ROOT}/libs.tech/klayout/tech/intm4tm2.lyp
     dbu: 0.001
   sg13g2:
     description: Imported from KiCad
-    layer_properties: ./sg13g2.lyp
-    dbu: 0.001
-  sky130:
-    description: Imported from KiCad
-    layer_properties: ./sky130.lyp
+    layer_properties: ${GDS_TO_KICAD_ROOT}/pdks/sg13g2.lyp
     dbu: 0.001
 connection_stacks:
   cupillar_opt1:
@@ -56,124 +54,423 @@ connection_stacks:
       material: SAC305
       height: 80.0
       diameter: 80.0
+  vendorx_microbump:
+    description: VendorX fine-pitch microbump (demo, non-IHP) on IHP interposer UBM
+    layers:
+    - name: VendorXBumpCu
+      material: Cu
+      height: 18.0
+      diameter: 40.0
+    - name: VendorXBumpCap
+      material: SnAg
+      height: 6.0
+      diameter: 40.0
 components:
 - id: interposer
   type: interposer
+  anchor: bbox_center
   technology: intm4tm2
-  layout: ./interposer.gds
-  top_cell: TOP
+  layout: layout/interposer_wire_bonding_demo_interposer.gds
+  top_cell: INTERPOSER
   dimensions:
-    width: 172986.089
-    height: 103893.19900000001
-    thickness: 13.83
+    width: 6492.309999999998
+    height: 5602.0
+    thickness: 300.0
   position:
-    x: 0.0
-    y: 0.0
+    x: 3246.154999999999
+    y: 2801.0
     z: 0.0
   io_pads:
-  - id: J1
+  - id: J24
     io_class: wire_bond
-    net: VDD_EXT
+    net: gnd
     position:
-      x: 500.0
-      y: 1000.0
+      x: 2113.915000000008
+      y: 672.7449999999953
     size:
       x: 100.0
       y: 100.0
     layer: TopMetal2
-  - id: J2
+  - id: J25
     io_class: wire_bond
-    net: GND_EXT
+    net: pa_vbb1
     position:
-      x: 1500.0
-      y: 1000.0
+      x: 500.5350000000035
+      y: 2252.220000000001
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J10
+    io_class: wire_bond
+    net: pa_vcc2
+    position:
+      x: 3053.545000000013
+      y: 3420.7550000000047
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J26
+    io_class: wire_bond
+    net: sout
+    position:
+      x: 1961.6900000000023
+      y: 4143.645000000004
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J16
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 500.5350000000035
+      y: 1147.7649999999994
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J33
+    io_class: wire_bond
+    net: pa_vbb3
+    position:
+      x: 500.5350000000035
+      y: 2795.554999999993
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J20
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 500.5350000000035
+      y: 3599.2149999999965
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J28
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 2492.890000000014
+      y: 4125.940000000002
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J29
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 3053.545000000013
+      y: 4807.345000000001
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J21
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 3053.545000000013
+      y: 2602.459999999992
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J35
+    io_class: wire_bond
+    net: pa_vcc5
+    position:
+      x: 3053.545000000013
+      y: 4250.705000000002
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J41
+    io_class: wire_bond
+    net: pa_vcc4
+    position:
+      x: 3053.545000000013
+      y: 3979.154999999999
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J14
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 500.5350000000035
+      y: 4134.475000000006
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J23
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 3053.545000000013
+      y: 4532.2149999999965
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J30
+    io_class: wire_bond
+    net: div_out
+    position:
+      x: 1731.4500000000116
+      y: 666.3699999999953
     size:
       x: 100.0
       y: 100.0
     layer: TopMetal2
   - id: J3
     io_class: wire_bond
-    net: OUT0
+    net: vco_vth
     position:
-      x: 500.0
-      y: 2000.0
+      x: 3051.7449999999953
+      y: 1448.8349999999919
     size:
       x: 100.0
       y: 100.0
     layer: TopMetal2
-  - id: J4
+  - id: J15
     io_class: wire_bond
-    net: OUT1
+    net: gnd
     position:
-      x: 1500.0
-      y: 2000.0
+      x: 3053.545000000013
+      y: 2866.3600000000006
     size:
       x: 100.0
       y: 100.0
     layer: TopMetal2
+  - id: J43
+    io_class: wire_bond
+    net: vcc
+    position:
+      x: 500.5350000000035
+      y: 872.0050000000047
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J36
+    io_class: wire_bond
+    net: ref
+    position:
+      x: 3051.7449999999953
+      y: 1161.9850000000006
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J17
+    io_class: wire_bond
+    net: fq_vcc
+    position:
+      x: 3049.0
+      y: 2328.3199999999924
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J37
+    io_class: wire_bond
+    net: vco_vcm
+    position:
+      x: 3052.149999999994
+      y: 862.3399999999965
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J42
+    io_class: wire_bond
+    net: vcc
+    position:
+      x: 3053.545000000013
+      y: 1755.3399999999965
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J18
+    io_class: wire_bond
+    net: pa_vcc3
+    position:
+      x: 3053.545000000013
+      y: 3707.604999999996
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J32
+    io_class: wire_bond
+    net: pa_vbb2
+    position:
+      x: 500.5350000000035
+      y: 2536.050000000003
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J39
+    io_class: wire_bond
+    net: fd_vcc
+    position:
+      x: 3053.545000000013
+      y: 5085.550000000003
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J2
+    io_class: wire_bond
+    net: pa_vbb5
+    position:
+      x: 500.5350000000035
+      y: 3321.4449999999924
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J31
+    io_class: wire_bond
+    net: fd_vbb
+    position:
+      x: 500.5350000000035
+      y: 3878.100000000006
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J19
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 500.5350000000035
+      y: 1958.645000000004
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J12
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 500.5350000000035
+      y: 1423.9949999999953
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J22
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 1399.5
+      y: 4141.429999999993
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J27
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 3050.8399999999965
+      y: 2046.1199999999953
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J9
+    io_class: wire_bond
+    net: div_vcc
+    position:
+      x: 3053.6900000000023
+      y: 559.5449999999983
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J34
+    io_class: wire_bond
+    net: pa_vcc1
+    position:
+      x: 3053.545000000013
+      y: 3140.975000000006
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J13
+    io_class: wire_bond
+    net: gnd
+    position:
+      x: 500.5350000000035
+      y: 1687.9949999999953
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  - id: J40
+    io_class: wire_bond
+    net: pa_vbb4
+    position:
+      x: 500.5350000000035
+      y: 3060.095000000001
+    size:
+      x: 100.0
+      y: 100.0
+    layer: TopMetal2
+  attachment_surface_z: 10.8103
 - id: U2
   type: die
+  anchor: gds_origin
   technology: sg13g2
-  connection: cupillar_opt2
-  layout: ./FMD_QNC_OTA_TIA.gds
+  connection: vendorx_microbump
+  layout: ${GDS_TO_KICAD_ROOT}/gds_files/for_thermal_eval/Metal_Test/Metal_Test.gds
   orientation: flip_chip
   dimensions:
-    width: 625.87
-    height: 625.87
-    thickness: 0.0
+    width: 778.0
+    height: 2660.0
+    thickness: 750.0
   position:
-    x: 171461.971
-    y: -100372.559
-    z: 61.83
+    x: 5170.233999999997
+    y: 2420.2699999999895
+    z: 34.8103
   rotation:
     z: 0.0
-  top_cell: DiffAmp_NOFILL
+  top_cell: Metal_Test
 - id: U1
   type: die
+  anchor: gds_origin
   technology: sg13g2
-  connection: cupillar_opt2
-  layout: ./Interposer_ANT_CuPi.gds
+  connection: cupillar_opt1
+  layout: ${GDS_TO_KICAD_ROOT}/gds_files/for_thermal_eval/Metal_Test/Metal_Test.gds
   orientation: flip_chip
   dimensions:
-    width: 1560.0
-    height: 3530.172
-    thickness: 0.0
+    width: 778.0
+    height: 2660.0
+    thickness: 750.0
   position:
-    x: 172785.382
-    y: -100482.692
-    z: 61.83
+    x: 1954.1210000000137
+    y: 2332.4820000000036
+    z: 54.8103
   rotation:
     z: 0.0
-  top_cell: Interposer_ANT_CuPi
-- id: U4
-  type: die
-  technology: sg13g2
-  connection: cupillar_opt2
-  layout: ./Interposer_ANT_CuPi.gds
-  orientation: flip_chip
-  dimensions:
-    width: 1560.0
-    height: 3530.172
-    thickness: 0.0
-  position:
-    x: 169882.357
-    y: -100484.023
-    z: 61.83
-  rotation:
-    z: 0.0
-  top_cell: Interposer_ANT_CuPi
-- id: U3
-  type: die
-  technology: sky130
-  layout: ./SystemLevel.gds
-  dimensions:
-    width: 238.485
-    height: 212.035
-    thickness: 0.0
-  position:
-    x: 171721.017
-    y: -99890.459
-    z: 1560.0
-  rotation:
-    z: 0.0
-  top_cell: SystemLevel
+  top_cell: Metal_Test
+interconnect:
+  adapter: vendorx_microbump
+  technology:
+    description: Chiplet attachment (VendorX Microsystems (DEMO / non-IHP))
+    layer_properties: ${INTERCONNECT_PDK_ROOT}/libs.tech/klayout/tech/interconnect.lyp
+    dbu: 0.001

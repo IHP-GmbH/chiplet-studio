@@ -16,7 +16,8 @@ components:
   - id: interposer
     type: interposer
     technology: intm4tm2
-    dimensions: {width: 4000, height: 3000, thickness: 13.83}
+    dimensions: {width: 4000, height: 3000, thickness: 10.8103}
+    attachment_surface_z: 10.8103
     position: {x: 0, y: 0, z: 0}
     io_pads:
       - id: J1

@@ -25,6 +25,7 @@ namespace py = pybind11;
 #include <QFile>
 #include <QDir>
 #include <QFileInfo>
+#include <QStatusBar>
 #include "ui/MainWindow.h"
 #include "ui/CrashRecoveryDialog.h"
 #include "core/CommandFactory.h"
@@ -134,20 +135,8 @@ int main(int argc, char *argv[])
             std::filesystem::create_directories(appDataDir);
         }
 
-        // Check for orphaned journal and offer recovery
-        if (chiplet::CommandJournal::has_orphaned_journal(appDataDir)) {
-            // Create an assembly for potential recovery
-            recoveredAssembly = std::make_unique<chiplet::Assembly>();
-            recoveredAssembly->set_name("Recovered Session");
-
-            auto result = chiplet::CrashRecoveryDialog::check_and_recover(
-                appDataDir, recoveredAssembly.get());
-
-            if (result != chiplet::CrashRecoveryDialog::Result::Recovered) {
-                // User discarded or cancelled - don't use the assembly
-                recoveredAssembly.reset();
-            }
-        }
+        // Never replay a baseline-less command stream into an empty Assembly.
+        recoveredAssembly = chiplet::CrashRecoveryDialog::check_and_recover(appDataDir);
     } catch (const std::exception& e) {
         qWarning("Crash-recovery check skipped: %s", e.what());
         recoveredAssembly.reset();
@@ -156,14 +145,15 @@ int main(int argc, char *argv[])
     chiplet::MainWindow window;
 
     // If we recovered an assembly, set it in the window
-    if (recoveredAssembly) {
+    const bool openedRecovery = static_cast<bool>(recoveredAssembly);
+    if (openedRecovery) {
         window.setRecoveredAssembly(std::move(recoveredAssembly));
     }
 
     window.show();
 
     // Open file passed as command-line argument (e.g., ./chiplet-studio file.chiplet)
-    if (argc > 1) {
+    if (argc > 1 && !openedRecovery) {
         QString filePath = QString::fromLocal8Bit(argv[1]);
         if (QFile::exists(filePath)) {
             // Use a single-shot timer to open after the event loop starts
@@ -176,6 +166,14 @@ int main(int argc, char *argv[])
             // documented argv[1] CLI contract.
             qWarning("Chiplet Studio: file not found: %s", qPrintable(filePath));
         }
+    }
+
+    if (argc > 1 && openedRecovery) {
+        qWarning("Chiplet Studio: the command-line document was not opened over "
+                 "the selected recovery. Use File > Open after reviewing it.");
+        window.statusBar()->showMessage(QObject::tr(
+            "Opened your selected recovery. The command-line document was not opened over it; "
+            "use File > Open when ready."));
     }
 
     const int rc = app.exec();

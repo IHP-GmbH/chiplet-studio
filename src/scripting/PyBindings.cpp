@@ -23,6 +23,7 @@
 #include "core/flow/FlowStep.h"
 #include "core/flow/FlowEngine.h"
 #include "formats/ChipletFormat.h"
+#include "formats/ChipletSynth.h"
 
 namespace py = pybind11;
 using namespace chiplet;
@@ -127,8 +128,10 @@ struct TechnologyHandle {
         if (borrowed && borrowed == g_scriptAssembly) return borrowed;
         throw std::runtime_error("Technology's assembly is no longer valid");
     }
-    Technology& ref() const {
-        Technology* t = assembly()->technology(id);
+    // const: every Python-side Technology property is def_property_readonly,
+    // so the binding never needed a mutable handle to begin with.
+    const Technology& ref() const {
+        const Technology* t = assembly()->technology(id);
         if (!t) {
             throw std::runtime_error("Technology '" + id + "' no longer exists");
         }
@@ -224,6 +227,15 @@ PYBIND11_MODULE(chiplet_studio, m) {
         .def_property_readonly("technology", [](const ComponentHandle& h) { return h.ref().technology(); })
         .def_property_readonly("layout_path", [](const ComponentHandle& h) { return h.ref().layout_path(); })
         .def_property_readonly("top_cell", [](const ComponentHandle& h) { return h.ref().top_cell(); })
+        // Read-only, canonical string, no setter. The cross-reader check
+        // asserts the anchor an import writes through BOTH readers, and without
+        // this the C++ side could not see the field at all while the PyYAML
+        // side could. A string rather than the enum on purpose: the document
+        // carries a string and that is what the other side compares against, so
+        // an enum here would have the two sides asserting different things.
+        .def_property_readonly("anchor", [](const ComponentHandle& h) {
+            return anchor_to_string(h.ref().anchor());
+        })
         .def_property_readonly("position", [](const ComponentHandle& h) { return h.ref().position(); })
         .def_property_readonly("rotation", [](const ComponentHandle& h) { return h.ref().rotation(); })
         .def_property_readonly("dimensions", [](const ComponentHandle& h) { return h.ref().dimensions(); })
@@ -379,12 +391,15 @@ PYBIND11_MODULE(chiplet_studio, m) {
                    std::to_string(a.components().size()) + " components>";
         });
 
-    // InterfaceType enum
+    // InterfaceType enum: this studio's MAPPING of interfaces[].type, which is
+    // not the same thing as the format's vocabulary. A document may legally
+    // declare a type with no member here.
     py::enum_<InterfaceType>(m, "InterfaceType")
         .value("MicroBump", InterfaceType::MicroBump)
         .value("CopperPillar", InterfaceType::CopperPillar)
         .value("TSV", InterfaceType::TSV)
         .value("WireBond", InterfaceType::WireBond)
+        .value("SolderBump", InterfaceType::SolderBump)
         .export_values();
 
     // InterfaceEndpoint struct
@@ -413,12 +428,31 @@ PYBIND11_MODULE(chiplet_studio, m) {
     // returned BY VALUE so a held copy never dangles into a freed Interface)
     py::class_<InterfaceHandle>(m, "Interface")
         .def_property_readonly("id", [](const InterfaceHandle& h) { return h.ref().id(); })
-        .def_property_readonly("type", [](const InterfaceHandle& h) { return h.ref().type(); })
+        // No `type` attribute, on purpose, and this is the Python half of the
+        // same decision the C++ type makes by refusing operator== against the
+        // enum. Binding `type` to std::optional<InterfaceType> would let
+        // `iface.type == InterfaceType.MicroBump` keep working and quietly
+        // answer False for a type this studio does not map, which is the bug
+        // being removed. Making it RAISE instead was considered and rejected:
+        // its trigger is a document that does not exist in the corpus today
+        // (every interface type in the ecosystem is micro_bump, copper_pillar
+        // or wire_bond, all mapped), so the rule would sit unexercised and
+        // break somebody months from now instead of at the moment they write
+        // the line. Removing the name breaks every call site immediately, which
+        // is the property the shape was chosen for. Nothing in the ecosystem
+        // reads this attribute today; measured before removing it.
+        .def_property_readonly("type_name",
+            [](const InterfaceHandle& h) { return h.ref().type().declared(); })
+        .def_property_readonly("mapped_type",
+            [](const InterfaceHandle& h) { return h.ref().type().mapped(); })
         .def_property_readonly("from_endpoint", [](const InterfaceHandle& h) { return h.ref().from(); })
         .def_property_readonly("to_endpoint", [](const InterfaceHandle& h) { return h.ref().to(); })
         .def_property_readonly("physical", [](const InterfaceHandle& h) { return h.ref().physical(); })
         .def("__repr__", [](const InterfaceHandle& h) {
-            return "<Interface '" + h.ref().id() + "'>";
+            // The declared string, so a repr of an unmapped interface is
+            // informative rather than a hole.
+            return "<Interface '" + h.ref().id() + "' type='" +
+                   h.ref().type().declared() + "'>";
         });
 
     // StepStatus enum
@@ -514,6 +548,70 @@ PYBIND11_MODULE(chiplet_studio, m) {
         ChipletFormat format;
         format.save(h.ref(), path);
     }, py::arg("assembly"), py::arg("path"), "Save an assembly to a .chiplet file");
+
+    // GDS import, bound so that the cross-reader check can drive the REAL
+    // producer rather than something shaped like its output.
+    //
+    // Why it is exposed at all. tests/cross_reader_check.py is the only place in
+    // this repository that reads a written .chiplet with a YAML implementation
+    // other than the writer's own. Until this binding existed it could only read
+    // a document it had itself loaded and re-saved, which establishes agreement
+    // about a document RESEMBLING an import, not about what an import writes.
+    // The alternatives were worse: a byte-pinned golden splits one claim across
+    // two independently schedulable ctest entries, only one of which
+    // (chiplet_cross_reader) is pinned in ci/gate_required_tests.txt, and it
+    // asserts text where the proposition is about what a reader resolves the
+    // text to.
+    //
+    // Second caller, and the one that keeps this signature honest:
+    // src/ui/MainWindow.cpp:704.
+    //
+    // No py::arg default on any spec field, deliberately. thicknessUm defaults
+    // to 200.0 in ChipletSynth.h; repeating that here would pin the BINDING's
+    // number, so a later change to the spec or to the import dialog would leave
+    // the check green on a value nothing produces any more. py::init<> means
+    // every default comes from the C++ default constructor.
+    py::class_<SingleGdsImportSpec>(m, "SingleGdsImportSpec")
+        .def(py::init<>())
+        .def_readwrite("gds_path", &SingleGdsImportSpec::gdsPath)
+        .def_readwrite("top_cell", &SingleGdsImportSpec::topCell)
+        .def_readwrite("width_um", &SingleGdsImportSpec::widthUm)
+        .def_readwrite("height_um", &SingleGdsImportSpec::heightUm)
+        .def_readwrite("thickness_um", &SingleGdsImportSpec::thicknessUm)
+        .def_readwrite("tech_id", &SingleGdsImportSpec::techId)
+        .def_readwrite("custom_lyp", &SingleGdsImportSpec::customLyp)
+        .def_readwrite("custom_stackup", &SingleGdsImportSpec::customStackup)
+        .def_readwrite("assembly_name", &SingleGdsImportSpec::assemblyName)
+        .def_readwrite("component_id", &SingleGdsImportSpec::componentId);
+
+    py::class_<ImportWriteResult> importWriteResult(m, "ImportWriteResult");
+    py::enum_<ImportWriteResult::Outcome>(importWriteResult, "Outcome")
+        .value("Written", ImportWriteResult::Outcome::Written)
+        .value("WrittenToFallback", ImportWriteResult::Outcome::WrittenToFallback)
+        .value("Refused", ImportWriteResult::Outcome::Refused)
+        .value("Cancelled", ImportWriteResult::Outcome::Cancelled)
+        .value("Failed", ImportWriteResult::Outcome::Failed);
+    importWriteResult
+        .def_readonly("outcome", &ImportWriteResult::outcome)
+        .def_readonly("path", &ImportWriteResult::path)
+        .def_readonly("message", &ImportWriteResult::message)
+        .def("__repr__", [](const ImportWriteResult& r) {
+            return "<ImportWriteResult " + r.path + ">";
+        });
+
+    // The outcome is part of the return value and not folded into an exception,
+    // because a caller has to be able to tell Written from WrittenToFallback:
+    // both carry a path, and only one of them is the path that was asked for.
+    m.def("write_single_gds_import",
+          [](const SingleGdsImportSpec& spec, const std::string& path) {
+              // chooseAnotherName is left unset on purpose. An occupied
+              // destination cancels rather than landing the document somewhere
+              // the caller never named.
+              return writeSingleGdsImport(spec, path, {});
+          },
+          py::arg("spec"), py::arg("path"),
+          "Write a single-GDS import to `path`. The destination must be fresh; "
+          "an occupied one cancels.");
 
     // Get the current assembly from the embedded GUI context.
     // Returns a borrowed handle: it stays valid only while it still matches the

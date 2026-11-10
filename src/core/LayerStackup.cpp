@@ -6,18 +6,20 @@
  */
 
 #include "LayerStackup.h"
+#include "Component.h"
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
+#include <utility>
 #include <yaml-cpp/yaml.h>
 #include <QtGlobal>
 
 namespace chiplet {
 
 void LayerStackup::addLayer(int layer, int datatype, double z_bottom, double thickness,
-                            const std::string& name)
+                            const std::string& name, const std::string& purpose)
 {
     LayerElevation elev;
     elev.layer = layer;
@@ -26,6 +28,7 @@ void LayerStackup::addLayer(int layer, int datatype, double z_bottom, double thi
     elev.thickness = thickness;
     elev.name = name;
     elev.visible = true;
+    elev.purpose = purpose;
 
     m_layers[elev.key()] = elev;
 }
@@ -52,6 +55,15 @@ const LayerElevation* LayerStackup::findByLayer(int layer) const
         }
     }
     return nullptr;
+}
+
+const LayerElevation* LayerStackup::heightFor(const LayerKey& key, bool* borrowed) const
+{
+    const LayerElevation* elev = find(key);
+    if (borrowed) {
+        *borrowed = !elev;
+    }
+    return elev ? elev : findByLayer(key.layer);
 }
 
 std::vector<LayerElevation> LayerStackup::sortedLayers() const
@@ -131,8 +143,9 @@ bool LayerStackup::loadFromYAML(const std::string& path)
             double z_bottom = layer_node["z_bottom"].as<double>(0.0);
             double thickness = layer_node["thickness"].as<double>(1.0);
             std::string name = layer_node["name"].as<std::string>("");
+            std::string purpose = layer_node["purpose"].as<std::string>("");
 
-            addLayer(layer, datatype, z_bottom, thickness, name);
+            addLayer(layer, datatype, z_bottom, thickness, name, purpose);
         }
 
         return true;
@@ -175,8 +188,9 @@ bool LayerStackup::loadFromBlenderGDS(const std::string& path)
             int type = node["type"].as<int>(0);
             double z = node["z"].as<double>(0.0);
             double height = node["height"].as<double>(1.0);
+            std::string purpose = node["purpose"].as<std::string>("");
 
-            parsed.addLayer(index, type, z, height, name);
+            parsed.addLayer(index, type, z, height, name, purpose);
         }
 
         if (parsed.empty()) {
@@ -224,6 +238,24 @@ std::vector<std::string> LayerStackup::resolveInterconnectKeys(
     }
     if (keys.empty() && !adapter.empty() &&
         !BlenderGDSConfigs::interconnectStackupFragmentPath(adapter).empty()) {
+        // Legacy fallback. The adapter is the DRC/parameter axis, not the
+        // geometry axis, so the fragment it names is only a default: it is
+        // whatever stack the adapter's PDK ships, and the dies in this
+        // assembly may use something else entirely (ihp_cupillar ships
+        // Option 1, so an assembly of Option 3 stacks would be drawn and
+        // seated ~17 um short). Say so once per key: rendering the wrong
+        // stack silently is a false sign-off, and this is a sign-off tool.
+        static std::set<std::string> warned;
+        if (warned.insert(adapter).second) {
+            qWarning("[chiplet] interconnect geometry: no per-die connection "
+                     "id resolved to a stackup fragment, falling back to the "
+                     "assembly adapter '%s'. The bump geometry shown is that "
+                     "adapter's DEFAULT stack, not one derived from the dies; "
+                     "it may not match the real stack. Give each die a "
+                     "connection: id that is a method of the interconnect PDK "
+                     "manifest to render its actual geometry.",
+                     adapter.c_str());
+        }
         keys.push_back(adapter);
     }
     return keys;
@@ -288,7 +320,7 @@ LayerStackup LayerStackup::loadInterconnectFragments(
         (void)key;
         result.addLayer(entry.first.layer, entry.first.datatype,
                         entry.first.z_bottom, entry.first.thickness,
-                        entry.first.name);
+                        entry.first.name, entry.first.purpose);
     }
     // The union's reference frame is meaningful only when all sources agree.
     if (!first && refAgrees) {
@@ -297,57 +329,41 @@ LayerStackup LayerStackup::loadInterconnectFragments(
     return result;
 }
 
-double LayerStackup::interconnectFragmentOffset(const LayerStackup& frag,
-                                                const std::string& path) const
-{
-    if (frag.zReference() == "attachment_surface") {
-        if (m_hasAttachmentSurfaceZ) {
-            return m_attachmentSurfaceZ;
-        }
-        const double best = totalHeight();
-        qWarning("Interconnect fragment %s is relative to the attachment "
-                 "surface, but the base stackup does not declare "
-                 "attachment_surface_z; using totalHeight()=%.2f um as a "
-                 "best-effort surface (die seating may be approximate)",
-                 path.c_str(), best);
-        return best;
-    }
-    if (!frag.zReference().empty()) {
-        qWarning("Interconnect fragment %s declares unknown z_reference "
-                 "'%s'; treating its z values as absolute",
-                 path.c_str(), frag.zReference().c_str());
-        return 0.0;
-    }
-    qWarning("Interconnect fragment %s carries absolute z values "
-             "(deprecated: couples the method to one interposer's BEOL "
-             "height). Add 'z_reference: attachment_surface' and rebase "
-             "z to 0 so the method seats on any interposer",
-             path.c_str());
-    return 0.0;
-}
-
 size_t LayerStackup::mergeInterconnectFragment(const std::string& key)
 {
     return mergeInterconnectFragments({key});
 }
 
 size_t LayerStackup::mergeInterconnectFragments(
-    const std::vector<std::string>& keys)
+    const std::vector<std::string>& keys, std::vector<std::string>* leftOut)
 {
     std::map<LayerKey, std::pair<LayerElevation, std::string>> staging;
     for (const auto& k : keys) {
         std::string path;
         LayerStackup frag = loadInterconnectFragment(k, &path);
         if (frag.empty()) continue;
-        stageFragmentLayers(staging, frag,
-                            interconnectFragmentOffset(frag, path), k);
+        if (frag.zReference() != "attachment_surface") {
+            qWarning("Interconnect fragment %s gives absolute heights (z_reference "
+                     "'%s'), which carry one interposer's plane; left out. Add "
+                     "'z_reference: attachment_surface' and rebase z to 0.",
+                     path.c_str(), frag.zReference().c_str());
+            if (leftOut) leftOut->push_back(k);
+            continue;
+        }
+        if (!m_hasAttachmentSurfaceZ) {
+            qWarning("Interconnect fragment %s is relative to the attachment "
+                     "surface, but no plane was set; left out.", path.c_str());
+            if (leftOut) leftOut->push_back(k);
+            continue;
+        }
+        stageFragmentLayers(staging, frag, m_attachmentSurfaceZ, k);
     }
     size_t merged = 0;
     for (const auto& [key, entry] : staging) {
         (void)key;
         addLayer(entry.first.layer, entry.first.datatype,
                  entry.first.z_bottom, entry.first.thickness,
-                 entry.first.name);
+                 entry.first.name, entry.first.purpose);
         ++merged;
     }
     return merged;
@@ -428,81 +444,89 @@ static std::string getConfigsDir()
 #endif
 }
 
+namespace {
+
+// The technologies Studio ships data for, by exact id. Case matters and no
+// substring matches: an id that is not a row resolves to nothing, and the
+// caller says so, instead of drawing another technology's stack. Two spellings
+// of a die PDK are rows of their own; gf180 is the id the Import GDS dialog
+// wrote before it named gf180mcu, kept so those files still resolve.
+struct KnownTechnology {
+    const char* id;
+    const char* stackup;  // under configs/stackups/
+    const char* lyp;      // under pdks/, or nullptr when none is bundled
+    ComponentType role;
+};
+
+constexpr KnownTechnology kKnownTechnologies[] = {
+    {"sg13g2", "ihp-sg13g2.yaml", "ihp-sg13g2/sg13g2.lyp", ComponentType::Die},
+    {"ihp-sg13g2", "ihp-sg13g2.yaml", "ihp-sg13g2/sg13g2.lyp", ComponentType::Die},
+    {"sg13cmos5l", "ihp-sg13cmos5l.yaml", nullptr, ComponentType::Die},
+    {"ihp-sg13cmos5l", "ihp-sg13cmos5l.yaml", nullptr, ComponentType::Die},
+    {"sky130", "sky130.yaml", "sky130/sky130.lyp", ComponentType::Die},
+    {"gf180mcu", "gf180mcu.yaml", nullptr, ComponentType::Die},
+    {"gf180", "gf180mcu.yaml", nullptr, ComponentType::Die},
+    {"intm4tm2", "intm4tm2.yaml", "interposer/interposer.lyp", ComponentType::Interposer},
+};
+
+const KnownTechnology* knownTechnology(const std::string& techId)
+{
+    for (const auto& row : kKnownTechnologies) {
+        if (techId == row.id) return &row;
+    }
+    return nullptr;
+}
+
+} // anonymous namespace
+
+bool isKnownTechnology(const std::string& techId)
+{
+    return knownTechnology(techId) != nullptr;
+}
+
 std::string stackupPath(const std::string& techId)
 {
+    const KnownTechnology* row = knownTechnology(techId);
+    if (!row) return "";
     std::string base = getConfigsDir();
     if (base.empty()) return "";
-
-    std::string stackupDir = base + "/stackups/";
-
-    // Map techId patterns to YAML files
-    std::string lower = techId;
-    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    if (lower.find("sg13g2") != std::string::npos) {
-        return stackupDir + "ihp-sg13g2.yaml";
-    }
-    if (lower.find("sg13cmos5l") != std::string::npos ||
-        lower.find("sg13cmos") != std::string::npos) {
-        return stackupDir + "ihp-sg13cmos5l.yaml";
-    }
-    if (lower.find("sky130") != std::string::npos) {
-        return stackupDir + "sky130.yaml";
-    }
-    if (lower.find("gf180") != std::string::npos) {
-        return stackupDir + "gf180mcu.yaml";
-    }
-    // IHP 130-nm IntM4TM2 aluminum BEOL interposer. The plain product id
-    // is the only spelling; there are no legacy aliases.
-    if (lower.find("intm4tm2") != std::string::npos) {
-        return stackupDir + "intm4tm2.yaml";
-    }
-
-    // Also try direct match: if techId itself contains a known PDK name
-    if (lower.find("ihp") != std::string::npos) {
-        return stackupDir + "ihp-sg13g2.yaml";
-    }
-
-    return "";
+    return base + "/stackups/" + row->stackup;
 }
 
 std::string pdkLayerPropertiesPath(const std::string& techId)
 {
+    const KnownTechnology* row = knownTechnology(techId);
+    if (!row || !row->lyp) return "";
     std::string base = getConfigsDir();
     if (base.empty()) return "";
-
-    std::string lower = techId;
-    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    // techId -> bundled pdks/<dir>/<file>.lyp (only the PDKs that ship one).
-    std::string rel;
-    if (lower.find("sg13g2") != std::string::npos) {
-        rel = "ihp-sg13g2/sg13g2.lyp";
-    } else if (lower.find("sky130") != std::string::npos) {
-        rel = "sky130/sky130.lyp";
-    } else if (lower.find("intm4tm2") != std::string::npos) {
-        rel = "interposer/interposer.lyp";
-    } else {
-        return "";  // sg13cmos5l, gf180: no bundled .lyp
-    }
 
     namespace fs = std::filesystem;
     std::error_code ec;
     // pdks/ is a sibling of the configs dir in both the dev tree and the
     // installed share/chiplet-studio layout.
-    fs::path cand = fs::path(base).parent_path() / "pdks" / rel;
+    fs::path cand = fs::path(base).parent_path() / "pdks" / row->lyp;
     if (fs::exists(cand, ec)) {
         return cand.string();
     }
     return "";
 }
 
-std::string interconnectStackupFragmentPath(const std::string& adapter)
+ComponentType importedComponentType(const std::string& techId)
 {
-    if (adapter.empty()) return "";
+    // An id no row names imports as a Die, an empty (custom) one included.
+    const KnownTechnology* row = knownTechnology(techId);
+    return row ? row->role : ComponentType::Die;
+}
+
+std::string interconnectStackupFragmentPath(const std::string& key)
+{
+    if (key.empty()) return "";
 
     namespace fs = std::filesystem;
-    const std::string fragName = adapter + ".stackup.yaml";
+    // NOTE: `key` is normally a per-die connection METHOD id (cupillar_opt3),
+    // not an adapter id. See the header for why this parameter is no longer
+    // called `adapter`.
+    const std::string fragName = key + ".stackup.yaml";
     // IHP PDK layout: the fragments live under libs.tech/<tool>/ of the
     // interconnect PDK, keyed by the consuming tool (chiplet_studio).
     auto fragmentUnder = [&fragName](const fs::path& pdkRoot) {
@@ -559,14 +583,16 @@ LayerStackup createInterposer()
 
     // IHP 130-nm IntM4TM2 aluminum BEOL interposer stackup - top metal layers
     // used for RDL routing. Layer numbers match the GDS layers actually present
-    // in interposer designs; heights from the SG13G2 process (um).
-    stackup.addLayer(50, 0, 3.2, 0.5, "Metal4");
-    stackup.addLayer(66, 0, 3.7, 0.5, "Via4");
-    stackup.addLayer(67, 0, 4.2, 0.8, "Metal5");
-    stackup.addLayer(125, 0, 5.0, 0.6, "TopVia1");
-    stackup.addLayer(126, 0, 5.6, 2.0, "TopMetal1");
-    stackup.addLayer(133, 0, 7.6, 1.0, "TopVia2");
-    stackup.addLayer(134, 0, 8.6, 3.0, "TopMetal2");
+    // in interposer designs. Every z and height is the interposer PDK's stack
+    // key (um, z = 0 at the substrate top), as in the bundled intm4tm2.yaml, so
+    // this last resort draws in the same frame and its top is the key's plane.
+    stackup.addLayer(50, 0, 0.64, 0.49, "Metal4");
+    stackup.addLayer(66, 0, 1.13, 0.54, "Via4");
+    stackup.addLayer(67, 0, 1.67, 0.49, "Metal5");
+    stackup.addLayer(125, 0, 2.16, 0.8503, "TopVia1");
+    stackup.addLayer(126, 0, 3.0103, 2.0, "TopMetal1");
+    stackup.addLayer(133, 0, 5.0103, 2.8, "TopVia2");
+    stackup.addLayer(134, 0, 7.8103, 3.0, "TopMetal2");
 
     return stackup;
 }

@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2026 aesc silicon
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# Vendored from aesc-silicon/BlenderGDS, import_gdsii/configs/ihp-sg13cmos5l.yaml at
+# commit a984b4518d1ce6f9fa61fb3c5d903197454018be.
+# Changed here: added the Substrate entry and its comment.
 
 # Si bulk visualized at 50 um -- aesthetic, NOT physically accurate.
 # IHP SG13 wafer is 750 um (sg13cmos5l shares the sg13g2 process). We

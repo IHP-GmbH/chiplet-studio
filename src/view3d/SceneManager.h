@@ -11,7 +11,18 @@
 #include "Camera.h"
 #include "math/Maths.h"
 
+#include <QMatrix4x4>
+#include <QVector3D>
+
 namespace chiplet {
+
+// The scene's light as the shaders take it. They light a face in view space,
+// so a light fixed in the scene is turned by the view's rotation. mapVector
+// leaves out the view's translation, which would make the direction a point.
+inline QVector3D lightInView(const QMatrix4x4& view, const QVector3D& light)
+{
+    return view.mapVector(light).normalized();
+}
 
 /**
  * SceneManager orchestrates the 3D scene: camera, lighting, and object picking.
@@ -25,7 +36,8 @@ public:
     Camera& camera() { return m_camera; }
     const Camera& camera() const { return m_camera; }
 
-    // Lighting (fixed direction set at construction)
+    // The light, fixed in the scene: a direction in world space, from above,
+    // set at construction. The shaders take it through lightInView.
     VECTOR3D lightDirection() const { return m_lightDirection; }
 
     // Scene bounds
@@ -41,7 +53,7 @@ public:
     Ray screenToRay(int screenX, int screenY, int viewportWidth, int viewportHeight) const;
 
     // Fit camera to scene
-    void fitToScene();
+    void fitToScene(float aspectRatio = 1.0f);
 
 private:
     Camera m_camera;

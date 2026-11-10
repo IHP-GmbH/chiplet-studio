@@ -3,8 +3,11 @@
  */
 
 #include <gtest/gtest.h>
+#include <QTemporaryDir>
 #include "core/LayerStackup.h"
 #include <cstdlib>
+#include <string>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 
@@ -115,7 +118,7 @@ TEST(BlenderGDSConfigs, ResolveStackupPath) {
     EXPECT_FALSE(path.empty());
     EXPECT_NE(path.find("gf180mcu.yaml"), std::string::npos);
 
-    path = BlenderGDSConfigs::stackupPath("IHP_SG13G2");
+    path = BlenderGDSConfigs::stackupPath("ihp-sg13g2");
     EXPECT_FALSE(path.empty());
     EXPECT_NE(path.find("ihp-sg13g2.yaml"), std::string::npos);
 }
@@ -138,12 +141,10 @@ namespace {
 
 // Lays out a fake interconnect PDK with relative ("unit_rel") and legacy
 // absolute ("unit_abs") fragments, plus same-key option variants for the
-// union-conflict tests, returning the tree root.
-std::filesystem::path makeFragmentTree() {
-    namespace fs = std::filesystem;
-    const fs::path root = fs::temp_directory_path() / "chiplet_lsu_frag_merge";
-    fs::remove_all(root);
-    const fs::path frags =
+// union-conflict tests, within a test-owned QTemporaryDir. Each CTest process
+// receives a distinct tree; no test deletes another process's fixture.
+std::filesystem::path makeFragmentTree(const std::filesystem::path& root) {
+    const std::filesystem::path frags =
         root / "libs.tech" / "chiplet_studio" / "stackup_fragments";
     writeYaml(frags / "unit_rel.stackup.yaml",
               "z_reference: attachment_surface\n"
@@ -170,21 +171,22 @@ std::filesystem::path makeFragmentTree() {
 
 TEST(BlenderGDSStackupMetadata, ParsesScalarKeysAndClearResetsThem) {
     namespace fs = std::filesystem;
-    const fs::path dir = fs::temp_directory_path() / "chiplet_lsu_meta";
-    fs::remove_all(dir);
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const fs::path dir = temporary.path().toStdString();
 
     writeYaml(dir / "with_meta.yaml",
               "z_reference: attachment_surface\n"
-              "attachment_surface_z: 13.83\n"
-              "Pad:\n  index: 134\n  type: 0\n  z: 10.83\n  height: 3.0\n");
+              "attachment_surface_z: 10.8103\n"
+              "Pad:\n  index: 134\n  type: 0\n  z: 7.8103\n  height: 3.0\n");
     writeYaml(dir / "plain.yaml",
-              "Pad:\n  index: 134\n  type: 0\n  z: 10.83\n  height: 3.0\n");
+              "Pad:\n  index: 134\n  type: 0\n  z: 7.8103\n  height: 3.0\n");
 
     LayerStackup s;
     ASSERT_TRUE(s.loadFromBlenderGDS((dir / "with_meta.yaml").string()));
     EXPECT_EQ(s.zReference(), "attachment_surface");
     ASSERT_TRUE(s.hasAttachmentSurfaceZ());
-    EXPECT_NEAR(s.attachmentSurfaceZ(), 13.83, 1e-9);
+    EXPECT_DOUBLE_EQ(s.attachmentSurfaceZ(), 10.8103);
     // The scalar keys must not leak into the layer map.
     EXPECT_EQ(s.layerCount(), 1u);
 
@@ -195,7 +197,9 @@ TEST(BlenderGDSStackupMetadata, ParsesScalarKeysAndClearResetsThem) {
 }
 
 TEST(InterconnectFragmentMerge, RelativeFragmentOffsetByDeclaredSurface) {
-    const auto root = makeFragmentTree();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
     // Declared surface (4.0) deliberately differs from totalHeight() (5.0):
@@ -204,7 +208,7 @@ TEST(InterconnectFragmentMerge, RelativeFragmentOffsetByDeclaredSurface) {
     {
         namespace fs = std::filesystem;
         const fs::path baseYaml =
-            fs::temp_directory_path() / "chiplet_lsu_frag_merge" / "base.yaml";
+            root / "base.yaml";
         writeYaml(baseYaml,
                   "attachment_surface_z: 4.0\n"
                   "Pad:\n  index: 134\n  type: 0\n  z: 2.0\n  height: 3.0\n");
@@ -220,50 +224,55 @@ TEST(InterconnectFragmentMerge, RelativeFragmentOffsetByDeclaredSurface) {
     unsetenv("INTERCONNECT_PDK_ROOT");
 }
 
-TEST(InterconnectFragmentMerge, RelativeFragmentFallsBackToTotalHeight) {
-    const auto root = makeFragmentTree();
+TEST(InterconnectFragmentMerge, RelativeFragmentWithNoPlaneIsLeftOut) {
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
-    // No attachment_surface_z declared: best-effort totalHeight() = 5.0
-    // (warned about), instead of seating the body at z = 0.
+    // No plane: nothing to offset by. The stack's height (5.0) is not one.
     LayerStackup base;
     base.addLayer(134, 0, 2.0, 3.0, "Pad");
 
-    EXPECT_EQ(base.mergeInterconnectFragment("unit_rel"), 1u);
-    const LayerElevation* body = base.find(500, 35);
-    ASSERT_NE(body, nullptr);
-    EXPECT_NEAR(body->z_bottom, 5.0, 1e-9);
+    std::vector<std::string> leftOut;
+    EXPECT_EQ(base.mergeInterconnectFragments({"unit_rel"}, &leftOut), 0u);
+    EXPECT_EQ(leftOut, std::vector<std::string>{"unit_rel"});
+    EXPECT_EQ(base.find(500, 35), nullptr);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
 }
 
-TEST(InterconnectFragmentMerge, LegacyAbsoluteFragmentIgnoresDeclaredSurface) {
-    const auto root = makeFragmentTree();
+TEST(InterconnectFragmentMerge, AbsoluteFragmentIsLeftOut) {
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
-    // Even with a declared surface, a markerless fragment keeps its
-    // absolute z (deprecation path).
+    // A markerless fragment bakes its own plane (7.5 here), which never
+    // stands in for the declared one: it is left out, declared surface or not.
     LayerStackup base;
     {
         namespace fs = std::filesystem;
         const fs::path baseYaml =
-            fs::temp_directory_path() / "chiplet_lsu_frag_merge" / "base_abs.yaml";
+            root / "base_abs.yaml";
         writeYaml(baseYaml,
                   "attachment_surface_z: 4.0\n"
                   "Pad:\n  index: 134\n  type: 0\n  z: 2.0\n  height: 3.0\n");
         ASSERT_TRUE(base.loadFromBlenderGDS(baseYaml.string()));
     }
 
-    EXPECT_EQ(base.mergeInterconnectFragment("unit_abs"), 1u);
-    const LayerElevation* body = base.find(500, 35);
-    ASSERT_NE(body, nullptr);
-    EXPECT_NEAR(body->z_bottom, 7.5, 1e-9);
+    std::vector<std::string> leftOut;
+    EXPECT_EQ(base.mergeInterconnectFragments({"unit_abs"}, &leftOut), 0u);
+    EXPECT_EQ(leftOut, std::vector<std::string>{"unit_abs"});
+    EXPECT_EQ(base.find(500, 35), nullptr);
 
     unsetenv("INTERCONNECT_PDK_ROOT");
 }
 
 TEST(InterconnectFragmentMerge, UnresolvableAdapterMergesNothing) {
-    const auto root = makeFragmentTree();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
     LayerStackup base;
@@ -280,7 +289,9 @@ TEST(InterconnectFragmentMerge, UnresolvableAdapterMergesNothing) {
 // adapter only when none resolves; non-resolving ids drop silently
 // (connection stack ids are not required to be method ids).
 TEST(InterconnectFragmentMerge, ResolveKeysMethodsWinOverAdapter) {
-    const auto root = makeFragmentTree();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
     auto keys = LayerStackup::resolveInterconnectKeys({"unit_rel"}, "unit_abs");
@@ -311,14 +322,16 @@ TEST(InterconnectFragmentMerge, ResolveKeysMethodsWinOverAdapter) {
 // (per-layer render can only show one height per key); disjoint vendor
 // keys merge side by side.
 TEST(InterconnectFragmentMerge, UnionConflictTallerBodyWins) {
-    const auto root = makeFragmentTree();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
     LayerStackup base;
     {
         namespace fs = std::filesystem;
         const fs::path baseYaml =
-            fs::temp_directory_path() / "chiplet_lsu_frag_merge" / "base_union.yaml";
+            root / "base_union.yaml";
         writeYaml(baseYaml,
                   "attachment_surface_z: 4.0\n"
                   "Pad:\n  index: 134\n  type: 0\n  z: 2.0\n  height: 3.0\n");
@@ -349,7 +362,9 @@ TEST(InterconnectFragmentMerge, UnionConflictTallerBodyWins) {
 // Raw union (UI path): no offsets, common z_reference preserved when the
 // sources agree.
 TEST(InterconnectFragmentMerge, RawUnionKeepsDeclaredFrame) {
-    const auto root = makeFragmentTree();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
     LayerStackup u = LayerStackup::loadInterconnectFragments(
@@ -368,7 +383,9 @@ TEST(InterconnectFragmentMerge, RawUnionKeepsDeclaredFrame) {
 }
 
 TEST(InterconnectFragmentMerge, RawLoaderKeepsDeclaredZAndReportsPath) {
-    const auto root = makeFragmentTree();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = makeFragmentTree(temporary.path().toStdString());
     setenv("INTERCONNECT_PDK_ROOT", root.string().c_str(), 1);
 
     std::string path;

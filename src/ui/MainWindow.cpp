@@ -14,7 +14,12 @@
 #include "NetGraphPanel.h"
 #include "CellSelectionDialog.h"
 #include "ImportGdsDialog.h"
+#include "CrashRecoveryDialog.h"
 #include "ExportPngDialog.h"
+#include "ViewingNotesBar.h"
+#include "ShortcutPolicy.h"
+#include "DockWidthPolicy.h"
+#include "PanelWiring.h"
 #include "view2d/KLayout2DView.h"
 #include "view2d/CellComponentMapper.h"
 #include "view3d/AssemblyView.h"
@@ -23,8 +28,12 @@
 #include "view3d/GDSLayerExtractor.h"
 #include "formats/ChipletFormat.h"
 #include "formats/ChipletSynth.h"
+
+#include <optional>
 #include "core/Technology.h"
 #include "core/LayerStackup.h"
+#include "core/TechResolve.h"
+#include "view2d/AssemblySheet.h"
 #include "core/commands/CmdMoveComponent.h"
 #include "core/commands/CmdSetRenderMode.h"
 #include "scripting/ScriptEngine.h"
@@ -33,7 +42,10 @@
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
+#include <QActionGroup>
 #include <QDockWidget>
+#include <QAbstractButton>
+#include <QPushButton>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QToolBar>
@@ -41,21 +53,26 @@
 #include <QLabel>
 #include <QDoubleSpinBox>
 #include <QSignalBlocker>
+#include <QVBoxLayout>
 #include <QProgressDialog>
 #include <QTimer>
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QDir>
 #include <QFileInfo>
-#include <QSaveFile>
 #include <QUuid>
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
 #include <QScreen>
 #include <QImage>
 #include <QEvent>
+#include <QCloseEvent>
+#include <QElapsedTimer>
+#include <QtCore/qscopeguard.h>
 
 namespace chiplet {
+
+
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -98,6 +115,19 @@ void MainWindow::setupMenus()
     QAction* saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, &MainWindow::onFileSave);
+
+    QAction* saveAsAction = fileMenu->addAction("Save &As...");
+    // SaveAs is the one standard key the generic theme left unbound in the
+    // rehearsal image: the menu showed a blank accelerator and Ctrl+Shift+S did
+    // nothing, while New/Open/Save/Refresh/Quit all resolved. Fall back only
+    // when the platform gave us nothing.
+    saveAsAction->setShortcuts(
+        shortcutsOrFallback(QKeySequence::keyBindings(QKeySequence::SaveAs),
+                            QStringLiteral("Ctrl+Shift+S")));
+    connect(saveAsAction, &QAction::triggered, this, &MainWindow::onFileSaveAs);
+
+    QAction* recoveryAction = fileMenu->addAction("Recovery &Checkpoints...");
+    connect(recoveryAction, &QAction::triggered, this, &MainWindow::onFileRecovery);
 
     fileMenu->addSeparator();
 
@@ -213,9 +243,33 @@ void MainWindow::setupPanels()
         viewMenu->addAction(toggleProperties);
     }
 
-    // Central 3D view widget
+    // Central 3D view widget, under the notes strip that speaks for both views
     m_assemblyView = new AssemblyView(this);
-    setCentralWidget(m_assemblyView);
+    {
+        auto* central = new QWidget(this);
+        auto* centralLayout = new QVBoxLayout(central);
+        centralLayout->setContentsMargins(0, 0, 0, 0);
+        centralLayout->setSpacing(0);
+        m_viewingNotesBar = new ViewingNotesBar(central);
+        centralLayout->addWidget(m_viewingNotesBar);
+        centralLayout->addWidget(m_assemblyView, 1);
+        setCentralWidget(central);
+    }
+    connect(m_assemblyView, &AssemblyView::notesChanged,
+            this, &MainWindow::refreshViewingNotes);
+    connect(m_assemblyView, &AssemblyView::layerRowsChanged, this, [this]() {
+        if (m_propertiesPanel) m_propertiesPanel->refreshLayerRows();
+    });
+    // A 2D load starts with fill hidden; if the switch is on, follow it. The
+    // panel repopulates its list on the same signal, connected earlier.
+    connect(m_klayout2DView, &KLayout2DView::notesChanged,
+            this, &MainWindow::refreshViewingNotes);
+    connect(m_klayout2DView, &KLayout2DView::layoutChanged, this, [this](bool) {
+        if (m_showFillAction && m_showFillAction->isChecked() && m_drillDownPanel) {
+            m_drillDownPanel->setFillVisible(true);
+        }
+        refreshViewingNotes();
+    });
 
     // 3D top-down mini-map / navigator: a corner overlay child of the view so it
     // composites on top of the QOpenGLWidget. MainWindow keeps it pinned to the
@@ -280,6 +334,8 @@ void MainWindow::setupPanels()
             this, [this](const QString& componentId) {
                 m_propertiesPanel->setComponent(componentId.toStdString(), m_assembly.get());
             });
+    connectPropertiesRequest(m_hierarchyPanel, m_propertiesPanel, m_propertiesDock,
+                             [this]() { return m_assembly.get(); });
 
     // Hierarchy interconnect row -> Properties panel (assembly-level bumping
     // method; clears the 3D component highlight, nothing to highlight for it)
@@ -416,7 +472,8 @@ void MainWindow::setupPanels()
             std::vector<PropertiesPanel::RenderedLayerInfo> out;
             if (!m_assemblyView) return out;
             for (const auto& e : m_assemblyView->componentLayers(componentId)) {
-                out.push_back({e.layer, e.datatype, e.name});
+                out.push_back({e.layer, e.datatype, e.name, e.fill,
+                               e.count, e.countNote, e.meshed});
             }
             return out;
         });
@@ -439,18 +496,34 @@ void MainWindow::setupPanels()
                 if (oldMode == newMode) {
                     return;
                 }
+                // The views follow through connectRenderModeSync, as they do
+                // on undo and redo.
                 auto cmd = std::make_unique<CmdSetRenderMode>(
                     componentId.toStdString(), oldMode, newMode);
                 m_commandProcessor->execute(std::move(cmd));
-                m_assemblyView->onComponentRenderModeChanged(componentId, newMode);
-                if (m_hierarchyPanel) {
-                    m_hierarchyPanel->updateRenderModeDisplay(componentId);
-                }
             });
 }
 
-void MainWindow::detachAssemblyFromViews()
+bool MainWindow::detachAssemblyFromViews()
 {
+    // Keep the outgoing document's last full state under its own identity.
+    // Opening/New never adopts or overwrites a different recovery checkpoint.
+    const bool checkpointed = checkpointRecovery();
+    if (!checkpointed && QMessageBox::question(
+            this, tr("Recovery copy is stale"),
+            tr("The current state could not be checkpointed. Replacing this document "
+               "may lose edits that are only in memory. Replace it anyway?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        return false;
+    }
+    // Cell selection and view construction can enter nested event loops. Retire
+    // the outgoing persistence identity BEFORE any new model becomes visible;
+    // an old timer must never checkpoint the new model into the old handle.
+    m_installingAssembly = true;
+    if (m_autoSaveTimer) m_autoSaveTimer->stop();
+    if (checkpointed) retireRecoveryCheckpoint();
+    m_recoveryCheckpoint.reset();
+    m_autoSaveIdentity = QUuid::createUuid().toString(QUuid::WithoutBraces);
     // Detach every consumer from the current assembly BEFORE it is replaced or
     // freed. detectAndSelectCells() (load path) can spin a modal dialog whose
     // nested event loop processes a pending 3D repaint; a view still holding the
@@ -475,15 +548,23 @@ void MainWindow::detachAssemblyFromViews()
     if (m_drillDownPanel) {
         m_drillDownPanel->reset();
     }
+    // Both views open the next document with fill hidden; match the switch.
+    if (m_showFillAction) {
+        const QSignalBlocker block(m_showFillAction);
+        m_showFillAction->setChecked(false);
+    }
     updateLayerZSpacingControls();  // no assembly => Layer-Z controls greyed out
+    return true;
 }
 
 void MainWindow::onFileNew()
 {
-    detachAssemblyFromViews();  // detach from the outgoing assembly before it is freed
+    const auto installation = qScopeGuard([this] { m_installingAssembly = false; });
+    if (!detachAssemblyFromViews()) return;
     m_assembly = std::make_unique<Assembly>();
     m_assembly->set_name("Untitled");
     m_currentFilePath.clear();
+    if (m_viewingNotesBar) m_viewingNotesBar->startDocument();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
@@ -494,7 +575,8 @@ void MainWindow::onFileNew()
 
     updateLayerZSpacingControls();  // empty assembly: still greyed (no single die)
 
-    setWindowTitle("Chiplet Studio - Untitled");
+    setWindowTitle("Chiplet Studio - Untitled[*]");
+    setWindowModified(false);
 
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
@@ -590,24 +672,6 @@ void MainWindow::onFileOpen()
     openFile(path);
 }
 
-namespace {
-// Atomic text write (QSaveFile writes to a temp then renames on commit).
-// Returns false if the directory is not writable, so the caller can fall back.
-bool writeTextFile(const QString& path, const std::string& content)
-{
-    QSaveFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        return false;
-    }
-    const QByteArray bytes = QByteArray::fromStdString(content);
-    if (f.write(bytes) != bytes.size()) {
-        f.cancelWriting();
-        return false;
-    }
-    return f.commit();
-}
-}  // namespace
-
 void MainWindow::onImportGds()
 {
     ImportGdsDialog dlg(this);
@@ -647,42 +711,69 @@ void MainWindow::onImportGds()
     spec.customLyp = dlg.customLyp().toStdString();
     spec.customStackup = dlg.customStackup().toStdString();
 
-    const std::string yaml = synthesizeSingleGdsChiplet(spec);
-
-    // Write the synthesized .chiplet next to the GDS so it is reusable and can
-    // be re-opened directly. The GDS path inside it is absolute, so the file's
-    // location does not affect resolution.
+    // The write policy lives in ChipletSynth, Qt-free, so the whole of it is
+    // testable without a GUI: fresh destinations only, a refusal that leaves
+    // nothing behind, and a fallback that follows a real write failure. This
+    // slot supplies the one thing that genuinely needs a window, which is asking
+    // for a different name.
     QFileInfo gdsInfo(gdsPath);
-    QString outPath =
+    const QString preferred =
         gdsInfo.absoluteDir().filePath(gdsInfo.completeBaseName() + ".chiplet");
 
-    if (QFileInfo::exists(outPath)) {
-        const auto choice = QMessageBox::question(this, tr("Import GDS"),
-            tr("%1 already exists. Overwrite it?").arg(outPath),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (choice != QMessageBox::Yes) {
-            return;
+    const auto askForAnotherName =
+        [this](const std::string& occupied) -> std::optional<std::string> {
+        const QString taken = QString::fromStdString(occupied);
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(tr("Import GDS"));
+        box.setText(tr("%1 already exists.").arg(taken));
+        box.setInformativeText(
+            tr("The import will not replace a file it did not create. Choose a "
+               "different name, or cancel."));
+        QAbstractButton* rename =
+            box.addButton(tr("Choose a Different Name..."), QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != rename) {
+            return std::nullopt;
         }
-    }
+        const QString chosen = QFileDialog::getSaveFileName(
+            this, tr("Save the Imported Chiplet As"), taken,
+            tr("Chiplet Files (*.chiplet);;All Files (*)"), nullptr,
+            QFileDialog::DontConfirmOverwrite);
+        if (chosen.isEmpty()) {
+            return std::nullopt;
+        }
+        return chosen.toStdString();
+    };
 
-    if (!writeTextFile(outPath, yaml)) {
-        // The GDS folder may be read-only (e.g. inside a PDK checkout). Fall
-        // back to a temp file so the import still works, and say where it went.
-        const QString tempPath = QDir::temp().filePath(
-            QStringLiteral("chiplet_import_%1.chiplet")
-                .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-        if (!writeTextFile(tempPath, yaml)) {
-            QMessageBox::critical(this, tr("Import GDS"),
-                tr("Could not write the synthesized .chiplet file."));
-            return;
-        }
+    const ImportWriteResult written =
+        writeSingleGdsImport(spec, preferred.toStdString(), askForAnotherName);
+
+    switch (written.outcome) {
+    case ImportWriteResult::Outcome::Cancelled:
+        return;
+    case ImportWriteResult::Outcome::Refused:
+        QMessageBox::critical(this, tr("Import GDS"),
+            tr("This GDS cannot be described as a .chiplet, so nothing was "
+               "written:\n\n%1").arg(QString::fromStdString(written.message)));
+        return;
+    case ImportWriteResult::Outcome::Failed:
+        QMessageBox::critical(this, tr("Import GDS"),
+            tr("The import could not be written:\n\n%1")
+                .arg(QString::fromStdString(written.message)));
+        return;
+    case ImportWriteResult::Outcome::WrittenToFallback:
         statusBar()->showMessage(
-            tr("GDS folder not writable; imported to %1").arg(tempPath), 6000);
-        outPath = tempPath;
+            tr("Could not write beside the GDS; imported to %1")
+                .arg(QString::fromStdString(written.path)), 8000);
+        break;
+    case ImportWriteResult::Outcome::Written:
+        break;
     }
 
     // Load through the existing async pipeline (wires views + cell selection).
-    openFile(outPath);
+    openFile(QString::fromStdString(written.path));
 }
 
 void MainWindow::onExportPng()
@@ -796,7 +887,12 @@ void MainWindow::onAssemblyLoadFinished()
     // from the OUTGOING assembly before the move below frees it (the
     // cell-selection dialog's nested event loop could otherwise repaint a freed
     // assembly). Everything is repointed to the new assembly below.
-    detachAssemblyFromViews();
+    const auto installation = qScopeGuard([this] { m_installingAssembly = false; });
+    if (!detachAssemblyFromViews()) {
+        m_pendingLoadPath.clear();
+        statusBar()->showMessage(tr("Kept the current document."), 3000);
+        return;
+    }
 
     m_assembly = std::move(result.assembly);
     m_currentFilePath = m_pendingLoadPath;
@@ -810,6 +906,7 @@ void MainWindow::onAssemblyLoadFinished()
     detectAndSelectCells();
 
     // Update all views (mesh generation happens here on main thread)
+    if (m_viewingNotesBar) m_viewingNotesBar->startDocument();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
@@ -820,8 +917,9 @@ void MainWindow::onAssemblyLoadFinished()
 
     updateLayerZSpacingControls();  // enable Layer-Z only if this is a lone die
 
-    setWindowTitle(QString("Chiplet Studio - %1").arg(
+    setWindowTitle(QString("Chiplet Studio - %1[*]").arg(
         QString::fromStdString(m_assembly->name())));
+    setWindowModified(false);
 
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
@@ -848,9 +946,11 @@ void MainWindow::onLoadCanceled()
     statusBar()->showMessage("Load canceled", 2000);
 }
 
-QString MainWindow::resolveAssemblyGdsPath(bool* interposerOnly) const
+QString MainWindow::resolveAssemblyGdsPath(bool* interposerOnly,
+                                           QString* loneComponent) const
 {
     if (interposerOnly) *interposerOnly = false;
+    if (loneComponent) loneComponent->clear();
     if (!m_assembly) return {};
 
     // 1. Explicit assembly_gds field
@@ -905,14 +1005,17 @@ QString MainWindow::resolveAssemblyGdsPath(bool* interposerOnly) const
     //    instead of leaving it empty. Gated on a single layout-bearing component
     //    so it never has to guess which GDS represents the assembly.
     QString loneLayout;
+    QString loneId;
     int layoutCount = 0;
     for (const auto& comp : m_assembly->components()) {
         if (!comp->layout_path().empty()) {
             ++layoutCount;
             loneLayout = QString::fromStdString(comp->layout_path());
+            loneId = QString::fromStdString(comp->id());
         }
     }
     if (layoutCount == 1 && QFile::exists(loneLayout)) {
+        if (loneComponent) *loneComponent = loneId;
         return loneLayout;
     }
 
@@ -924,35 +1027,139 @@ void MainWindow::loadAssemblyGds()
     if (!m_assembly) return;
 
     bool interposerOnly = false;
-    QString assemblyGds = resolveAssemblyGdsPath(&interposerOnly);
+    QString loneComponent;
+    QString assemblyGds = resolveAssemblyGdsPath(&interposerOnly, &loneComponent);
     if (assemblyGds.isEmpty()) return;
 
     // Defer loading to next event loop iteration so KLayout widget
     // initialization completes before we start loading layouts.
     // Without this, KLayout's hierarchy panel initialization
     // can trigger a menu assertion during first-time widget creation.
-    QTimer::singleShot(0, this, [this, assemblyGds, interposerOnly]() {
-        if (!m_assembly) return;
+    // A replacement (including New or recovery) can happen before this callback.
+    // Bind the path to the opened-document identity, not an Assembly address
+    // that could be reused after the outgoing model is freed.
+    const QString documentIdentity = m_autoSaveIdentity;
+    QTimer::singleShot(0, this, [this, assemblyGds, interposerOnly, loneComponent,
+                                 documentIdentity]() {
+        if (!m_assembly || m_autoSaveIdentity != documentIdentity) return;
 
-        // Find best LYP from technologies
-        QString lypPath;
-        for (const auto& tech : m_assembly->technologies()) {
-            if (!tech->layer_properties_path().empty()) {
-                lypPath = QString::fromStdString(tech->layer_properties_path());
-                break;
-            }
+        // Each technology styles its own layers: the carrier's sheet for the
+        // carrier, each die technology's sheet for its die cells (see
+        // AssemblySheet.h). A lone imported layout is all its component's.
+        LoadSpec spec = loneComponent.isEmpty()
+            ? assemblyLoadSpec(*m_assembly, interposerOnly)
+            : componentLoadSpec(*m_assembly, loneComponent.toStdString());
+        if (loneComponent.isEmpty() && !interposerOnly) {
+            spec.carrierFillPath = carrierFillSource(*m_assembly, assemblyGds.toStdString());
         }
 
-        m_drillDownPanel->setAssemblyGds(assemblyGds, lypPath, *m_assembly,
+        m_drillDownPanel->setAssemblyGds(assemblyGds, spec, *m_assembly,
                                          interposerOnly);
         m_klayout2DDock->show();
         m_klayout2DDock->raise();
+        applyInitial2DDockWidth();
+    });
+}
+
+void MainWindow::refreshViewingNotes()
+{
+    if (!m_viewingNotesBar) return;
+    QStringList notes;
+    QStringList opening;
+    if (m_assembly) {
+        try {
+            for (const auto& n : technologyNotes(*m_assembly)) {
+                notes << QString::fromStdString(n);
+            }
+            const std::string shown = QFileInfo(m_currentFilePath).fileName().toStdString();
+            for (const auto& n : placementNotes(*m_assembly, shown)) {
+                notes << QString::fromStdString(n);
+            }
+            if (!mountPlaneGuessNote(*m_assembly).empty()) {
+                opening << QStringLiteral("mount-plane-guess");
+            }
+        } catch (const std::exception& e) {
+            notes << QString("Viewing notes incomplete: %1").arg(e.what());
+        }
+    }
+    if (m_klayout2DView) notes << m_klayout2DView->notes();
+    if (m_assemblyView) notes << m_assemblyView->notes();
+    m_viewingNotesBar->setNotes(notes, opening);
+}
+
+void MainWindow::applyInitial2DDockWidth()
+{
+    if (m_klayout2DDockWidthApplied || !m_klayout2DDock || !m_assemblyView) {
+        return;
+    }
+    // Set at SCHEDULING time, not inside the slot below. Both call sites fire
+    // straight after show() and raise(), so two of them in one event-loop turn
+    // would both pass a guard that is only set when the slot runs, and queue two
+    // competing resizes. Once only, and whatever width the user chooses later is
+    // theirs.
+    m_klayout2DDockWidthApplied = true;
+
+    // Both call sites reach this straight after show() and raise(), where the
+    // widths are still whatever the layout had before. Compute a cycle later,
+    // on settled numbers: exact arithmetic on pre-layout widths is still wrong.
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_klayout2DDock || !m_assemblyView) {
+            return;
+        }
+        // A floating dock has its own top-level geometry and a hidden one has
+        // no share of the row, so there is nothing here to allocate. Say so
+        // rather than resizing something the user detached.
+        if (m_klayout2DDock->isFloating() || !m_klayout2DDock->isVisible()) {
+            qInfo("2D dock initial width: skipped, dock is %s",
+                  m_klayout2DDock->isFloating() ? "floating" : "hidden");
+            return;
+        }
+        const int windowWidth = width();
+        const int dockWidth = m_klayout2DDock->width();
+        const int centralWidth = m_assemblyView->width();
+        const int target = initial2DDockWidth(windowWidth, dockWidth, centralWidth);
+        // Any changed, positive target, in either direction. The dock opening
+        // too wide is the case this exists for, and a rule that only grows
+        // cannot answer it.
+        const bool requested = (target > 0 && target != dockWidth);
+        if (requested) {
+            resizeDocks({m_klayout2DDock}, {target}, Qt::Horizontal);
+        }
+
+        // Unconditional, once the layout has answered. resizeDocks is a request:
+        // it can be refused, granted, or overshot, and the case where nothing
+        // was asked for is the one a reader most needs stated rather than
+        // inferred from silence.
+        QTimer::singleShot(0, this, [this, windowWidth, dockWidth, centralWidth,
+                                     target, requested]() {
+            if (!m_klayout2DDock || !m_assemblyView) {
+                return;
+            }
+            qInfo("2D dock initial width: window %d; dock %d -> %d (target %d, "
+                  "%s); 3D viewport %d -> %d (floor %d)",
+                  windowWidth, dockWidth, m_klayout2DDock->width(), target,
+                  requested ? "requested" : "no request", centralWidth,
+                  m_assemblyView->width(), kMinCentralWidth);
+        });
     });
 }
 
 void MainWindow::initializeCommandProcessor()
 {
-    m_commandProcessor = std::make_unique<CommandProcessor>(m_assembly.get());
+    m_commandProcessor = std::make_unique<CommandProcessor>(m_assembly.get(), this);
+    connectRenderModeSync(m_commandProcessor.get(), m_assemblyView, m_hierarchyPanel);
+    connect(m_commandProcessor.get(), &CommandProcessor::model_changed,
+            this, [this]() {
+        setWindowModified(true);
+        if (m_installingAssembly) return;
+        if (m_recoveryTimer) m_recoveryTimer->start();
+        if (m_recoveryWarning && !m_recoveryFailed) {
+            m_recoveryWarning->setText(tr("Recovery copy pending"));
+            m_recoveryWarning->setToolTip(tr("Waiting for a pause in editing before writing "
+                "the recovery copy. Save, auto-save and closing flush it immediately."));
+            m_recoveryWarning->setVisible(true);
+        }
+    });
     connect(m_commandProcessor.get(), &CommandProcessor::can_undo_changed,
             m_undoAction, &QAction::setEnabled);
     connect(m_commandProcessor.get(), &CommandProcessor::can_redo_changed,
@@ -975,9 +1182,20 @@ void MainWindow::initializeCommandProcessor()
     if (m_scriptEngine && m_scriptEngine->is_initialized()) {
         m_scriptEngine->set_assembly(m_assembly.get(), m_commandProcessor.get());
     }
+    m_installingAssembly = false;
+    checkpointRecovery();
 }
 
 void MainWindow::onFileSave()
+{
+    if (!m_currentFilePath.isEmpty()) {
+        saveAssemblyToPath(m_currentFilePath);
+        return;
+    }
+    onFileSaveAs();
+}
+
+void MainWindow::onFileSaveAs()
 {
     if (!m_assembly) {
         return;
@@ -985,22 +1203,83 @@ void MainWindow::onFileSave()
 
     QString path = QFileDialog::getSaveFileName(
         this,
-        "Save Assembly",
-        QString(),
-        "Chiplet Files (*.chiplet);;All Files (*)"
+        "Save As - choose a new filename (unrelated existing files are protected)",
+        m_currentFilePath,
+        "Chiplet Files (*.chiplet);;All Files (*)",
+        nullptr,
+        QFileDialog::DontConfirmOverwrite
     );
 
     if (path.isEmpty()) {
         return;
     }
 
+    saveAssemblyToPath(path);
+}
+
+void MainWindow::onFileRecovery()
+{
+    const auto directory = QStandardPaths::writableLocation(
+        QStandardPaths::AppDataLocation).toStdString();
+    if (directory.empty()) {
+        QMessageBox::warning(this, tr("Recovery checkpoints"),
+                            tr("The application recovery directory is unavailable."));
+        return;
+    }
+    try {
+        const auto current = m_recoveryCheckpoint && !m_recoveryCheckpoint->closed()
+            ? m_recoveryCheckpoint->path() : std::filesystem::path{};
+        auto recovered = CrashRecoveryDialog::check_and_recover(directory, true, current);
+        if (recovered) setRecoveredAssembly(std::move(recovered));
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Recovery checkpoints"), QString::fromUtf8(e.what()));
+    }
+}
+
+void MainWindow::saveAssemblyToPath(const QString& path)
+{
+    if (!m_assembly || path.isEmpty()) return;
+
+    // This Save implementation preserves source spellings; it is not a project
+    // relocation/exporter. Do not silently change relative asset resolution.
+    const auto& source = m_assembly->document_persistence().source_path;
+    if (!source.empty()) {
+        const auto sourceDir = QFileInfo(QString::fromStdString(source)).absoluteDir();
+        const auto targetDir = QFileInfo(path).absoluteDir();
+        if (sourceDir.canonicalPath() != targetDir.canonicalPath()) {
+            const auto relative = [](const std::string& reference) {
+                return !reference.empty() && reference.rfind("${", 0) != 0 &&
+                    QDir::isRelativePath(QString::fromStdString(reference));
+            };
+            bool dependsOnSourceDirectory = relative(m_assembly->assembly_gds_source()) ||
+                relative(m_assembly->netlist().external_netlist_path()) ||
+                m_assembly->has_flow() || !m_assembly->flow_source_text().empty();
+            for (const auto& component : m_assembly->components())
+                dependsOnSourceDirectory |= relative(component->layout_path_source());
+            for (const auto& technology : m_assembly->technologies())
+                dependsOnSourceDirectory |= relative(technology->layer_properties_source()) ||
+                    relative(technology->stackup_source());
+            if (dependsOnSourceDirectory) {
+                QMessageBox::warning(this, tr("Save As would change asset resolution"),
+                    tr("This document uses relative assets or a flow working directory. "
+                       "Project relocation is not implemented by Save As. Choose a new "
+                       "filename in the original directory:\n%1\n\n"
+                       "The destination and your open edits are unchanged.")
+                        .arg(sourceDir.absolutePath()));
+                return;
+            }
+        }
+    }
+
     try {
         ChipletFormat format;
         format.save(*m_assembly, path.toStdString());
         m_currentFilePath = path;
-        setWindowTitle(QString("Chiplet Studio - %1").arg(
+        setWindowModified(false);
+        setWindowTitle(QString("Chiplet Studio - %1[*]").arg(
             QString::fromStdString(m_assembly->name())));
         statusBar()->showMessage("Saved: " + path, 3000);
+        checkpointRecovery();
     } catch (const std::exception& e) {
         QMessageBox::critical(this, "Error",
             QString("Failed to save assembly: %1").arg(e.what()));
@@ -1020,20 +1299,13 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
         return;
     }
 
-    // Get layer properties from technology
-    QString lypPath;
-    QString techName;
-    if (!comp->technology().empty()) {
-        techName = QString::fromStdString(comp->technology());
-        Technology* tech = m_assembly->technology(comp->technology());
-        if (tech && !tech->layer_properties_path().empty()) {
-            lypPath = QString::fromStdString(tech->layer_properties_path());
-        }
-    }
+    // The component's own sheet (declared, else built-in) styles its layout.
+    const QString techName = QString::fromStdString(comp->technology());
 
     // Load layout and show 2D dock
     QString layoutPath = QString::fromStdString(comp->layout_path());
-    if (m_klayout2DView->loadLayout(layoutPath, lypPath)) {
+    if (m_klayout2DView->loadComposedLayout(
+            layoutPath, componentLoadSpec(*m_assembly, comp->id()))) {
         // Set context on drill-down panel (populates cell combo, reparents side panels)
         QString compName = QString::fromStdString(comp->name());
         m_drillDownPanel->setContext(componentId, compName, techName);
@@ -1046,6 +1318,7 @@ void MainWindow::onComponentDrillDown(const QString& componentId)
 
         m_klayout2DDock->show();
         m_klayout2DDock->raise();
+        applyInitial2DDockWidth();
     }
 }
 
@@ -1055,9 +1328,16 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
         return;
     }
 
-    detachAssemblyFromViews();  // detach from any outgoing assembly before it is freed
+    const auto installation = qScopeGuard([this] { m_installingAssembly = false; });
+    if (!detachAssemblyFromViews()) return;
     m_assembly = std::move(assembly);
-    m_currentFilePath.clear();  // Recovered, needs Save As
+    // The recovered content and the authorized on-disk baseline are distinct.
+    // Reuse the recorded pathname, but the format still checks its exact bytes
+    // before replacing it. New documents without a receipt require Save As.
+    const auto& persistence = m_assembly->document_persistence();
+    m_currentFilePath = persistence.primary
+        ? QString::fromStdString(persistence.primary->canonical_path()) : QString();
+    if (m_viewingNotesBar) m_viewingNotesBar->startDocument();
     m_assemblyView->setAssembly(m_assembly.get());
     m_hierarchyPanel->setAssembly(m_assembly.get());
     m_propertiesPanel->setAssembly(m_assembly.get());
@@ -1068,14 +1348,21 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
 
     updateLayerZSpacingControls();  // enable Layer-Z only if this is a lone die
 
-    setWindowTitle(QString("Chiplet Studio - %1 [Recovered]").arg(
+    setWindowTitle(QString("Chiplet Studio - %1 [Recovered][*]").arg(
         QString::fromStdString(m_assembly->name())));
 
     // Initialize command processor for undo/redo
     initializeCommandProcessor();
+    setWindowModified(true);
+    statusBar()->showMessage(tr("Recovered checkpoint; undo/redo history starts empty."), 8000);
 
     // Populate flow engine from recovered assembly
     populateFlowEngine();
+
+    // Recovery detaches the outgoing 2D view just like a normal open. Restore
+    // the recovered document's on-disk layout as well; this does not regenerate
+    // that layout from any unsaved component-placement edits.
+    loadAssemblyGds();
 
     // Reset autosave timer
     if (m_autoSaveTimer) {
@@ -1283,6 +1570,54 @@ void MainWindow::setupFlowPanel()
             &AssemblyView::setBasePlaneVisible);
     viewMenu->addAction(toggleBasePlane);
 
+    // Fill (layers a stackup marks `purpose: filler`) is hidden at every open
+    // in both views; this switches all of it at once. The per-layer boxes in
+    // the 2D list and in Properties still work afterwards.
+    m_showFillAction = new QAction("Show Fill", this);
+    m_showFillAction->setCheckable(true);
+    m_showFillAction->setChecked(false);
+    m_showFillAction->setToolTip("Show or hide every fill layer in the 2D and 3D views");
+    connect(m_showFillAction, &QAction::toggled, this, [this](bool on) {
+        m_assemblyView->setShowFill(on);
+        if (m_drillDownPanel) m_drillDownPanel->setFillVisible(on);
+        if (m_propertiesPanel) m_propertiesPanel->refreshLayerChecks();
+    });
+    viewMenu->addAction(m_showFillAction);
+
+    // How 3D draws the shapes of a detailed component. Standard is the view
+    // as it was, and the setting at every start; the other two say in the
+    // notes strip and the layer rows what they drew.
+    QMenu* shapesMenu = viewMenu->addMenu("3D Shapes");
+    shapesMenu->setObjectName("shapesMenu");
+    shapesMenu->setToolTipsVisible(true);
+    auto* shapesGroup = new QActionGroup(this);
+    shapesGroup->setExclusive(true);
+    const struct {
+        const char* text;
+        const char* name;
+        const char* tip;
+        ShapeMode mode;
+    } shapeModes[] = {
+        {"Standard", "shapesStandard",
+         "Merged layer meshes, with the shape limits the notes name", ShapeMode::Standard},
+        {"Fast", "shapesFast",
+         "Every shape; tiles too small on screen are drawn as coverage", ShapeMode::Fast},
+        {"Every shape", "shapesEvery",
+         "Every shape at every zoom; a frame can take seconds", ShapeMode::Every},
+    };
+    for (const auto& m : shapeModes) {
+        QAction* a = shapesMenu->addAction(m.text);
+        a->setObjectName(m.name);
+        a->setToolTip(m.tip);
+        a->setCheckable(true);
+        a->setChecked(m.mode == ShapeMode::Standard);
+        shapesGroup->addAction(a);
+        const ShapeMode mode = m.mode;
+        connect(a, &QAction::triggered, this, [this, mode]() {
+            m_assemblyView->setShapeMode(mode);
+        });
+    }
+
     // Top-down mini-map toggle
     QAction* toggleMiniMap = new QAction("3D Overview", this);
     toggleMiniMap->setCheckable(true);
@@ -1367,7 +1702,15 @@ void MainWindow::populateFlowEngine()
 
     const FlowDefinition& def = m_assembly->flow_definition();
 
-    m_flowEngine->set_working_directory(def.working_directory);
+    // The document holds only what its author declared. When it declared no
+    // working_directory, the effective one is the directory the .chiplet
+    // itself lives in; that default is resolved HERE, at the point of running,
+    // and deliberately never written back into the document.
+    std::string workingDir = def.working_directory;
+    if (workingDir.empty() && !m_currentFilePath.isEmpty()) {
+        workingDir = QFileInfo(m_currentFilePath).absolutePath().toStdString();
+    }
+    m_flowEngine->set_working_directory(workingDir);
 
     for (const auto& [key, value] : def.environment) {
         m_flowEngine->set_environment(key, value);
@@ -1389,16 +1732,36 @@ void MainWindow::populateFlowEngine()
 
 void MainWindow::setupAutoSave()
 {
+    m_recoveryTimer = new QTimer(this);
+    m_recoveryTimer->setSingleShot(true);
+    m_recoveryTimer->setInterval(350);
+    m_recoveryTimer->setObjectName("recoveryDebounceTimer");
+    connect(m_recoveryTimer, &QTimer::timeout, this, &MainWindow::checkpointRecovery);
     m_autoSaveTimer = new QTimer(this);
     connect(m_autoSaveTimer, &QTimer::timeout,
             this, &MainWindow::onAutoSave);
+
+    // A permanent status-bar marker rather than a transient message, because
+    // the thing being reported stays true until somebody fixes it. It lives on
+    // the right of the status bar, where addPermanentWidget keeps it clear of
+    // the transient messages that would otherwise cover it.
+    m_autoSaveWarning = new QLabel(this);
+    m_autoSaveWarning->setText(tr("Auto-save FAILING"));
+    m_autoSaveWarning->setStyleSheet("QLabel { color: #b00020; font-weight: bold; }");
+    m_autoSaveWarning->setVisible(false);
+    statusBar()->addPermanentWidget(m_autoSaveWarning);
+
+    m_recoveryWarning = new QLabel(tr("Recovery copy STALE"), this);
+    m_recoveryWarning->setStyleSheet("QLabel { color: #b00020; font-weight: bold; }");
+    m_recoveryWarning->setVisible(false);
+    statusBar()->addPermanentWidget(m_recoveryWarning);
 
     // Timer starts when an assembly is loaded/created
 }
 
 void MainWindow::onAutoSave()
 {
-    if (!m_assembly) {
+    if (!m_assembly || m_installingAssembly) {
         return;
     }
 
@@ -1414,17 +1777,51 @@ void MainWindow::onAutoSave()
         // For now, do a synchronous save since serialization is fast
         // The actual file write could be backgrounded but YAML generation
         // needs the assembly which shouldn't be modified during save
-        format.save(*m_assembly, savePath.toStdString());
+        format.save(*m_assembly, savePath.toStdString(), SavePurpose::Autosave);
+        checkpointRecovery();
+        applyAutoSaveNotice(m_autoSaveState.on_success(), savePath, QString());
         statusBar()->showMessage("Auto-saved to " + savePath, 3000);
         qDebug() << "Auto-saved to" << savePath;
     } catch (const std::exception& e) {
-        qWarning() << "Auto-save failed:" << e.what();
-        statusBar()->showMessage("Auto-save failed: " + QString::fromStdString(e.what()), 5000);
+        const QString reason = QString::fromUtf8(e.what());
+        qWarning() << "Auto-save failed:" << reason;
+        applyAutoSaveNotice(m_autoSaveState.on_failure(), savePath, reason);
     }
+}
+
+void MainWindow::applyAutoSaveNotice(const AutoSaveNotice& notice,
+                                     const QString& path,
+                                     const QString& reason)
+{
+    if (m_autoSaveWarning) {
+        m_autoSaveWarning->setVisible(notice.warn);
+        m_autoSaveWarning->setToolTip(
+            notice.warn ? tr("Auto-save to %1 is failing: %2").arg(path, reason)
+                        : QString());
+    }
+
+    if (!notice.announce) {
+        return;
+    }
+
+    // Once per run of failures. Every five minutes forever is not a stronger
+    // warning, it is one people learn to dismiss without reading. The marker
+    // above is what carries the state after this box is closed.
+    QMessageBox::warning(
+        this, tr("Auto-save is failing"),
+        tr("Your work is NOT being auto-saved.\n\n"
+           "Auto-save to %1 failed:\n%2\n\n"
+           "Any file you saved yourself is untouched and still correct. Save "
+           "somewhere you can write to, and this notice will clear on the next "
+           "successful auto-save.").arg(path, reason));
 }
 
 QString MainWindow::autoSavePath() const
 {
+    if (m_assembly && m_assembly->document_persistence().autosave) {
+        return QString::fromStdString(
+            m_assembly->document_persistence().autosave->canonical_path());
+    }
     // Use a consistent autosave location
     QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (dataPath.isEmpty()) {
@@ -1440,11 +1837,88 @@ QString MainWindow::autoSavePath() const
     // If we have a current file path, save alongside it
     if (!m_currentFilePath.isEmpty()) {
         QFileInfo info(m_currentFilePath);
-        return info.absolutePath() + "/" + info.baseName() + ".autosave.chiplet";
+        return info.absolutePath() + "/" + info.completeBaseName() +
+            ".autosave." + m_autoSaveIdentity + ".chiplet";
     }
 
     // Otherwise use the app data location
-    return dataPath + "/autosave.chiplet";
+    return dataPath + "/autosave." + m_autoSaveIdentity + ".chiplet";
+}
+
+bool MainWindow::checkpointRecovery()
+{
+    if (!m_assembly || m_installingAssembly) return true;
+    if (m_recoveryTimer) m_recoveryTimer->stop();
+    QElapsedTimer timer;
+    timer.start();
+    try {
+        const QString directory = QStandardPaths::writableLocation(
+            QStandardPaths::AppDataLocation) + "/recovery";
+        if (directory == "/recovery" || !QDir().mkpath(directory)) {
+            throw std::runtime_error("The application recovery directory is unavailable.");
+        }
+        ChipletFormat format;
+        const auto payload = format.encode_recovery(*m_assembly);
+        if (m_recoveryCheckpoint) {
+            RecoveryCheckpoint::update_or_recreate(*m_recoveryCheckpoint, payload);
+        } else {
+            m_recoveryCheckpoint = RecoveryCheckpoint::create(directory.toStdString(), payload);
+        }
+        m_recoveryFailed = false;
+        if (m_recoveryWarning) m_recoveryWarning->setVisible(false);
+        emit recoveryCheckpointSaved(QString::fromStdString(m_recoveryCheckpoint->path().string()));
+        emit recoveryCheckpointDuration(timer.nsecsElapsed() / 1000, true);
+        return true;
+    } catch (const std::exception& e) {
+        const QString reason = QString::fromUtf8(e.what());
+        m_recoveryFailed = true;
+        if (m_recoveryWarning) {
+            m_recoveryWarning->setText(tr("Recovery copy STALE"));
+            m_recoveryWarning->setToolTip(tr("Recent edits are not in the recovery copy: %1. "
+                "The open model and any previous checkpoint are retained.").arg(reason));
+            m_recoveryWarning->setVisible(true);
+        }
+        qWarning() << "Recovery checkpoint failed; the open model is retained:" << reason;
+        emit recoveryCheckpointFailed(reason);
+        emit recoveryCheckpointDuration(timer.nsecsElapsed() / 1000, false);
+        return false;
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (m_installingAssembly) {
+        event->ignore();
+        return;
+    }
+    const bool checkpointed = checkpointRecovery();
+    if (!checkpointed && QMessageBox::question(
+            this, tr("Recovery copy is stale"),
+            tr("The current state could not be checkpointed. Closing may lose edits "
+               "that are only in memory. Close anyway?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        event->ignore();
+        return;
+    }
+    if (checkpointed) retireRecoveryCheckpoint();
+    if (m_autoSaveTimer) m_autoSaveTimer->stop();
+    if (m_recoveryTimer) m_recoveryTimer->stop();
+    // A QWidget can be shown again after close. Never reuse its now-archived
+    // handle: a later edit must allocate a separate active recovery identity.
+    m_recoveryCheckpoint.reset();
+    QMainWindow::closeEvent(event);
+}
+
+void MainWindow::retireRecoveryCheckpoint()
+{
+    if (!m_recoveryCheckpoint || m_recoveryCheckpoint->closed()) return;
+    try {
+        RecoveryCheckpoint::mark_closed(*m_recoveryCheckpoint);
+    } catch (const std::exception& e) {
+        // Leave the active copy discoverable if archival fails. No deletion or
+        // hidden success: next startup may offer this retained checkpoint again.
+        qWarning() << "Recovery copy retained as pending; could not archive:" << e.what();
+    }
 }
 
 bool MainWindow::detectAndSelectCells()
@@ -1456,7 +1930,7 @@ bool MainWindow::detectAndSelectCells()
     bool anyChanges = false;
     GDSAnalyzer analyzer;
 
-    for (const auto& compPtr : m_assembly->components()) {
+    for (auto& compPtr : m_assembly->components()) {
         Component* comp = compPtr.get();
         if (!comp) continue;
 

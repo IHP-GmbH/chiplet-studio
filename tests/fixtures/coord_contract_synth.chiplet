@@ -1,7 +1,8 @@
 format_version: "1.0"
 
 # Synthetic verification fixture for the coord-frame contract.
-# See chiplet-studio/docs/coord_frame_contract.md §7.1 for the spec.
+# See docs/coord_frame_contract.md §7.1 in IHP-GmbH/chiplet-system-spec
+# for the spec.
 #
 # 1000 x 1000 um interposer (bbox_center anchor), 2 dies (gds_origin),
 # 4 io_pads at the interposer corners. Positions and dimensions chosen
@@ -10,7 +11,7 @@ format_version: "1.0"
 
 assembly:
   name: "Coord Frame Contract Synthetic Fixture"
-  description: "Verification fixture for chiplet-studio/docs/coord_frame_contract.md"
+  description: "Verification fixture for coord_frame_contract.md in IHP-GmbH/chiplet-system-spec"
   units: "um"
 
 components:
@@ -20,7 +21,7 @@ components:
     # thickness = physical silicon body; attachment_surface_z = the BEOL-top
     # die-attachment (mount) surface, decoupled from the body.
     dimensions: {width: 1000, height: 1000, thickness: 300.0}
-    attachment_surface_z: 13.83
+    attachment_surface_z: 10.8103
     position: {x: 500, y: 500, z: 0}
     io_pads:
       - id: P_BL

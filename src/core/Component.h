@@ -67,7 +67,8 @@ enum class Orientation {
  * Mesh anchor convention. Determines how a component's local mesh is
  * built relative to its declared `position` in the canonical frame.
  *
- * See chiplet-studio/docs/coord_frame_contract.md §2 for the contract.
+ * See docs/coord_frame_contract.md §2 in IHP-GmbH/chiplet-system-spec for the
+ * contract.
  *
  * - GdsOrigin: the component mesh is built around its own GDS (0,0).
  *   `position` is added to the GDS-origin without extra centering.

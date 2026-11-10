@@ -86,6 +86,18 @@ public slots:
      */
     void clearSelection();
 
+    /**
+     * Re-read every layer checkbox from the visibility resolver, e.g. after
+     * the 3D view switched all fill at once.
+     */
+    void refreshLayerChecks();
+
+    /**
+     * Rebuild the layer rows of the component they show, keeping the filter
+     * and the scroll position, e.g. when the 3D view's counts changed.
+     */
+    void refreshLayerRows();
+
 public:
     /**
      * Install a resolver that reports a layer's current visibility
@@ -106,14 +118,25 @@ public:
     void setLayerOpacityResolver(std::function<float(const QString&, int, int)> resolver);
 
     // A render layer as reported by the 3D view (layer/datatype + name).
-    struct RenderedLayerInfo { int layer; int datatype; QString name; };
+    // `count` ("3D shows N of M shapes") and `countNote` are empty when 3D
+    // shows every shape of the layer; `meshed` false means it drew none.
+    struct RenderedLayerInfo {
+        int layer;
+        int datatype;
+        QString name;
+        bool fill = false;
+        QString count;
+        QString countNote;
+        bool meshed = true;
+    };
 
     /**
      * Install a resolver that lists a component's built render layers
-     * (componentId) -> [{layer, datatype, name}, ...]. Used as the source for
-     * the layer tree when the component's technology ships no .lyp (e.g. a
-     * supported-PDK Import GDS), so per-layer show/hide and transparency still
-     * work. When the .lyp is present it takes precedence and this is unused.
+     * (componentId) -> [{layer, datatype, name, fill}, ...]. The layer tree
+     * is built from it when the component's technology ships no .lyp (e.g. a
+     * supported-PDK Import GDS). With a .lyp, the .lyp's rows come first and
+     * any rendered layer the .lyp does not list is appended, so every layer
+     * 3D draws can be shown and hidden. Fill rows say "(fill)" either way.
      */
     void setLayerListResolver(
         std::function<std::vector<RenderedLayerInfo>(const QString&)> resolver);
@@ -178,6 +201,8 @@ private:
     // Fallback layer-tree population from the 3D view's rendered layers, used
     // when the technology has no .lyp. Assumes m_blockLayerSync is set.
     void populateLayersFromRenderer();
+    // One rendered-layer row, checkbox seeded from the visibility resolver.
+    QTreeWidgetItem* makeRenderedLayerRow(const RenderedLayerInfo& l, const QString& source);
 
     // Type conversion
     QString typeToString(ComponentType type) const;
@@ -185,7 +210,7 @@ private:
     // Shared tail of the interconnect views: the resolved fragments' body
     // layers as a live layer tree bound to the interposer (merge target).
     void populateInterconnectBodyLayers(const std::vector<std::string>& keys,
-                                        Technology* tech);
+                                        const Technology* tech);
 
     // Data
     ComponentID m_selectedComponentId;

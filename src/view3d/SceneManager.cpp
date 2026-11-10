@@ -23,9 +23,9 @@ void SceneManager::setSceneBounds(const AA_BOUNDING_BOX& bounds)
     m_sceneBounds = bounds;
 }
 
-void SceneManager::fitToScene()
+void SceneManager::fitToScene(float aspectRatio)
 {
-    m_camera.fitToBox(m_sceneBounds);
+    m_camera.fitToBox(m_sceneBounds, aspectRatio);
 }
 
 SceneManager::Ray SceneManager::screenToRay(int screenX, int screenY,

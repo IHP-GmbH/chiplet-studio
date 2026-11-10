@@ -10,8 +10,8 @@
  * z_bottom. There is no explicit order index. For the bundled PDKs that order
  * comes from the BlenderGDS stackup YAML resolved at "Priority 0"
  * (BlenderGDSConfigs::stackupPath + LayerStackup::loadFromBlenderGDS inside
- * AssemblyView::buildLayerGeometry); that bundled YAML owns the order for
- * every supported PDK.
+ * resolveTechnologyStackup, which 3D, die seating and the notes share); that
+ * bundled YAML owns the order for every supported PDK.
  *
  * These tests freeze the resolved order as a golden snapshot so any future
  * change to HOW the stackup is sourced is forced to keep the exact same
@@ -59,7 +59,8 @@ void writeFile(const std::filesystem::path& path, const std::string& content) {
 }
 
 // Canonical, tie-break-stable serialization of a stackup's layers in stacking
-// order. The production sort is by z_bottom alone; layers that share a z_bottom
+// order: z, thickness, layer/datatype, name, and purpose when set. The
+// production sort is by z_bottom alone; layers that share a z_bottom
 // are physically co-planar (a drawing layer and its filler), so their relative
 // draw order is immaterial. Here we add (layer, datatype) as a deterministic
 // tie-break so the snapshot text is stable regardless of std::sort's tie
@@ -77,7 +78,11 @@ std::string serializeOrder(const LayerStackup& stackup) {
     os << std::fixed << std::setprecision(4);
     for (const auto& l : layers) {
         os << l.z_bottom << '\t' << l.thickness << '\t'
-           << l.layer << '/' << l.datatype << '\t' << l.name << '\n';
+           << l.layer << '/' << l.datatype << '\t' << l.name;
+        // Purpose decides what starts hidden, so it is part of the contract.
+        // Only written when set, so a stackup without any keeps its old text.
+        if (!l.purpose.empty()) os << '\t' << l.purpose;
+        os << '\n';
     }
     return os.str();
 }
