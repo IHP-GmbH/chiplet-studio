@@ -1,14 +1,18 @@
 # GDS3D Techfile for Interposer
 # Derived from IHP SG13G2 - Upper metals + cu-pillar connection stack
 # Cu-pillar dimensions from SG13G2 Layout Rules Rev 2.1, Table 6.1 Option 1
+# Metal Height and Thickness are the interposer PDK's stack key in nm
+# (libs.tech/intm4tm2_stack.json, z = 0 at the substrate top), as in
+# configs/stackups/intm4tm2.yaml; the connection bodies start on the key's
+# plane, 10810.3.
 # Author: Chiplet Studio
 # Date: 2025
 
 LayerStart: Metal4
 Layer: 50
 Datatype: 0
-Height: 3880
-Thickness: 450
+Height: 640
+Thickness: 490
 Red: 0.58
 Green: 0.91
 Blue: 0.22
@@ -20,8 +24,8 @@ LayerEnd
 LayerStart: Via4
 Layer: 66
 Datatype: 0
-Height: 4330
-Thickness: 550
+Height: 1130
+Thickness: 540
 Red: 0.87
 Green: 0.67
 Blue: 0.37
@@ -33,8 +37,8 @@ LayerEnd
 LayerStart: Metal5
 Layer: 67
 Datatype: 0
-Height: 4880
-Thickness: 450
+Height: 1670
+Thickness: 490
 Red: 0.86
 Green: 0.82
 Blue: 0.27
@@ -46,8 +50,8 @@ LayerEnd
 LayerStart: TopVia1
 Layer: 125
 Datatype: 0
-Height: 5330
-Thickness: 830
+Height: 2160
+Thickness: 850.3
 Red: 1.00
 Green: 0.90
 Blue: 0.75
@@ -59,7 +63,7 @@ LayerEnd
 LayerStart: TopMetal1
 Layer: 126
 Datatype: 0
-Height: 6160
+Height: 3010.3
 Thickness: 2000
 Red: 1.00
 Green: 0.90
@@ -72,8 +76,8 @@ LayerEnd
 LayerStart: TopVia2
 Layer: 133
 Datatype: 0
-Height: 8160
-Thickness: 3000
+Height: 5010.3
+Thickness: 2800
 Red: 1.00
 Green: 0.50
 Blue: 0.00
@@ -85,7 +89,7 @@ LayerEnd
 LayerStart: TopMetal2
 Layer: 134
 Datatype: 0
-Height: 11160
+Height: 7810.3
 Thickness: 3000
 Red: 1.00
 Green: 0.50
@@ -98,7 +102,7 @@ LayerEnd
 LayerStart: Passiv
 Layer: 9
 Datatype: 0
-Height: 13830
+Height: 10810.3
 Thickness: 1900
 Red: 0.80
 Green: 0.80
@@ -111,7 +115,7 @@ LayerEnd
 LayerStart: CuPillar
 Layer: 500
 Datatype: 35
-Height: 13830
+Height: 10810.3
 Thickness: 28000
 Red: 0.72
 Green: 0.45
@@ -124,7 +128,7 @@ LayerEnd
 LayerStart: SnAgCap
 Layer: 501
 Datatype: 35
-Height: 41830
+Height: 38810.3
 Thickness: 16000
 Red: 0.75
 Green: 0.75
@@ -137,7 +141,7 @@ LayerEnd
 LayerStart: SolderBall
 Layer: 502
 Datatype: 36
-Height: 13830
+Height: 10810.3
 Thickness: 80000
 Red: 0.50
 Green: 0.50

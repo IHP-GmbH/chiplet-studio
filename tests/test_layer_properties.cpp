@@ -4,7 +4,9 @@
 
 #include <gtest/gtest.h>
 #include "view2d/LayerProperties.h"
+#include <QTemporaryDir>
 #include <filesystem>
+#include <fstream>
 
 namespace chiplet {
 namespace {
@@ -96,6 +98,15 @@ TEST(LayerPropertiesUtils, ParseLayerSourceEmpty)
     LayerKey key = parse_layer_source("");
     EXPECT_EQ(key.layer, 0);
     EXPECT_EQ(key.datatype, 0);
+}
+
+TEST(LayerPropertiesUtils, ParseLayerSourceWithNameAndCellview)
+{
+    EXPECT_EQ(parse_layer_source("Metal1_Dummy 34/4@1"), LayerKey(34, 4));
+    EXPECT_EQ(layer_source_name("Metal1_Dummy 34/4@1"), "Metal1_Dummy");
+    EXPECT_EQ(parse_layer_source("22/0@1"), LayerKey(22, 0));
+    EXPECT_EQ(layer_source_name("22/0@1"), "");
+    EXPECT_EQ(layer_source_name("  COMP  22/0@1"), "COMP");
 }
 
 // =============================================================================
@@ -400,6 +411,30 @@ TEST(LayerPropertiesFile, LoadEmptyPath)
 
     EXPECT_FALSE(result);
     EXPECT_EQ(lyp.layer_count(), 0u);
+}
+
+TEST(LayerPropertiesFile, EmptyNameTakesTheNameInTheSource)
+{
+    // The gf180mcu sheet leaves <name/> empty and names the layer in the source.
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const std::string path = dir.filePath("named.lyp").toStdString();
+    std::ofstream(path) << R"(<?xml version="1.0" encoding="utf-8"?>
+<layer-properties>
+ <properties><name/><source>Metal1_Dummy 34/4@1</source></properties>
+ <properties><name>Metal1</name><source>Metal1_Label 34/10@1</source></properties>
+ <properties><name/><source>22/0@1</source></properties>
+</layer-properties>
+)";
+    LayerPropertiesFile lyp;
+    ASSERT_TRUE(lyp.load(path)) << lyp.error();
+    ASSERT_EQ(lyp.layer_count(), 3u);
+    ASSERT_NE(lyp.find(34, 4), nullptr);
+    EXPECT_EQ(lyp.find(34, 4)->name, "Metal1_Dummy");
+    ASSERT_NE(lyp.find(34, 10), nullptr);
+    EXPECT_EQ(lyp.find(34, 10)->name, "Metal1");  // a written name wins
+    ASSERT_NE(lyp.find(22, 0), nullptr);
+    EXPECT_EQ(lyp.find(22, 0)->name, "");
 }
 
 TEST(LayerPropertiesFile, DefaultState)

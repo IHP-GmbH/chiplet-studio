@@ -1,6 +1,6 @@
-# Hermetic body-less interposer stackup WITHOUT attachment_surface_z. Pins
-# the best-effort fallback: a relative fragment merged onto this base is
-# offset by totalHeight() (Passiv top = 15.73) with a warning.
+# Hermetic body-less interposer stackup WITHOUT attachment_surface_z. With no
+# plane in the file either, a relative fragment merged onto this base sits on
+# the interposer's thickness; this file's height (Passiv top 15.73) is unused.
 TopMetal2:
   index: 134
   type: 0

@@ -20,6 +20,7 @@ class QLineEdit;
 class QComboBox;
 class QDoubleSpinBox;
 class QGroupBox;
+class QLabel;
 
 namespace chiplet {
 
@@ -52,6 +53,7 @@ private slots:
 private:
     QLineEdit* m_gdsEdit = nullptr;
     QComboBox* m_techCombo = nullptr;
+    QLabel* m_importsAsLabel = nullptr;
     QDoubleSpinBox* m_thicknessSpin = nullptr;
     QGroupBox* m_customGroup = nullptr;
     QLineEdit* m_lypEdit = nullptr;

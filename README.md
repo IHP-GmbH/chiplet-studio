@@ -10,13 +10,33 @@ console.
 ## Status
 
 > [!WARNING]
-> Chiplet Studio is currently a preview release only!
+> Chiplet Studio is alpha software. Its menus and its scripting API can
+> still change between versions.
+
+What is tested: `scripts/run-gate.sh` builds Studio and runs its whole ctest
+suite offline in a container. The suite covers reading and saving `.chiplet`
+files, the commands behind undo and redo, the 3D and 2D views and the Python
+API. The gate also reads the writer's output with a second YAML reader
+(PyYAML), so a save that only Studio could read fails it.
+
+What is not verified:
+
+- Thicknesses in the 3D view are for display. Some are scaled on purpose (the
+  silicon bulk is drawn 50 um thick, not as the 750 um wafer), so the view is no
+  measurement of the stack.
+- Nothing Studio shows or saves is a DRC, LVS or fabrication check. Those run in
+  the PDK and ADK tools, not here.
+- The portable bundle (`scripts/build-portable.sh`) is not part of the alpha
+  and is not supported. In the alpha, Studio runs from the ADK tools image or
+  from a build of this repository.
+- A `.chiplet` file's `flow:` block names programs, and the Flow Pipeline panel
+  runs them when you start them. Open only files you trust.
 
 ## Features
 
 - **3D Visualization** - Interactive assembly view with orbit camera and per-component render modes
 - **2D Drill-down** - KLayout-based GDS/OASIS viewing, with an assembly view and a shape-filtering slider
-- **Flow Orchestrator** - Run a configurable build pipeline against the assembly (View > Flow Pipeline)
+- **Flow Orchestrator** - Run the build steps a `.chiplet` file's `flow:` block defines (the Flow Pipeline panel appears when the file has one)
 - **Net Graph** - Inspect the assembly's connectivity
 - **Hierarchy Panel** - Tree view with component selection sync
 - **Properties Panel** - Component details with unit conversion
@@ -31,6 +51,11 @@ Chiplet Studio includes an embedded Python interpreter for automation and script
 1. Open **View > Python Console** (or press `` Ctrl+` ``)
 2. Type Python commands interactively
 3. Use the `chiplet_studio` module to manipulate the assembly
+
+Saving through `save_assembly` also follows the document's safe-save policy:
+an existing unrelated destination, or a loaded file changed externally, is
+refused. Use a fresh filename for a new document; loading a file authorizes
+replacing only its unchanged on-disk version.
 
 ### Example Script
 
@@ -108,41 +133,11 @@ startup:
 ./build/chiplet-studio path/to/assembly.chiplet
 ```
 
-### Portable bundle (no Docker, no root)
+### Portable bundle (not supported)
 
-To run on machines without Docker or system dependencies, build a
-self-contained bundle with `scripts/build-portable.sh`:
-
-```bash
-./scripts/build-portable.sh             # tarball, bundled software-GL fallback
-./scripts/build-portable.sh --appimage  # also emit an AppImage
-./scripts/build-portable.sh --lean      # smaller, host OpenGL only (~65 MB)
-```
-
-This writes to `dist/`:
-
-- **`chiplet-studio-portable.tar.gz`** (recommended); extract anywhere and run:
-  ```bash
-  tar xf chiplet-studio-portable.tar.gz
-  ./chiplet-studio-portable/AppRun [assembly.chiplet]
-  ```
-- **`Chiplet_Studio-x86_64.AppImage`**, single file:
-  ```bash
-  chmod +x Chiplet_Studio-x86_64.AppImage
-  ./Chiplet_Studio-x86_64.AppImage [assembly.chiplet]
-  # on systems without FUSE2:
-  ./Chiplet_Studio-x86_64.AppImage --appimage-extract-and-run [assembly.chiplet]
-  ```
-
-The bundle runs on any glibc 2.35+ Linux (Ubuntu 22.04 or newer). By default it
-uses the host GPU when it provides OpenGL 3.3, otherwise it transparently falls
-back to a bundled software renderer (llvmpipe). Force a mode with the
-`CHIPLET_GL` environment variable:
-
-```bash
-CHIPLET_GL=hardware ./AppRun   # always use the host GPU
-CHIPLET_GL=software ./AppRun   # always use the bundled software renderer
-```
+`scripts/build-portable.sh` once built a self-contained tarball and AppImage.
+It has not been run since June 2026 and is not part of the alpha. Treat it as
+unmaintained until it is revived and tested again.
 
 ## Project Structure
 
@@ -156,25 +151,36 @@ chiplet-studio/
 │   ├── view2d/     # KLayout integration
 │   ├── scripting/  # Embedded Python (pybind11)
 │   └── ui/         # Qt UI components
-├── tests/          # Google Test suite (562 tests via ctest)
-├── docs/           # Documentation
+├── tests/          # Google Test suite, run through ctest
+├── docs/           # Pages the ADK documentation includes
 └── extern/klayout  # KLayout submodule
 ```
 
 `src/formats/` no longer hand-parses the format: `ChipletFormat` is a thin
 consumer that delegates `.chiplet` parsing and validation to the vendored,
 Apache-2.0 `chiplet_format_io` reference library (a verbatim copy of
-IHP-GmbH/chiplet-spec; see `src/formats/chiplet_format_io/VENDORED.md`) and maps
-its `ChipletDocument` into `core/Assembly`.
+IHP-GmbH/chiplet-system-spec; see `src/formats/chiplet_format_io/VENDORED.md`)
+and maps its `ChipletDocument` into `core/Assembly`.
 
 ## Documentation
 
-- `docs/ARCHITECTURE.md` - Architecture and technical decisions
-- `docs/CHIPLET_FORMAT_SPEC.md` - Pointer to the canonical `.chiplet` spec (IHP-GmbH/chiplet-spec)
-- `docs/coord_frame_contract.md` - Pointer to the canonical coordinate-frame contract (IHP-GmbH/chiplet-spec)
-- `docs/interconnect_render_contract.md` - Interconnect body rendering and die seating contract (Chiplet Studio implementation contract)
-- `docs/FLOW_ORCHESTRATOR.md` - Flow orchestration
-- `docs/CODE_STYLE.md` - Coding standards
+The two contract documents this code is written against are maintained in
+[IHP-GmbH/chiplet-system-spec](https://github.com/IHP-GmbH/chiplet-system-spec)
+(Apache-2.0), so that the format can be implemented under any license:
+
+- `docs/CHIPLET_FORMAT_SPEC.md` - the `.chiplet` format
+- `docs/coord_frame_contract.md` - the coordinate frame, the `anchor:`
+  convention and the z-mounting rule
+
+Both are cited by section number throughout this source tree, and both are
+backed here by tests: `tests/test_coord_frame_contract.cpp` and
+`tests/test_chiplet_format*.cpp`.
+
+This repository's own `docs/` holds only the pages the ADK documentation
+includes: an index and a usage page, and the Python API reference, which
+`scripts/gen-api-reference.py` generates from the built module. The contract
+documents are not there, so a `docs/` citation in a source comment means the
+spec repository above.
 
 ## Capabilities
 
@@ -205,6 +211,6 @@ It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
 without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 PURPOSE. See the [`LICENSE`](LICENSE) file for the full GPL-3.0 text.
 
-Chiplet Studio links **KLayout** (GPL-3.0-or-later), so the combined work is
-licensed GPL-3.0-or-later. See [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md)
+Chiplet Studio links **KLayout** (GPL-2.0-or-later) and Qt 6 (LGPL-3.0), and
+the combined work is licensed GPL-3.0-or-later. See [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md)
 for the licenses of all bundled and linked third-party components.

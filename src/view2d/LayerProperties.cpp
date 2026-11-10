@@ -45,22 +45,54 @@ LayerColor parse_hex_color(const std::string& hex)
     return color;
 }
 
-// Parse layer/datatype source string (e.g., "40/0")
+namespace {
+
+// Where the layer/datatype word of a source starts: the word holding its last
+// '/'. npos when there is no '/'.
+std::size_t sourceKeyStart(const std::string& source)
+{
+    const std::size_t slash = source.rfind('/');
+    if (slash == std::string::npos) {
+        return std::string::npos;
+    }
+    const std::size_t space = source.find_last_of(" \t", slash);
+    return space == std::string::npos ? 0 : space + 1;
+}
+
+}  // namespace
+
+// Parse layer/datatype source string (e.g., "40/0" or "Metal1_Dummy 34/4@1")
 LayerKey parse_layer_source(const std::string& source)
 {
     LayerKey key;
 
-    size_t slash_pos = source.find('/');
-    if (slash_pos != std::string::npos) {
+    const std::size_t start = sourceKeyStart(source);
+    if (start != std::string::npos) {
+        const std::string word = source.substr(start);
+        const size_t slash_pos = word.find('/');
         try {
-            key.layer = std::stoi(source.substr(0, slash_pos));
-            key.datatype = std::stoi(source.substr(slash_pos + 1));
+            key.layer = std::stoi(word.substr(0, slash_pos));
+            key.datatype = std::stoi(word.substr(slash_pos + 1));
         } catch (const std::exception&) {
             // Invalid format, return default (0/0)
         }
     }
 
     return key;
+}
+
+std::string layer_source_name(const std::string& source)
+{
+    const std::size_t start = sourceKeyStart(source);
+    if (start == std::string::npos || start == 0) {
+        return {};
+    }
+    const std::size_t first = source.find_first_not_of(" \t");
+    const std::size_t last = source.find_last_not_of(" \t", start - 1);
+    if (first == std::string::npos || last == std::string::npos || last < first) {
+        return {};
+    }
+    return source.substr(first, last - first + 1);
 }
 
 bool LayerPropertiesFile::load(const string_type& path)
@@ -79,6 +111,7 @@ bool LayerPropertiesFile::load(const string_type& path)
     QXmlStreamReader xml(&file);
 
     LayerStyle current_style;
+    std::string source_name;
     bool in_properties = false;
 
     while (!xml.atEnd() && !xml.hasError()) {
@@ -90,6 +123,7 @@ bool LayerPropertiesFile::load(const string_type& path)
             if (name == "properties") {
                 in_properties = true;
                 current_style = LayerStyle();
+                source_name.clear();
             } else if (in_properties) {
                 // Read element content
                 QString content = xml.readElementText();
@@ -99,6 +133,7 @@ bool LayerPropertiesFile::load(const string_type& path)
                     current_style.name = content_str;
                 } else if (name == "source") {
                     current_style.key = parse_layer_source(content_str);
+                    source_name = layer_source_name(content_str);
                 } else if (name == "fill-color") {
                     current_style.fill_color = parse_hex_color(content_str);
                 } else if (name == "frame-color") {
@@ -138,6 +173,10 @@ bool LayerPropertiesFile::load(const string_type& path)
 
             if (name == "properties" && in_properties) {
                 in_properties = false;
+                // An empty <name/> takes the name the source carries.
+                if (current_style.name.empty()) {
+                    current_style.name = source_name;
+                }
 
                 // Add layer to collection
                 size_t index = m_layers.size();

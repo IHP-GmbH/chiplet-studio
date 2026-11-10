@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 IHP GmbH
+
+# Not a Python package. Chiplet Studio builds with CMake and its gating suite is
+# the ctest census, which needs Qt6 and the in-tree KLayout. This file exists so
+# that a host with no compiler can run the checks that need neither
+# (tests/contracts/) under pytest. Nothing is importable: both module lists are
+# empty, which also turns setuptools' package discovery off.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chiplet-studio-contracts"
+version = "0.0.0"
+description = "Chiplet Studio's compiler-free contract checks, run under pytest"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools]
+py-modules = []
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests/contracts"]
+# -ra prints the reason for every skip. --strict-markers and --strict-config
+# turn a typo in a marker or an ini key into an error instead of a silently
+# ignored line. No -m here: a bare `pytest` runs every case, the sibling one
+# included, and a tiered runner splits that selection by the marker below.
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "needs_sibling_sources: reads a sibling repository under $HCDP_ROOT (chiplet-spec); skips when HCDP_ROOT names none or the export does not hold the vendored bytes",
+]
+
+# A tiered runner reads every skip it is not told about as a failure. The
+# sibling case skips wherever the chiplet-system-spec export does not carry the
+# vendored reader's bytes, which is the normal state once the pinned spec has
+# moved past the vendored release; the gate then rests on ci/check_vendored.py.
+[[tool.tierrun.declared-skips]]
+reason = "holds no copy of the vendored reader"
+nodeid = "test_vendored_reader_is_in_the_pinned_export"

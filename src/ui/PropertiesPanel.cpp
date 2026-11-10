@@ -27,6 +27,9 @@
 #include <QIcon>
 #include <QFileInfo>
 #include <QPainter>
+#include <QScrollBar>
+#include <map>
+#include <set>
 
 namespace chiplet {
 
@@ -508,6 +511,13 @@ QPixmap createPatternSwatch(const LayerStyle& layer, int swatchSize = 16)
     return pix;
 }
 
+// A row 3D can show or hide carries its layer; a row listing a layer 3D drew
+// none of carries none, and no visibility op may touch it.
+bool isLayerRow(const QTreeWidgetItem* item)
+{
+    return item->data(0, Qt::UserRole).isValid();
+}
+
 } // anonymous namespace
 
 void PropertiesPanel::showInterconnect()
@@ -549,7 +559,7 @@ void PropertiesPanel::showInterconnect()
         m_metadataTree->addTopLevelItem(item);
     };
 
-    Technology* tech = m_assembly->technology(adapter);
+    const Technology* tech = m_assembly->technology(adapter);
     if (tech && !tech->description().empty()) {
         addRow("description", QString::fromStdString(tech->description()));
     }
@@ -609,7 +619,7 @@ void PropertiesPanel::showInterconnectMethod(const QString& dieId,
     addRow("die", dieId);
     addRow("method", methodId);
 
-    Technology* tech = m_assembly->technology(adapter);
+    const Technology* tech = m_assembly->technology(adapter);
     if (tech && !tech->description().empty()) {
         addRow("description", QString::fromStdString(tech->description()));
     }
@@ -636,13 +646,13 @@ void PropertiesPanel::showInterconnectMethod(const QString& dieId,
 }
 
 void PropertiesPanel::populateInterconnectBodyLayers(
-    const std::vector<std::string>& keys, Technology* tech)
+    const std::vector<std::string>& keys, const Technology* tech)
 {
     // Body layers as a live layer tree, bound to the interposer component
     // (the merge target, where the bodies render). The existing checkbox
     // plumbing (onLayerItemChanged -> layerVisibilityChanged -> 3D view)
     // then works unchanged for show/hide of the interconnect bodies.
-    Component* interposer = nullptr;
+    const Component* interposer = nullptr;
     for (const auto& c : m_assembly->components()) {
         if (c->type() == ComponentType::Interposer) {
             interposer = c.get();
@@ -733,9 +743,22 @@ void PropertiesPanel::updateLayersGroup()
         return;
     }
 
-    m_layersGroup->setTitle(QString("Layers (%1)").arg(m_layerProps.layer_count()));
+    // What 3D drew for this component: marks fill, and supplies the layers
+    // the .lyp does not list.
+    std::vector<RenderedLayerInfo> rendered;
+    if (m_layerListResolver && is_valid_id(m_selectedComponentId)) {
+        rendered = m_layerListResolver(QString::fromStdString(m_selectedComponentId));
+    }
+    std::set<std::pair<int, int>> fillKeys;
+    std::map<std::pair<int, int>, const RenderedLayerInfo*> counted;
+    for (const auto& l : rendered) {
+        if (l.fill) fillKeys.insert({l.layer, l.datatype});
+        if (!l.count.isEmpty()) counted[{l.layer, l.datatype}] = &l;
+    }
+    std::set<std::pair<int, int>> listed;
 
     for (const auto& layer : m_layerProps.layers()) {
+        listed.insert({layer.key.layer, layer.key.datatype});
         QTreeWidgetItem* item = new QTreeWidgetItem();
 
         // Pattern swatch as icon (renders pattern if present)
@@ -746,6 +769,14 @@ void PropertiesPanel::updateLayersGroup()
         QString name = QString::fromStdString(layer.name);
         if (layer.has_pattern()) {
             name += QString(" [%1]").arg(QString::fromStdString(layer.dither_pattern));
+        }
+        const bool fill = fillKeys.count({layer.key.layer, layer.key.datatype}) > 0;
+        if (fill) {
+            name += " (fill)";
+        }
+        auto limited = counted.find({layer.key.layer, layer.key.datatype});
+        if (limited != counted.end()) {
+            name += ", " + limited->second->count;
         }
         item->setText(0, name);
         item->setText(1, QString("%1/%2").arg(layer.key.layer).arg(layer.key.datatype));
@@ -770,13 +801,102 @@ void PropertiesPanel::updateLayersGroup()
             .arg(layer.key.datatype)
             .arg(layer.has_pattern() ?
                  QString::fromStdString(layer.dither_pattern) : "Solid");
+        if (fill) {
+            tooltip += "\nFill: hidden at open; View > Show Fill switches all fill";
+        }
+        if (limited != counted.end()) {
+            tooltip += "\n" + limited->second->countNote;
+        }
         item->setToolTip(0, tooltip);
         item->setToolTip(1, tooltip);
 
         m_layerTree->addTopLevelItem(item);
     }
 
+    for (const auto& l : rendered) {
+        if (listed.count({l.layer, l.datatype})) continue;
+        m_layerTree->addTopLevelItem(makeRenderedLayerRow(l, "not in the .lyp"));
+    }
+    m_layersGroup->setTitle(QString("Layers (%1)").arg(m_layerTree->topLevelItemCount()));
+
     m_blockLayerSync = false;
+}
+
+QTreeWidgetItem* PropertiesPanel::makeRenderedLayerRow(const RenderedLayerInfo& l,
+                                                        const QString& source)
+{
+    const QString compId = QString::fromStdString(m_selectedComponentId);
+    QTreeWidgetItem* item = new QTreeWidgetItem();
+    QString name = l.name.isEmpty()
+                   ? QString("Layer %1/%2").arg(l.layer).arg(l.datatype)
+                   : l.name;
+    if (l.fill) {
+        name += " (fill)";
+    }
+    if (!l.count.isEmpty()) {
+        name += ", " + l.count;
+    }
+    item->setText(0, name);
+    item->setText(1, QString("%1/%2").arg(l.layer).arg(l.datatype));
+
+    // A layer 3D drew none of has no mesh to show or hide, so no checkbox.
+    if (l.meshed) {
+        bool visible = m_layerVisibilityResolver
+            ? m_layerVisibilityResolver(compId, l.layer, l.datatype)
+            : true;
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+        item->setData(0, Qt::UserRole, l.layer);
+        item->setData(0, Qt::UserRole + 1, l.datatype);
+    } else {
+        item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
+    }
+
+    QString tooltip = QString("Layer: %1\nL/D: %2/%3\n(from PDK stackup; %4)")
+        .arg(l.name).arg(l.layer).arg(l.datatype).arg(source);
+    if (l.fill) {
+        tooltip += "\nFill: hidden at open; View > Show Fill switches all fill";
+    }
+    if (!l.countNote.isEmpty()) {
+        tooltip += "\n" + l.countNote;
+    }
+    item->setToolTip(0, tooltip);
+    item->setToolTip(1, tooltip);
+    return item;
+}
+
+void PropertiesPanel::refreshLayerChecks()
+{
+    if (!m_layerVisibilityResolver || !is_valid_id(m_selectedComponentId)) {
+        return;
+    }
+    const QString compId = QString::fromStdString(m_selectedComponentId);
+    m_blockLayerSync = true;
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        const QVariant layer = item->data(0, Qt::UserRole);
+        const QVariant datatype = item->data(0, Qt::UserRole + 1);
+        if (!layer.isValid() || !datatype.isValid()) continue;
+        const bool visible = m_layerVisibilityResolver(compId, layer.toInt(), datatype.toInt());
+        item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+    }
+    m_blockLayerSync = false;
+}
+
+void PropertiesPanel::refreshLayerRows()
+{
+    // The interconnect's body rows are not the view's to change.
+    if (!is_valid_id(m_selectedComponentId) || m_layersForComponent != m_selectedComponentId) {
+        return;
+    }
+    const QString filter = m_layerFilter ? m_layerFilter->text() : QString();
+    const int scroll = m_layerTree->verticalScrollBar()->value();
+    m_layersForComponent = INVALID_COMPONENT_ID;
+    updateLayersGroup();
+    if (m_layerFilter && !filter.isEmpty()) {
+        m_layerFilter->setText(filter);
+    }
+    m_layerTree->verticalScrollBar()->setValue(scroll);
 }
 
 void PropertiesPanel::populateLayersFromRenderer()
@@ -800,26 +920,7 @@ void PropertiesPanel::populateLayersFromRenderer()
 
     m_layersGroup->setTitle(QString("Layers (%1)").arg(layers.size()));
     for (const auto& l : layers) {
-        QTreeWidgetItem* item = new QTreeWidgetItem();
-        item->setText(0, l.name.isEmpty()
-                         ? QString("Layer %1/%2").arg(l.layer).arg(l.datatype)
-                         : l.name);
-        item->setText(1, QString("%1/%2").arg(l.layer).arg(l.datatype));
-
-        bool visible = m_layerVisibilityResolver
-            ? m_layerVisibilityResolver(compId, l.layer, l.datatype)
-            : true;
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
-        item->setData(0, Qt::UserRole, l.layer);
-        item->setData(0, Qt::UserRole + 1, l.datatype);
-
-        QString tooltip = QString("Layer: %1\nL/D: %2/%3\n(from PDK stackup; no .lyp)")
-            .arg(l.name).arg(l.layer).arg(l.datatype);
-        item->setToolTip(0, tooltip);
-        item->setToolTip(1, tooltip);
-
-        m_layerTree->addTopLevelItem(item);
+        m_layerTree->addTopLevelItem(makeRenderedLayerRow(l, "no .lyp"));
     }
 }
 
@@ -829,7 +930,7 @@ void PropertiesPanel::onLayerItemChanged(QTreeWidgetItem* item, int column)
     if (m_blockLayerSync || !item) {
         return;
     }
-    if (!is_valid_id(m_selectedComponentId)) {
+    if (!is_valid_id(m_selectedComponentId) || !isLayerRow(item)) {
         return;
     }
 
@@ -857,7 +958,7 @@ void PropertiesPanel::setAllLayersVisible(bool visible)
     const Qt::CheckState target = visible ? Qt::Checked : Qt::Unchecked;
     for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
         QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
-        if (item->isHidden()) continue;  // filter-hidden rows untouched
+        if (item->isHidden() || !isLayerRow(item)) continue;  // filter-hidden rows untouched
         if (item->checkState(0) != target) {
             item->setCheckState(0, target);
         }
@@ -871,6 +972,7 @@ void PropertiesPanel::showOnlyLayer(int layer, int datatype)
     // "only this" would silently leave them visible.
     for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
         QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        if (!isLayerRow(item)) continue;
         const int l = item->data(0, Qt::UserRole).toInt();
         const int d = item->data(0, Qt::UserRole + 1).toInt();
         const Qt::CheckState target = (l == layer && d == datatype)
@@ -885,7 +987,7 @@ void PropertiesPanel::invertLayerVisibility()
 {
     for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
         QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
-        if (item->isHidden()) continue;  // filter-hidden rows untouched
+        if (item->isHidden() || !isLayerRow(item)) continue;  // filter-hidden rows untouched
         const Qt::CheckState target =
             item->checkState(0) == Qt::Checked ? Qt::Unchecked : Qt::Checked;
         item->setCheckState(0, target);
@@ -898,6 +1000,7 @@ void PropertiesPanel::showOnlyMatchingFilter()
     // filter-hidden rows get unchecked. The one bulk op that does touch hidden rows.
     for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
         QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+        if (!isLayerRow(item)) continue;
         const Qt::CheckState target =
             item->isHidden() ? Qt::Unchecked : Qt::Checked;
         if (item->checkState(0) != target) {
@@ -922,7 +1025,7 @@ void PropertiesPanel::onLayerContextMenu(const QPoint& pos)
         "QMenu::separator { height: 1px; background: #555; margin: 2px 8px; }"
     );
 
-    if (item) {
+    if (item && isLayerRow(item)) {
         const bool isVisible = (item->checkState(0) == Qt::Checked);
         const int layer = item->data(0, Qt::UserRole).toInt();
         const int datatype = item->data(0, Qt::UserRole + 1).toInt();
@@ -1041,7 +1144,7 @@ void PropertiesPanel::loadLayerProperties()
         return;
     }
 
-    Technology* tech = m_assembly->resolve_component_technology(m_selectedComponentId);
+    const Technology* tech = m_assembly->resolve_component_technology(m_selectedComponentId);
     if (!tech) {
         return;
     }

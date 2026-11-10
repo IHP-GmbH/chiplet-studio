@@ -1,71 +1,80 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 IHP GmbH
-"""Hold src/formats/chiplet_format_io/ to the verbatim copy it declares itself to be.
+"""Hold src/formats/chiplet_format_io/ to the copy VENDORED.md records.
 
 CONTRIBUTING.md forbids editing the vendored reader in place: fixes belong
-upstream in chiplet-spec and come back as a re-vendor. Nothing enforced that,
-and the copy had silently grown a field the upstream reference did not have
-while missing three upstream commits, in both directions at once, with every
-suite green. This is the enforcement.
+upstream in chiplet-system-spec and come back as a re-vendor. Nothing enforced
+that, and the copy had silently grown a field the upstream reference did not
+have while missing three upstream commits, in both directions at once, with
+every suite green. This is the enforcement.
 
-What is compared is the copy against the commit VENDORED.md itself names, not
-against the upstream tip. Comparing against the tip would turn every upstream
-change into a red gate here and train the reflex of bumping the declared commit
-to make the red go away, which is the opposite of the property wanted. Noticing
-that the declared commit has gone stale is drift, and drift belongs in the
-weekly integration run, not in a merge gate.
+VENDORED.md records a content digest of the vendored files, which anyone can
+recompute with sha256sum, and no upstream commit id. This check needs no
+network and no upstream checkout: the declared file list must be exactly the
+files on disk, and those files must hash to the recorded digest.
+
+That is all it proves. The copy matches the note; it does not prove the note
+matches upstream. An edit that also rewrites the digest passes here, so a
+change to the digest line is the thing a reviewer must hold to a real
+re-vendor. The comparison with upstream bytes is the contracts case
+test_vendored_reader_is_in_the_pinned_export, which needs a chiplet-system-spec
+export and skips where the export does not hold these bytes.
 
 Usage:
-    check_vendored.py --spec-dir <chiplet-spec checkout>
-    check_vendored.py --print-commit          # the sha VENDORED.md declares
-    check_vendored.py --self-test             # prove the checks can fail
+    check_vendored.py                  # the copy against its recorded digest
+    check_vendored.py --print-files    # the declared files, one per line
+    check_vendored.py --print-digest   # the recorded digest
+    check_vendored.py --self-test      # prove each check can fail
 """
 
 import argparse
 import hashlib
 import pathlib
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 
 VENDOR_DIR = pathlib.Path("src/formats/chiplet_format_io")
-UPSTREAM_SUBDIR = "reference/cpp"
 VENDORED_SUFFIXES = {".hpp", ".cpp"}
+DIGEST_LINE = re.compile(r"^- \*\*Content digest:\*\* `([0-9a-f]{64})`", re.M)
 
 
 def parse_vendored_md(path):
-    """Return (commit, declared file list) from a VENDORED.md."""
+    """Return (recorded digest, declared file list) from a VENDORED.md."""
     text = path.read_text()
 
-    m = re.search(r"^- \*\*Commit:\*\* `([0-9a-f]{40})`", text, re.M)
+    m = DIGEST_LINE.search(text)
     if not m:
         raise SystemExit(
-            "%s: no `- **Commit:** <40 hex>` line. The vendoring commit is what "
-            "the copy is compared against; without it there is nothing to "
-            "compare to." % path
+            "%s: no `- **Content digest:** <64 hex>` line. The digest is what "
+            "the copy is checked against; without it there is nothing to "
+            "check." % path
         )
-    commit = m.group(1)
+    digest = m.group(1)
 
     declared = re.findall(r"^- `([^`]+\.(?:hpp|cpp))`", text, re.M)
     if not declared:
         raise SystemExit(
             "%s: no declared file list (lines of the form ``- `path.cpp` ``)." % path
         )
-    return commit, sorted(declared)
+    return digest, sorted(declared)
 
 
-def sha256(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def content_digest(base, files):
+    """`cd <base> && sha256sum <files sorted by path> | sha256sum`."""
+    listing = "".join(
+        "%s  %s\n" % (hashlib.sha256((base / rel).read_bytes()).hexdigest(), rel)
+        for rel in sorted(files)
+    )
+    return hashlib.sha256(listing.encode()).hexdigest()
 
 
-def check(root, spec_dir):
-    """Return a list of failure strings; empty means the copy is verbatim."""
-    failures = []
+def check(root):
+    """Return a list of failure strings; empty means the copy matches the note."""
     vendor = root / VENDOR_DIR
-    commit, declared = parse_vendored_md(vendor / "VENDORED.md")
+    digest, declared = parse_vendored_md(vendor / "VENDORED.md")
 
     on_disk = sorted(
         str(p.relative_to(vendor))
@@ -73,79 +82,75 @@ def check(root, spec_dir):
         if p.is_file() and p.suffix in VENDORED_SUFFIXES
     )
     if on_disk != declared:
-        failures.append(
+        return [
             "VENDORED.md declares %s but the directory holds %s. A file that is "
             "vendored without being declared is a copy nobody knows to re-sync."
             % (declared, on_disk)
-        )
+        ]
 
-    upstream = pathlib.Path(spec_dir) / UPSTREAM_SUBDIR
-    for rel in sorted(set(declared) | set(on_disk)):
-        ours, theirs = vendor / rel, upstream / rel
-        if not ours.exists():
-            failures.append("%s: declared in VENDORED.md, absent from the tree" % rel)
-            continue
-        if not theirs.exists():
-            failures.append(
-                "%s: not present in %s at %s. Either it was added here in place "
-                "(forbidden; upstream it instead) or the declared commit is wrong."
-                % (rel, UPSTREAM_SUBDIR, commit[:7])
-            )
-            continue
-        if sha256(ours) != sha256(theirs):
-            failures.append(
-                "%s: differs from chiplet-spec@%s. Do not edit the vendored copy; "
-                "change it upstream and re-vendor, updating VENDORED.md."
-                % (rel, commit[:7])
-            )
-    return failures
+    # The computed digest is left out of the message on purpose: printed next
+    # to "update VENDORED.md" it reads as the value to paste, which turns an
+    # in-place edit into a passing one.
+    if content_digest(vendor, declared) != digest:
+        return [
+            "the vendored files do not hash to the digest VENDORED.md records. "
+            "Do not edit the vendored copy; change it upstream and re-vendor."
+        ]
+    return []
 
 
 def self_test():
-    """Every check above, made to fail on purpose.
+    """Every check above, made to fail on purpose, each by its own message.
 
     A checker with no negative test is indistinguishable from a checker that
     returns 0 unconditionally, and this one runs in a gate.
     """
     src_root = pathlib.Path(__file__).resolve().parent.parent
-    commit, declared = parse_vendored_md(src_root / VENDOR_DIR / "VENDORED.md")
+    _, declared = parse_vendored_md(src_root / VENDOR_DIR / "VENDORED.md")
 
     with tempfile.TemporaryDirectory() as tmp:
-        tmp = pathlib.Path(tmp)
-        root, spec = tmp / "studio", tmp / "spec"
-        (root / VENDOR_DIR).mkdir(parents=True)
-        (spec / UPSTREAM_SUBDIR).mkdir(parents=True)
-
-        shutil.copy(src_root / VENDOR_DIR / "VENDORED.md", root / VENDOR_DIR)
+        root = pathlib.Path(tmp)
+        vendor = root / VENDOR_DIR
+        vendor.mkdir(parents=True)
         for rel in declared:
-            for base in (root / VENDOR_DIR, spec / UPSTREAM_SUBDIR):
-                (base / rel).parent.mkdir(parents=True, exist_ok=True)
-                (base / rel).write_text("// %s\n" % rel)
+            (vendor / rel).parent.mkdir(parents=True, exist_ok=True)
+            (vendor / rel).write_text("// %s\n" % rel)
+
+        # The real note, re-pointed at the stand-in files' digest, so the
+        # parser under test is the one the gate runs on the real note.
+        note = (src_root / VENDOR_DIR / "VENDORED.md").read_text()
+        note, n = DIGEST_LINE.subn(
+            "- **Content digest:** `%s`" % content_digest(vendor, declared), note)
+        assert n == 1, "VENDORED.md has %d digest lines, expected 1" % n
+        (vendor / "VENDORED.md").write_text(note)
 
         cases = []
 
-        def expect(name, want_fail):
-            got = check(root, spec)
-            ok = bool(got) == want_fail
+        def expect(name, fragment):
+            """fragment None: must pass; else must fail with that in the message."""
+            got = check(root)
+            ok = not got if fragment is None else any(fragment in f for f in got)
             cases.append((name, ok, got))
-            return ok
 
-        expect("identical trees pass", False)
+        expect("the recorded copy passes", None)
 
-        victim = root / VENDOR_DIR / declared[0]
+        victim = vendor / declared[0]
         original = victim.read_text()
         victim.write_text(original + "// edited in place\n")
-        expect("an in-place edit fails", True)
+        expect("an in-place edit fails", "do not hash to the digest")
         victim.write_text(original)
 
-        stray = root / VENDOR_DIR / "src" / "extra_helper.cpp"
+        stray = vendor / "src" / "extra_helper.cpp"
         stray.parent.mkdir(parents=True, exist_ok=True)
         stray.write_text("// undeclared\n")
-        expect("an undeclared vendored file fails", True)
+        expect("an undeclared vendored file fails", "vendored without being declared")
         stray.unlink()
 
-        (spec / UPSTREAM_SUBDIR / declared[0]).unlink()
-        expect("a file missing upstream fails", True)
+        victim.unlink()
+        expect("a declared file that is absent fails", "vendored without being declared")
+        victim.write_text(original)
+
+        expect("the restored copy passes again", None)
 
         ok = True
         for name, passed, got in cases:
@@ -158,8 +163,8 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--spec-dir", help="a chiplet-spec checkout at the declared commit")
-    ap.add_argument("--print-commit", action="store_true")
+    ap.add_argument("--print-files", action="store_true")
+    ap.add_argument("--print-digest", action="store_true")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -173,19 +178,20 @@ def main():
     if args.self_test:
         return self_test()
 
-    if args.print_commit:
-        print(parse_vendored_md(root / VENDOR_DIR / "VENDORED.md")[0])
+    digest, declared = parse_vendored_md(root / VENDOR_DIR / "VENDORED.md")
+    if args.print_files:
+        print("\n".join(declared))
+        return 0
+    if args.print_digest:
+        print(digest)
         return 0
 
-    if not args.spec_dir:
-        ap.error("--spec-dir is required unless --print-commit or --self-test")
-
-    failures = check(root, args.spec_dir)
+    failures = check(root)
     for f in failures:
         print("FAIL: %s" % f, file=sys.stderr)
     if failures:
         return 1
-    print("vendored chiplet_format_io is verbatim against the declared commit")
+    print("vendored chiplet_format_io matches the digest VENDORED.md records")
     return 0
 
 

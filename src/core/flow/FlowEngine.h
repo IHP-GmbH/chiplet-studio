@@ -69,6 +69,11 @@ signals:
 private:
     void execute_next();
     void start_process(FlowStep& step);
+    // Record a reason on the step, mark it failed and unwind the queue,
+    // without ever having started a process. Both pre-launch refusals use it,
+    // so a step that never ran reports the same way whichever check stopped it.
+    void fail_before_launch(FlowStep& step, const std::string& reason);
+
     QString build_program(const FlowStep& step) const;
     QStringList build_command_args(const FlowStep& step) const;
 

@@ -158,27 +158,36 @@ except Exception as e:
 print("")
 print("Test 8: Save and load assembly...")
 try:
-    # Save to temp file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.chiplet', delete=False) as f:
-        temp_path = f.name
+    # A new model may create a fresh destination, not replace an unrelated
+    # pre-created file. Keep both the refusal and positive round-trip controls.
+    with tempfile.TemporaryDirectory(prefix='studio-bindings-') as directory:
+        occupied = os.path.join(directory, 'unrelated.chiplet')
+        with open(occupied, 'wb') as f:
+            f.write(b'unrelated original bytes\n')
+        try:
+            cs.save_assembly(asm, occupied)
+            raise AssertionError('Unrelated destination was overwritten')
+        except RuntimeError as refused:
+            assert 'unrelated destination' in str(refused), str(refused)
+        with open(occupied, 'rb') as f:
+            assert f.read() == b'unrelated original bytes\n'
 
-    cs.save_assembly(asm, temp_path)
-    print(f"  Saved to: {temp_path}")
+        temp_path = os.path.join(directory, 'roundtrip.chiplet')
+        assert not os.path.exists(temp_path)
+        cs.save_assembly(asm, temp_path)
+        print(f"  Saved to: {temp_path}")
 
-    # Load back
-    loaded = cs.load_assembly(temp_path)
-    assert loaded.name == "Test Assembly"
-    assert loaded.component_count == 3
+        # Load back
+        loaded = cs.load_assembly(temp_path)
+        assert loaded.name == "Test Assembly"
+        assert loaded.component_count == 3
 
-    # Verify component data preserved
-    die_loaded = loaded.component("die_1")
-    assert die_loaded is not None
-    assert die_loaded.position.x == 500.0
-    assert die_loaded.position.y == 600.0
-    print(f"  Loaded: {repr(loaded)}")
-
-    # Clean up
-    os.unlink(temp_path)
+        # Verify component data preserved
+        die_loaded = loaded.component("die_1")
+        assert die_loaded is not None
+        assert die_loaded.position.x == 500.0
+        assert die_loaded.position.y == 600.0
+        print(f"  Loaded: {repr(loaded)}")
     print("  PASS")
 except Exception as e:
     print(f"  FAIL: {e}")

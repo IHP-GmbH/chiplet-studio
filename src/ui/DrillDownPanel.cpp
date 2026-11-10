@@ -25,6 +25,10 @@
 #include <QFile>
 #include <QTimer>
 #include <QEvent>
+#include <QMap>
+#include <QFont>
+
+#include <algorithm>
 
 namespace chiplet {
 
@@ -69,6 +73,12 @@ void DrillDownPanel::setupUI()
     navLayout->setSpacing(6);
 
     m_backButton = new QPushButton("<- Back", navBar);
+    // Correct for the state this is set in. Back is state-dependent and the
+    // tooltip is rewritten to match at three other sites: "Show full assembly
+    // view" once an assembly GDS loads (setAssemblyGds, returnToAssembly) and
+    // "Back to full assembly view" on drill-down when one is loaded. With none
+    // loaded, which is the state here, MainWindow's handler hides the 2D dock
+    // and the user is back in the 3D view.
     m_backButton->setToolTip("Return to 3D view");
     m_backButton->setFixedWidth(70);
     navLayout->addWidget(m_backButton);
@@ -106,7 +116,10 @@ void DrillDownPanel::setupUI()
     m_overviewToggle = new QToolButton(navBar);
     m_overviewToggle->setText("Overview");
     m_overviewToggle->setCheckable(true);
-    m_overviewToggle->setChecked(true);
+    // Off on a fresh window: the mini-map sits over the lower-right artwork, so
+    // it is opt-in. The member below starts false to match; the user's choice
+    // then survives load, drill-down and Back for the rest of the session.
+    m_overviewToggle->setChecked(false);
     m_overviewToggle->setToolTip("Toggle overview navigator (corner mini-map)");
     navLayout->addWidget(m_overviewToggle);
 
@@ -278,7 +291,7 @@ void DrillDownPanel::setupUI()
             });
 }
 
-void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPath,
+void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const LoadSpec& spec,
                                      const Assembly& assembly, bool interposerOnly)
 {
     // Only record the paths once the layout actually loads. Storing them up
@@ -290,9 +303,9 @@ void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPa
         return;
     }
 
-    if (m_view2d->loadLayout(gdsPath, lypPath)) {
+    if (m_view2d->loadComposedLayout(gdsPath, spec)) {
         m_assemblyGdsPath = gdsPath;
-        m_assemblyLypPath = lypPath;
+        m_assemblySpec = spec;
         m_cellMapper->build(assembly, m_view2d->cellNames());
         m_assemblyTopCell = m_view2d->currentCellName();
         m_panelMode = PanelMode::Assembly;
@@ -306,9 +319,9 @@ void DrillDownPanel::setAssemblyGds(const QString& gdsPath, const QString& lypPa
         // When this is the interposer-only fallback (no merged assembly GDS),
         // say so: the 2D shows the substrate, not the assembled dies.
         QString base = interposerOnly ? "Interposer (no assembled GDS)" : "Assembly";
-        m_assemblyContextText = lypPath.isEmpty()
-                                ? base + " (black-box / default layers)"
-                                : base;
+        const bool anySheet = std::any_of(spec.sheets.begin(), spec.sheets.end(),
+                                          [](const SheetSpec& s) { return !s.lypPath.empty(); });
+        m_assemblyContextText = anySheet ? base : base + " (black-box / default layers)";
         m_contextLabel->setText(m_assemblyContextText);
         populateLayerList();
     }
@@ -333,7 +346,7 @@ void DrillDownPanel::returnToAssembly()
         return;
     }
 
-    m_view2d->loadLayout(m_assemblyGdsPath, m_assemblyLypPath);
+    m_view2d->loadComposedLayout(m_assemblyGdsPath, m_assemblySpec);
     m_assemblyTopCell = m_view2d->currentCellName();
     m_panelMode = PanelMode::Assembly;
     m_backButton->setVisible(true);
@@ -402,7 +415,7 @@ void DrillDownPanel::reset()
     m_layerTree->clear();
 
     m_assemblyGdsPath.clear();
-    m_assemblyLypPath.clear();
+    m_assemblySpec = LoadSpec();
     m_assemblyTopCell.clear();
     m_assemblyContextText.clear();
     if (m_view2d) {
@@ -542,10 +555,49 @@ void DrillDownPanel::onLayerItemChanged(QTreeWidgetItem* item, int column)
         return;
     }
 
+    // A heading's box is derived from its rows (auto-tristate); toggling it
+    // toggles each row, which arrives here one row at a time.
+    if (item->childCount() > 0) {
+        return;
+    }
     int layerIndex = item->data(0, Qt::UserRole).toInt();
     bool visible = (item->checkState(0) == Qt::Checked);
     m_view2d->setLayerVisible(layerIndex, visible);
     scheduleOverviewRefresh();  // layer visibility changes the thumbnail
+}
+
+QList<QTreeWidgetItem*> DrillDownPanel::layerRows() const
+{
+    QList<QTreeWidgetItem*> rows;
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* top = m_layerTree->topLevelItem(i);
+        if (top->childCount() == 0) {
+            rows << top;
+            continue;
+        }
+        for (int c = 0; c < top->childCount(); ++c) {
+            rows << top->child(c);
+        }
+    }
+    return rows;
+}
+
+void DrillDownPanel::setFillVisible(bool visible)
+{
+    // The first Show Fill can add the carrier fill's rows (KLayout2DView).
+    const int rowsBefore = m_view2d->layerCount();
+    m_view2d->setFillVisible(visible);
+    if (m_view2d->layerCount() != rowsBefore) {
+        populateLayerList();
+    }
+    m_blockLayerSync = true;
+    for (QTreeWidgetItem* row : layerRows()) {
+        if (row->data(0, kFillRole).toBool()) {
+            row->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+    m_blockLayerSync = false;
+    scheduleOverviewRefresh();
 }
 
 void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
@@ -560,7 +612,7 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
         "QMenu::separator { height: 1px; background: #555; margin: 2px 8px; }"
     );
 
-    if (item) {
+    if (item && item->childCount() == 0) {
         bool isVisible = (item->checkState(0) == Qt::Checked);
         int layerIndex = item->data(0, Qt::UserRole).toInt();
 
@@ -575,8 +627,7 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
             m_view2d->setAllLayersVisible(false);
             m_view2d->setLayerVisible(layerIndex, true);
             // Update all checkboxes
-            for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
-                QTreeWidgetItem* it = m_layerTree->topLevelItem(i);
+            for (QTreeWidgetItem* it : layerRows()) {
                 int idx = it->data(0, Qt::UserRole).toInt();
                 it->setCheckState(0, (idx == layerIndex) ? Qt::Checked : Qt::Unchecked);
             }
@@ -591,8 +642,8 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
     connect(showAllAction, &QAction::triggered, this, [this]() {
         m_blockLayerSync = true;
         m_view2d->setAllLayersVisible(true);
-        for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
-            m_layerTree->topLevelItem(i)->setCheckState(0, Qt::Checked);
+        for (QTreeWidgetItem* it : layerRows()) {
+            it->setCheckState(0, Qt::Checked);
         }
         m_blockLayerSync = false;
         scheduleOverviewRefresh();
@@ -602,8 +653,8 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
     connect(hideAllAction, &QAction::triggered, this, [this]() {
         m_blockLayerSync = true;
         m_view2d->setAllLayersVisible(false);
-        for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
-            m_layerTree->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
+        for (QTreeWidgetItem* it : layerRows()) {
+            it->setCheckState(0, Qt::Unchecked);
         }
         m_blockLayerSync = false;
         scheduleOverviewRefresh();
@@ -614,11 +665,20 @@ void DrillDownPanel::onLayerContextMenu(const QPoint& pos)
 
 void DrillDownPanel::onLayerFilterChanged(const QString& text)
 {
-    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
-        QTreeWidgetItem* item = m_layerTree->topLevelItem(i);
+    for (QTreeWidgetItem* item : layerRows()) {
         bool match = text.isEmpty() ||
                      item->text(0).contains(text, Qt::CaseInsensitive);
         item->setHidden(!match);
+    }
+    // A heading stays while any row under it does.
+    for (int i = 0; i < m_layerTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* top = m_layerTree->topLevelItem(i);
+        if (top->childCount() == 0) continue;
+        bool any = false;
+        for (int c = 0; c < top->childCount(); ++c) {
+            any = any || !top->child(c)->isHidden();
+        }
+        top->setHidden(!any);
     }
 }
 
@@ -658,12 +718,31 @@ void DrillDownPanel::populateLayerList()
     m_blockLayerSync = true;
     m_layerTree->clear();
 
+    // Headings (a technology, or Shared) hold their rows; a sheet without
+    // headings stays a flat list. Rows are added before a heading's state is
+    // read, so its auto-tristate box reflects them.
     QVector<LayerInfo> layers = m_view2d->layerInfos();
+    QMap<QString, QTreeWidgetItem*> headings;
     for (const LayerInfo& info : layers) {
-        auto* item = new QTreeWidgetItem(m_layerTree);
+        if (info.isGroup) {
+            auto* heading = new QTreeWidgetItem(m_layerTree);
+            heading->setText(0, info.name);
+            heading->setFlags(heading->flags() | Qt::ItemIsUserCheckable
+                              | Qt::ItemIsAutoTristate);
+            heading->setData(0, Qt::UserRole, info.index);
+            heading->setExpanded(true);
+            QFont bold = heading->font(0);
+            bold.setBold(true);
+            heading->setFont(0, bold);
+            headings.insert(info.name, heading);
+            continue;
+        }
+        QTreeWidgetItem* parent = info.group.isEmpty() ? nullptr : headings.value(info.group);
+        auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_layerTree);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(0, info.visible ? Qt::Checked : Qt::Unchecked);
         item->setData(0, Qt::UserRole, info.index);
+        item->setData(0, kFillRole, info.fill);
 
         // Build display text: "layer/datatype - name" or just name
         QString text;
@@ -684,9 +763,18 @@ void DrillDownPanel::populateLayerList()
         swatch.fill(color);
         item->setIcon(0, QIcon(swatch));
 
-        item->setToolTip(0, QString("Layer %1/%2%3")
+        item->setToolTip(0, QString("Layer %1/%2%3%4")
             .arg(info.layer).arg(info.datatype)
-            .arg(info.name.isEmpty() ? "" : " - " + info.name));
+            .arg(info.name.isEmpty() ? "" : " - " + info.name)
+            .arg(info.fill ? "\nFill: hidden at open; View > Show Fill switches all fill" : ""));
+    }
+    if (!headings.isEmpty()) {
+        m_layerTree->setRootIsDecorated(true);
+        m_layerTree->setIndentation(12);
+        m_layerTree->expandAll();
+    } else {
+        m_layerTree->setRootIsDecorated(false);
+        m_layerTree->setIndentation(0);
     }
 
     m_blockLayerSync = false;

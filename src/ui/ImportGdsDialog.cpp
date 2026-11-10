@@ -7,7 +7,8 @@
 
 #include "ImportGdsDialog.h"
 
-#include "core/LayerStackup.h"  // BlenderGDSConfigs::pdkLayerPropertiesPath
+#include "core/Component.h"
+#include "core/LayerStackup.h"  // BlenderGDSConfigs::pdkLayerPropertiesPath, importedComponentType
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -44,6 +45,17 @@ QWidget* makePathRow(QLineEdit** edit, QWidget* parent, QPushButton** browse)
     return row;
 }
 
+QString typeName(ComponentType type)
+{
+    switch (type) {
+    case ComponentType::Die: return QObject::tr("Die");
+    case ComponentType::DieArray: return QObject::tr("Die array");
+    case ComponentType::Interposer: return QObject::tr("Interposer");
+    case ComponentType::Substrate: return QObject::tr("Substrate");
+    }
+    return {};
+}
+
 }  // namespace
 
 ImportGdsDialog::ImportGdsDialog(QWidget* parent)
@@ -67,12 +79,18 @@ ImportGdsDialog::ImportGdsDialog(QWidget* parent)
     m_techCombo->addItem(tr("IHP SG13G2 (130nm BiCMOS)"), QStringLiteral("sg13g2"));
     m_techCombo->addItem(tr("IHP SG13CMOS5L (130nm CMOS)"), QStringLiteral("sg13cmos5l"));
     m_techCombo->addItem(tr("SkyWater SKY130"), QStringLiteral("sky130"));
-    m_techCombo->addItem(tr("GlobalFoundries GF180MCU"), QStringLiteral("gf180"));
+    m_techCombo->addItem(tr("GlobalFoundries GF180MCU"), QStringLiteral("gf180mcu"));
     m_techCombo->addItem(tr("IHP IntM4TM2 interposer"), QStringLiteral("intm4tm2"));
     m_techCombo->addItem(tr("Custom (unsupported PDK)..."), QString());
     connect(m_techCombo, &QComboBox::currentIndexChanged,
             this, &ImportGdsDialog::onTechChanged);
     form->addRow(tr("Technology:"), m_techCombo);
+
+    // What the GDS becomes, read-only and set with each technology change from
+    // the role table the import itself reads.
+    m_importsAsLabel = new QLabel(this);
+    m_importsAsLabel->setObjectName(QStringLiteral("importsAs"));
+    form->addRow(tr("Imports as:"), m_importsAsLabel);
 
     // Synthetic die thickness (a 2D GDS carries no Z extent).
     m_thicknessSpin = new QDoubleSpinBox(this);
@@ -158,6 +176,9 @@ void ImportGdsDialog::onTechChanged()
     // Custom stackup field only matters for an unsupported PDK; supported PDKs
     // resolve their stackup from the bundled config by id.
     m_customGroup->setVisible(custom);
+
+    m_importsAsLabel->setText(
+        typeName(BlenderGDSConfigs::importedComponentType(techId.toStdString())));
 
     // Auto-fill the .lyp with the supported PDK's bundled layer table (if one
     // ships) so the import carries real layer names/colors out of the box; the

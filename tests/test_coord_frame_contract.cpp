@@ -1,6 +1,6 @@
 /**
- * test_coord_frame_contract.cpp - Verification tests for the
- * coord-frame contract (chiplet-studio/docs/coord_frame_contract.md).
+ * test_coord_frame_contract.cpp - Verification tests for the coord-frame
+ * contract (docs/coord_frame_contract.md in IHP-GmbH/chiplet-system-spec).
  *
  * Two test groups:
  *   - Synth*: load coord_contract_synth.chiplet (a small fixture with
@@ -10,10 +10,10 @@
  *   - WirebondDemo*: load the full wire-bond demo .chiplet (regenerated
  *     end-to-end via KiCad export + hyp_to_gds.py --update-chiplet-file).
  *     Asserts the canonical-frame post-conditions: per-component
- *     anchors, U1 mounting Z = 57.83 um (cupillar_opt1), all io_pads inside the
- *     interposer bbox (no HYP-absolute leaks). Path is resolved from
- *     the WIREBOND_DEMO_CHIPLET env var or a workspace-relative path;
- *     tests skip with a clear message if neither is reachable.
+ *     anchors, U1 mounting Z = 54.8103 um (cupillar_opt1), all io_pads inside the
+ *     interposer bbox (no HYP-absolute leaks). The path comes from
+ *     the WIREBOND_DEMO_CHIPLET env var only; the tests skip, naming
+ *     it, when it is unset or names no file.
  */
 
 #include <gtest/gtest.h>
@@ -37,37 +37,18 @@ std::string fixturePath(const std::string& filename)
     return std::string(FIXTURES_DIR) + "/" + filename;
 }
 
-// Locate the canonical wire-bond demo .chiplet. The demo is not bundled with
-// the chiplet-studio test fixtures; it ships in the adk-tools umbrella under
-// examples/interposer_wire_bonding_demo/outputs/. Resolution order:
-//   1. $WIREBOND_DEMO_CHIPLET (absolute or relative; set by the CI/Docker gate)
-//   2. the bundled examples/ copy, relative to the chiplet-studio dir. The
-//      depth to the umbrella root differs between the baked image
-//      (chiplet-studio/..  == /opt/adk-tools) and a dev checkout
-//      (chiplet-studio/../.. == adk-tools), so both roots are tried.
-// Returns an empty optional when nothing exists on disk; callers
-// GTEST_SKIP with a message that points to the env var.
+// Locate the canonical wire-bond demo .chiplet. It is not bundled with the
+// test fixtures, and the gate binds a hash-bound copy through
+// $WIREBOND_DEMO_CHIPLET (scripts/run-gate.sh). There is no fallback path: the
+// umbrella's example was renamed and no longer matches the gate's copy, so a
+// fallback would find nothing or test a different document. Returns an empty optional
+// when the variable is unset or names no file; callers GTEST_SKIP naming it.
 std::optional<std::string> locateWirebondDemoChiplet()
 {
     if (const char* env = std::getenv("WIREBOND_DEMO_CHIPLET")) {
         std::filesystem::path p(env);
         if (std::filesystem::exists(p)) {
             return p.string();
-        }
-    }
-
-    const std::filesystem::path rel =
-        std::filesystem::path("examples") / "interposer_wire_bonding_demo"
-        / "outputs" / "interposer_wire_bonding_demo.chiplet";
-    const std::filesystem::path studioDir =
-        std::filesystem::path(FIXTURES_DIR).parent_path()  // tests/
-                                           .parent_path(); // chiplet-studio/
-    for (const std::filesystem::path& umbrella :
-         {studioDir.parent_path(),                  // baked image: /opt/adk-tools
-          studioDir.parent_path().parent_path()}) { // dev tree: adk-tools/tools/.. == adk-tools
-        std::filesystem::path candidate = umbrella / rel;
-        if (std::filesystem::exists(candidate)) {
-            return candidate.string();
         }
     }
     return std::nullopt;
@@ -169,7 +150,7 @@ TEST_F(CoordFrameContractSynth, Dimensions)
     // separate component-level field.
     EXPECT_DOUBLE_EQ(interposer->dimensions().thickness, 300.0);
     ASSERT_TRUE(interposer->attachment_surface_z().has_value());
-    EXPECT_DOUBLE_EQ(interposer->attachment_surface_z().value(), 13.83);
+    EXPECT_DOUBLE_EQ(interposer->attachment_surface_z().value(), 10.8103);
 
     for (const char* id : {"U_A", "U_B"}) {
         auto* die = assembly->component(id);
@@ -187,8 +168,8 @@ TEST_F(CoordFrameContractSynth, Dimensions)
 // into this test. A box is NOT centered on position.z: a die/substrate is
 // bottom-anchored (bottom face at position.z, grows up); an interposer that
 // declares attachment_surface_z is top-anchored (top face at that surface, body
-// hangs down). Regression guard for the f077122 thickness-semantics flip that
-// made the old center-on-position.z bug sink dies through the interposer.
+// hangs down). Regression guard for the thickness-semantics flip that made
+// the old center-on-position.z bug sink dies through the interposer.
 struct BoxYExtents { double bottom_mm; double top_mm; };
 static BoxYExtents boxYExtents(const Component& c)
 {
@@ -203,14 +184,14 @@ static BoxYExtents boxYExtents(const Component& c)
 
 TEST_F(CoordFrameContractSynth, BoxModeVerticalAnchoring)
 {
-    // Interposer (thickness 300 um, attachment_surface_z 13.83 um): body hangs
+    // Interposer (thickness 300 um, attachment_surface_z 10.8103 um): body hangs
     // below the attach surface, top face exactly at the surface -- never rising
     // into the dies.
     auto* interposer = assembly->component("interposer");
     ASSERT_NE(interposer, nullptr);
     BoxYExtents ip = boxYExtents(*interposer);
-    EXPECT_FLOAT_EQ(static_cast<float>(ip.top_mm), 0.01383f);      // 13.83 um attach surface
-    EXPECT_FLOAT_EQ(static_cast<float>(ip.bottom_mm), -0.28617f);  // 13.83 - 300 um
+    EXPECT_FLOAT_EQ(static_cast<float>(ip.top_mm), 0.0108103f);     // 10.8103 um attach surface
+    EXPECT_FLOAT_EQ(static_cast<float>(ip.bottom_mm), -0.2891897f); // 10.8103 - 300 um
 
     // Dies (pos.z 50 um, thickness 50 um): bottom face seats on the standoff at
     // pos.z, box grows upward -- above the interposer, no overlap.
@@ -292,10 +273,9 @@ TEST_F(CoordFrameContractSynth, WorldPositionMatchesContract)
 // ------------------------------------------------------------------
 // Wire-bond demo round-trip — §7.2 of the contract.
 //
-// The expected values are the post-Gate-3 canonical .chiplet produced
-// by KiCad export + hyp_to_gds.py --update-chiplet-file. Numbers are
-// taken from the regenerated demo (Gate 3 of coord-frame contract
-// execution).
+// The expected values are the canonical .chiplet produced by KiCad
+// export + hyp_to_gds.py --update-chiplet-file, taken from the demo as
+// regenerated under the coord-frame contract.
 // ------------------------------------------------------------------
 
 class CoordFrameContractWirebondDemo : public ::testing::Test {
@@ -304,9 +284,8 @@ protected:
     {
         auto path = locateWirebondDemoChiplet();
         if (!path.has_value()) {
-            GTEST_SKIP() << "Wire-bond demo .chiplet not found. Set "
-                         << "WIREBOND_DEMO_CHIPLET or run from the "
-                         << "default workspace layout.";
+            GTEST_SKIP() << "Wire-bond demo .chiplet not found: "
+                         << "WIREBOND_DEMO_CHIPLET is unset or names no file.";
         }
         ChipletFormat format;
         assembly = format.load(*path);
@@ -330,8 +309,8 @@ TEST_F(CoordFrameContractWirebondDemo, Anchors)
 }
 
 // U1 sits on cupillar_opt1 (28 um CuPillar + 16 um SnAgCap = 44 um
-// stack) over the interposer TopMetal2 (z_top = 13.83 um). Final z =
-// 13.83 + 44 = 57.83. Option 1 is the die's design rule set: U1's pad
+// stack) over the interposer TopMetal2 (z_top = 10.8103 um). Final z =
+// 10.8103 + 44 = 54.8103. Option 1 is the die's design rule set: U1's pad
 // ring has a 79.93 um-pitch pair (sout/GND), legal at Option 1's 75 um
 // minimum but below Option 2's 80 um -- the canonical regen therefore
 // selects cupillar_opt1 for U1 (per-die CONNECTION field). XY are the
@@ -346,11 +325,11 @@ TEST_F(CoordFrameContractWirebondDemo, U1Position)
     ASSERT_NE(u1, nullptr);
     EXPECT_NEAR(u1->position().x, 1954.12, 0.1);
     EXPECT_NEAR(u1->position().y, 2332.48, 0.1);
-    EXPECT_NEAR(u1->position().z, 57.83,   0.01);
+    EXPECT_NEAR(u1->position().z, 54.8103, 1e-9);
 }
 
 // U2 sits on vendorx_microbump (18 um Cu + 6 um cap = 24 um stack):
-// z = 13.83 + 24 = 37.83. The per-die method comes from U2's
+// z = 10.8103 + 24 = 34.8103. The per-die method comes from U2's
 // CONNECTION footprint field; this locks the mixed-method demo (U1
 // IHP cu-pillar + U2 vendor microbump in one export).
 TEST_F(CoordFrameContractWirebondDemo, U2Position)
@@ -359,7 +338,7 @@ TEST_F(CoordFrameContractWirebondDemo, U2Position)
     ASSERT_NE(u2, nullptr);
     EXPECT_NEAR(u2->position().x, 5170.23, 0.1);
     EXPECT_NEAR(u2->position().y, 2420.27, 0.1);
-    EXPECT_NEAR(u2->position().z, 37.83,   0.01);
+    EXPECT_NEAR(u2->position().z, 34.8103, 1e-9);
 }
 
 TEST_F(CoordFrameContractWirebondDemo, InterposerPosition)
@@ -377,13 +356,13 @@ TEST_F(CoordFrameContractWirebondDemo, InterposerPosition)
     EXPECT_NEAR(interposer->dimensions().height, 5602.00, 0.1);
     // thickness is the interposer physical body (board GetBoardThickness, now
     // 300 um after the demo stackup fix); the die-attachment surface is the
-    // separate component-level attachment_surface_z (13.83).
+    // separate component-level attachment_surface_z (10.8103).
     EXPECT_NEAR(interposer->dimensions().thickness, 300.0, 0.01);
     ASSERT_TRUE(interposer->attachment_surface_z().has_value());
-    EXPECT_NEAR(interposer->attachment_surface_z().value(), 13.83, 0.01);
+    EXPECT_NEAR(interposer->attachment_surface_z().value(), 10.8103, 1e-9);
 }
 
-// Pre-Gate-3 the io_pads pass-through left them in HYP-absolute
+// Before the contract the io_pads pass-through left them in HYP-absolute
 // (~1.3e5 um). Now every pad must sit inside the interposer extent,
 // which for the wire-bond demo is the 6492.312 x 5602.001 um board
 // outline.
@@ -412,7 +391,7 @@ TEST_F(CoordFrameContractWirebondDemo, IOPadsInCanonicalFrame)
 
 // Load alone is the assertion: if the file still carried
 // _metadata.finalize_required: true (KiCad intermediate output), the
-// Gate 1 loader would have thrown ChipletFormatException at SetUp() and
+// loader would have thrown ChipletFormatException at SetUp() and
 // the fixture would never reach here.
 TEST_F(CoordFrameContractWirebondDemo, FinalizedFileLoaded)
 {

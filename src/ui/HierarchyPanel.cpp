@@ -166,8 +166,13 @@ void HierarchyPanel::refresh()
 
     m_tree->expandAll();
 
-    // Resize columns to fit content
-    m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    // Component ids live in column 0, so it must never be squeezed below its
+    // content: Stretch gave it only the width the other three left over, which
+    // ellipsized the ids in a narrow dock. Sizing every column to its content
+    // and dropping the last-section stretch keeps the ids whole and lets the
+    // tree scroll horizontally instead.
+    m_tree->header()->setStretchLastSection(false);
+    m_tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);

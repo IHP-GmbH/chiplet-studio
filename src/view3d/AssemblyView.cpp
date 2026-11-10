@@ -8,20 +8,25 @@
 #include "AssemblyView.h"
 #include "MeshBuilder.h"
 #include "CoordFrame.h"
+#include "GdsPlacement.h"
 #include "GDSLayerExtractor.h"
 #include "LayerMeshBuilder.h"
+#include "SceneLoad.h"
 #include "ShapeFilter.h"
-#include "core/GenericLayers.h"
+#include "ViewCount.h"
+#include "core/TechResolve.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QTimer>
 #include <QDebug>
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFramebufferObjectFormat>
+#include <QElapsedTimer>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrent>
 #include <set>
 #include <cmath>
 #include <algorithm>
-#include <cctype>
 
 namespace chiplet {
 
@@ -91,6 +96,15 @@ AssemblyView::AssemblyView(QWidget* parent)
     m_filterDebounceTimer->setSingleShot(true);
     m_filterDebounceTimer->setInterval(150);
     connect(m_filterDebounceTimer, &QTimer::timeout, this, &AssemblyView::applyShapeFilter);
+
+    m_fastWatcher = new QFutureWatcher<std::shared_ptr<FastRead>>(this);
+    connect(m_fastWatcher, &QFutureWatcherBase::finished, this, &AssemblyView::onFastRead);
+    // The rows and the notes follow the camera once it has stopped, not every
+    // frame, so the text does not churn while dragging.
+    m_settleTimer = new QTimer(this);
+    m_settleTimer->setSingleShot(true);
+    m_settleTimer->setInterval(250);
+    connect(m_settleTimer, &QTimer::timeout, this, &AssemblyView::settleFast);
 }
 
 AssemblyView::~AssemblyView()
@@ -108,6 +122,7 @@ AssemblyView::~AssemblyView()
     m_polygonCache.clear();
     m_areaStats.clear();
     if (haveGL) {
+        m_fastGL.release(this);
         m_gridMesh.release();
         // Delete the GL program while the context is still current. The member
         // ShaderProgram destructor otherwise runs after doneCurrent() and calls
@@ -131,20 +146,35 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_shapeFilterByComponent.clear();
     m_pendingFilterComponent.clear();
     m_layerZSpacing = 1.0f;  // Z spread is per-import; never carry it across loads.
+    m_showFill = false;      // fill is off at every open
+    m_sheetNotes.clear();
+    m_componentNotes.clear();
+    m_shapeCounts.clear();
+    // The setting stays; what it read was this assembly's.
+    ++m_fastGeneration;
+    dropFastFrame();
+    m_fastSources.clear();
+    m_fast.clear();
+    m_fastKeys.clear();
+    m_fastBudget = kMaxPreparedRecords;
+    m_fastUploaded = false;
 
     if (!assembly) {
         if (m_initialized) {
             makeCurrent();
             m_meshes.clear();
+            m_fastGL.upload(this, {});
             doneCurrent();
         }
         emit overviewChanged();
+        emit notesChanged();
         update();
         return;
     }
 
     if (m_initialized) {
         makeCurrent();
+        m_fastGL.upload(this, {});
         try {
             loadLayerProperties();
             buildMeshes();
@@ -157,9 +187,11 @@ void AssemblyView::setAssembly(Assembly* assembly)
             qWarning() << "Unknown exception during mesh building";
         }
         doneCurrent();
+        readFastShapes();
     }
 
     emit overviewChanged();
+    emit notesChanged();
     update();
 }
 
@@ -190,6 +222,7 @@ void AssemblyView::setComponentVisibility(const QString& componentId, bool visib
 
     m_componentVisibility[componentId] = visible;
     update();
+    emit notesChanged();  // whether fill is coming depends on it (layersDrawn)
 }
 
 bool AssemblyView::isComponentVisible(const QString& componentId) const
@@ -199,6 +232,13 @@ bool AssemblyView::isComponentVisible(const QString& componentId) const
         return it->second;
     }
     return true;  // Default to visible
+}
+
+bool AssemblyView::layersDrawn(const Component& comp) const
+{
+    const RenderMode mode = comp.render_mode();
+    return (mode == RenderMode::Detailed || mode == RenderMode::DetailedNoSubstrate)
+        && isComponentVisible(QString::fromStdString(comp.id()));
 }
 
 void AssemblyView::setLayerVisible(const QString& componentId, int layer, int datatype, bool visible)
@@ -226,7 +266,8 @@ void AssemblyView::setLayerVisible(const QString& componentId, int layer, int da
         }
     }
 
-    if (changed) {
+    // The fast view draws layers the standard view has no mesh for.
+    if (changed || m_shapeMode != ShapeMode::Standard) {
         update();
     }
 }
@@ -247,6 +288,15 @@ bool AssemblyView::isLayerVisible(const QString& componentId, int layer, int dat
         for (const LayerMesh& mesh : it->second.layers) {
             if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
                 return mesh.visible;
+            }
+        }
+    }
+    // A layer only the fast view draws: as its mesh would start.
+    auto f = m_fast.find(componentId);
+    if (f != m_fast.end()) {
+        for (const FastLayer& l : f->second.layers) {
+            if (l.key.layer == layer && l.key.datatype == datatype) {
+                return l.place.fill ? m_showFill : l.place.visible;
             }
         }
     }
@@ -280,7 +330,7 @@ void AssemblyView::setLayerOpacity(const QString& componentId, int layer, int da
         }
     }
 
-    if (changed) {
+    if (changed || m_shapeMode != ShapeMode::Standard) {
         update();
     }
 }
@@ -315,12 +365,43 @@ AssemblyView::componentLayers(const QString& componentId) const
     if (it == m_layerGeometry.end()) {
         return entries;
     }
-    entries.reserve(it->second.layers.size());
-    for (const LayerMesh& mesh : it->second.layers) {
-        entries.push_back({mesh.key.layer, mesh.key.datatype,
-                           QString::fromStdString(mesh.name)});
+    static const std::vector<ShapeCount> none;
+    auto counts = m_shapeCounts.find(componentId);
+    std::vector<LayerRow> rows = layerRows(componentId.toStdString(), it->second,
+                                           counts == m_shapeCounts.end() ? none
+                                                                         : counts->second);
+    if (auto f = m_fast.find(componentId); f != m_fast.end()) {
+        static const std::map<LayerKey, LayerBuckets> unsettled;
+        auto b = m_settledBuckets.find(componentId);
+        const auto& buckets = b == m_settledBuckets.end() ? unsettled : b->second;
+        if (shapesPrepared()) {
+            rows = fastLayerRows(std::move(rows), f->second, buckets);
+        } else if (m_shapeMode == ShapeMode::Standard && m_showFill && fillPrepared()) {
+            rows = fastLayerRows(std::move(rows), f->second, buckets, true);
+        }
+    }
+    for (const LayerRow& row : rows) {
+        entries.push_back({row.key.layer, row.key.datatype,
+                           QString::fromStdString(row.name), row.fill,
+                           QString::fromStdString(row.count),
+                           QString::fromStdString(row.countNote), row.meshed});
     }
     return entries;
+}
+
+std::optional<AssemblyView::DrawnLayer>
+AssemblyView::drawnLayer(const QString& componentId, int layer, int datatype) const
+{
+    auto it = m_layerGeometry.find(componentId);
+    if (it == m_layerGeometry.end()) {
+        return std::nullopt;
+    }
+    for (const LayerMesh& mesh : it->second.layers) {
+        if (mesh.key.layer == layer && mesh.key.datatype == datatype) {
+            return DrawnLayer{mesh.z_bottom, mesh.z_top, mesh.shapes};
+        }
+    }
+    return std::nullopt;
 }
 
 void AssemblyView::setLayerZSpacing(float factor)
@@ -341,12 +422,83 @@ bool AssemblyView::layerZSpacingApplicable() const
     return m_assembly && m_assembly->components().size() == 1;
 }
 
+void AssemblyView::setShowFill(bool show)
+{
+    m_showFill = show;
+    for (auto& [compId, geometry] : m_layerGeometry) {
+        auto vis = m_layerVisibilityOverride.find(compId);
+        if (vis != m_layerVisibilityOverride.end()) {
+            for (const LayerMesh& mesh : geometry.layers) {
+                if (mesh.fill) {
+                    vis->second.erase(mesh.key);
+                }
+            }
+        }
+        setFillVisible(geometry, show);
+    }
+    for (const auto& [compId, fast] : m_fast) {
+        auto vis = m_layerVisibilityOverride.find(compId);
+        if (vis == m_layerVisibilityOverride.end()) continue;
+        for (const FastLayer& l : fast.layers) {
+            if (l.place.fill) vis->second.erase(l.key);
+        }
+    }
+    if (m_shapeMode == ShapeMode::Standard) {
+        // Standard's fill frame follows the switch: read when on, dropped when off.
+        dropFastFrame();
+        readFastShapes();
+        emit layerRowsChanged();
+    }
+    update();
+    emit notesChanged();  // the strip names the dies fill does not show on
+}
+
+bool AssemblyView::hasFill() const
+{
+    for (const auto& [compId, geometry] : m_layerGeometry) {
+        for (const LayerMesh& mesh : geometry.layers) {
+            if (mesh.fill) {
+                return true;
+            }
+        }
+    }
+    for (const auto& [compId, fast] : m_fast) {
+        for (const FastLayer& l : fast.layers) {
+            if (l.place.fill) return true;
+        }
+    }
+    return false;
+}
+
+QStringList AssemblyView::notes() const
+{
+    QStringList out;
+    if (!m_assembly) {
+        for (const auto& n : m_sheetNotes) {
+            out << QString::fromStdString(n);
+        }
+        return out;
+    }
+    ViewNotesState state{m_shapeMode, shapesPrepared(), m_everyFrameSeconds};
+    state.showFill = m_showFill;
+    state.fillPrepared = fillPrepared();
+    state.undetailed = undetailedParts(*m_assembly, m_layerGeometry);
+    for (const auto& n : viewNotes(state, *m_assembly, m_sheetNotes, m_componentNotes,
+                                   m_shapeCounts, m_fast, m_settledCoverage)) {
+        out << QString::fromStdString(n);
+    }
+    return out;
+}
+
 void AssemblyView::applyLayerOverrides(const QString& componentId)
 {
     auto it = m_layerGeometry.find(componentId);
     if (it == m_layerGeometry.end()) {
         return;
     }
+
+    // Fill's default comes first so a per-layer choice on a fill layer wins.
+    setFillVisible(it->second, m_showFill);
 
     // Visibility and opacity are independent overrides; apply whichever exist.
     auto vis = m_layerVisibilityOverride.find(componentId);
@@ -373,7 +525,7 @@ void AssemblyView::applyLayerOverrides(const QString& componentId)
 
 void AssemblyView::fitToAssembly()
 {
-    m_scene.fitToScene();
+    m_scene.fitToScene(currentAspect());
     emit cameraChanged();
     update();
 }
@@ -389,20 +541,11 @@ void AssemblyView::fitToComponent(const QString& componentId)
     auto lgIt = m_layerGeometry.find(componentId);
     if (lgIt != m_layerGeometry.end()) {
         const Component3DGeometry& geom = lgIt->second;
-        QVector3D translation = geom.transform.column(3).toVector3D();
 
         AA_BOUNDING_BOX compBounds;
         bool first = true;
         for (const auto& layer : geom.layers) {
-            AA_BOUNDING_BOX lb = layer.mesh.boundingBox();
-            AA_BOUNDING_BOX wb;
-            VECTOR3D wMins(lb.mins.x + translation.x(),
-                           lb.mins.y + translation.y(),
-                           lb.mins.z + translation.z());
-            VECTOR3D wMaxes(lb.maxes.x + translation.x(),
-                            lb.maxes.y + translation.y(),
-                            lb.maxes.z + translation.z());
-            wb.SetFromMinsMaxes(wMins, wMaxes);
+            const auto wb = transformedMeshBounds(layer.mesh.boundingBox(), geom.transform);
             if (first) {
                 compBounds = wb;
                 first = false;
@@ -412,7 +555,7 @@ void AssemblyView::fitToComponent(const QString& componentId)
         }
 
         if (!first) {
-            m_scene.camera().fitToBox(compBounds);
+            m_scene.camera().fitToBox(compBounds, currentAspect());
             emit cameraChanged();
             update();
             return;
@@ -422,7 +565,7 @@ void AssemblyView::fitToComponent(const QString& componentId)
     // Fallback: non-instanced meshes
     auto it = m_meshes.find(componentId);
     if (it != m_meshes.end()) {
-        m_scene.camera().fitToBox(it->second.boundingBox());
+        m_scene.camera().fitToBox(it->second.boundingBox(), currentAspect());
         emit cameraChanged();
         update();
         return;
@@ -442,7 +585,7 @@ void AssemblyView::fitToComponent(const QString& componentId)
                            static_cast<float>(pos.y + dims.height),
                            static_cast<float>(pos.z + dims.thickness));
             box.SetFromMinsMaxes(mins, maxes);
-            m_scene.camera().fitToBox(box);
+            m_scene.camera().fitToBox(box, currentAspect());
             emit cameraChanged();
             update();
             return;
@@ -532,6 +675,9 @@ void AssemblyView::initializeGL()
     if (!m_componentShader.loadFromSource(componentVertexShader, componentFragmentShader)) {
         qWarning() << "Failed to load component shader";
     }
+    if (!m_fastGL.init(this)) {
+        qWarning() << "Fast 3D shapes are not available: their shaders did not build";
+    }
 
     // Build solid base plane mesh (instead of grid lines)
     m_gridMesh = MeshBuilder::buildPlaneMesh(100.0f);
@@ -547,17 +693,23 @@ void AssemblyView::initializeGL()
             updateSceneBounds();
             fitToAssembly();
             emit overviewChanged();
+            emit notesChanged();
         } catch (const std::exception& e) {
             qCritical() << "AssemblyView::initializeGL: Exception during mesh building:" << e.what();
         } catch (...) {
             qCritical() << "AssemblyView::initializeGL: Unknown exception during mesh building";
         }
+        readFastShapes();
     }
 }
 
 void AssemblyView::resizeGL(int w, int h)
 {
     glViewport(0, 0, w, h);
+    if (w > 0 && h > 0) {
+        m_scene.camera().setViewportAspect(static_cast<float>(w) / h);
+        emit cameraChanged();
+    }
 }
 
 void AssemblyView::paintGL()
@@ -570,8 +722,18 @@ void AssemblyView::paintGL()
 
     // renderGrid/renderComponents build their own matrices from the camera
     // internally.
+    QElapsedTimer frame;
+    frame.start();
     renderGrid();
     renderComponents();
+    if (m_fastActive && m_shapeMode == ShapeMode::Every) {
+        // Every shape says what its last frame cost, measured, not quoted.
+        glFinish();
+        m_everyFrameSeconds = frame.nsecsElapsed() * 1e-9;
+    }
+    if (m_fastActive) {
+        m_settleTimer->start();
+    }
 }
 
 QImage AssemblyView::renderToImage(const QSize& size, bool transparentBackground,
@@ -657,30 +819,15 @@ QImage AssemblyView::renderToImage(const QSize& size, bool transparentBackground
 void AssemblyView::loadLayerProperties()
 {
     m_layerProps.clear();
+    m_sheetNotes.clear();
 
     if (!m_assembly) {
         return;
     }
 
-    // Load .lyp files for each technology
-    const auto& techs = m_assembly->technologies();
-    for (const auto& techPtr : techs) {
-        const std::string& techId = techPtr->id();
-        const std::string& lypPath = techPtr->layer_properties_path();
-        if (!lypPath.empty()) {
-            LayerPropertiesFile lyp;
-            if (lyp.load(lypPath)) {
-                size_t layerCount = lyp.layer_count();
-                m_layerProps[techId] = std::move(lyp);
-                qDebug() << "Loaded" << layerCount << "layers from"
-                         << QString::fromStdString(lypPath);
-            } else {
-                qWarning() << "Failed to load layer properties:"
-                           << QString::fromStdString(lypPath)
-                           << "-" << QString::fromStdString(lyp.error());
-            }
-        }
-    }
+    LayerSheets sheets = loadLayerSheets(*m_assembly);
+    m_layerProps = std::move(sheets.props);
+    m_sheetNotes = std::move(sheets.notes);
 }
 
 void AssemblyView::buildMeshes()
@@ -688,116 +835,27 @@ void AssemblyView::buildMeshes()
     m_meshes.clear();
     m_layerGeometry.clear();
     m_stackups.clear();
-    m_stackupModeled.clear();
+    m_componentNotes.clear();
+    m_shapeCounts.clear();
 
     if (!m_assembly) {
         m_needsRebuild = false;
         return;
     }
 
-    const auto& components = m_assembly->components();
-    if (components.empty()) {
+    if (m_assembly->components().empty()) {
         m_needsRebuild = false;
         return;
     }
 
-    // Extract GDS bounding boxes for components with layouts.
-    // This ensures box meshes match the actual GDS footprint in all
-    // abstraction modes (Wireframe, Transparent, Solid).
-    std::map<QString, GDSBoundingBox> gdsBounds;
-    for (const auto& comp : components) {
-        if (!comp || comp->layout_path().empty()) continue;
-        GDSBoundingBox bbox = GDSLayerExtractor::extractBoundingBox(
-            comp->layout_path(), comp->top_cell());
-        if (bbox.is_valid()) {
-            gdsBounds[QString::fromStdString(comp->id())] = bbox;
-        }
-    }
-
-    // Build non-instanced box meshes for ALL components.
-    // For components with GDS layouts, use GDS bounding box for dimensions
-    // so that all abstraction levels show the correct footprint.
-    for (const auto& comp : components) {
-        if (!comp) continue;
-
-        const LayerPropertiesFile* lyp = nullptr;
-        const std::string& techId = comp->technology();
-        if (!techId.empty()) {
-            auto it = m_layerProps.find(techId);
-            if (it != m_layerProps.end()) {
-                lyp = &(it->second);
-            }
-        }
-
-        QString compId = QString::fromStdString(comp->id());
-        auto bboxIt = gdsBounds.find(compId);
-
-        ComponentMesh mesh;
-        if (bboxIt != gdsBounds.end()) {
-            // GDS-derived box: match the layout footprint
-            const GDSBoundingBox& bbox = bboxIt->second;
-            const auto& pos = comp->position();
-            auto dims = comp->dimensions();
-
-            // Use GDS width/height, keep thickness from component
-            if (dims.thickness <= 0) {
-                dims.thickness = 200.0;  // Default die thickness
-            }
-
-            // Convert to mm (same as MeshBuilder)
-            float w = static_cast<float>(bbox.width() / 1000.0);
-            float d = static_cast<float>(dims.thickness / 1000.0);
-            float h = static_cast<float>(bbox.height() / 1000.0);
-
-            // Box is sized from the GDS bbox and positioned by .chiplet position.
-            // LayerMode centers each mesh on its own GDS bbox center so that
-            // .chiplet position consistently means "where the component's center
-            // sits in assembly space". BoxMode follows the same convention here.
-            // buildBox() centers along X and treats offsetZ as the +Z face, so add
-            // h/2 for the horizontal Z. The vertical (Y) is stack-anchored so the
-            // box seats on the physical stack instead of centering on position.z:
-            // bottom-anchored for a die, top-anchored at the interposer's attach
-            // surface (see MeshBuilder::anchoredOffsetY).
-            const ScenePosition scenePos = sceneFromChiplet(pos);
-            float offsetX = scenePos.x;
-            float offsetY = MeshBuilder::anchoredOffsetY(*comp, scenePos.y, d);  // stack-anchored elevation
-            float offsetZ = scenePos.z + h / 2.0f;
-
-            mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
-            mesh.setColor(MeshBuilder::colorForComponent(*comp, lyp));
-        } else {
-            // No GDS: use YAML dimensions (existing behavior)
-            mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
-        }
-
+    StandardScene scene = loadStandardScene(*m_assembly, m_layerProps, m_shapeFilterByComponent);
+    for (auto& [compId, mesh] : scene.boxes) {
         mesh.upload();
         m_meshes.emplace(compId, std::move(mesh));
     }
-
-    qDebug() << "Built" << m_meshes.size() << "box meshes ("
-             << gdsBounds.size() << " from GDS extents)";
-
-    // Pre-build layer geometry for every component (this matched the former
-    // default "Layer" view mode; the per-component render mode then decides
-    // what is actually drawn).
-    for (const auto& comp : components) {
-        if (!comp) continue;
-
-        {
-            const LayerPropertiesFile* lyp = nullptr;
-            const std::string& techId = comp->technology();
-            if (!techId.empty()) {
-                auto it = m_layerProps.find(techId);
-                if (it != m_layerProps.end()) {
-                    lyp = &(it->second);
-                }
-            }
-            buildLayerGeometry(*comp, lyp);
-        }
-    }
-
-    if (!m_layerGeometry.empty()) {
-        qDebug() << "Built layer geometry for" << m_layerGeometry.size() << "components";
+    m_stackups = std::move(scene.stackups);
+    for (auto& [compId, loaded] : scene.components) {
+        adoptStandardComponent(compId, std::move(loaded));
     }
 
     m_needsRebuild = false;
@@ -838,6 +896,7 @@ void AssemblyView::renderComponents()
     if (!m_assembly || m_meshes.empty() || !m_componentShader.isValid()) {
         return;
     }
+    prepareFastFrame();
 
     // Classify components by render mode
     std::vector<QString> opaqueIds;
@@ -873,11 +932,13 @@ void AssemblyView::renderComponents()
     // Pass 1: Opaque objects (depth write ON)
     glDepthMask(GL_TRUE);
     renderOpaquePass(opaqueIds);
+    drawFastLayers(false);
 
     // Pass 2: Transparent objects (depth write OFF, sorted back-to-front)
     glDepthMask(GL_FALSE);
     sortBackToFront(transparentIds);
     renderTransparentPass(transparentIds);
+    drawFastLayers(true);
 
     // Pass 3: Wireframe overlays (depth write OFF)
     renderWireframePass(wireframeIds);
@@ -918,7 +979,8 @@ void AssemblyView::setupShaderUniforms()
     m_componentShader.setUniformMat4("modelView", view);
     m_componentShader.setUniformMat4("model", model);
     m_componentShader.setUniformMat3("normalMatrix", normalMat);
-    m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+    m_componentShader.setUniformVec3("lightDirection",
+                                     lightInView(view, QVector3D(lightDir.x, lightDir.y, lightDir.z)));
     m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 }
 
@@ -942,15 +1004,19 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
 
         bool isSelected = (id == m_selectedComponent);
 
-        // Flip-chip mirror reverses triangle winding -- fix face culling
-        bool isFlipped = (comp->orientation() == Orientation::FaceDown);
-        if (isFlipped) glFrontFace(GL_CW);
-
         // If Detailed (with or without substrate) and has layer geometry, render that
         bool isDetailedMode = (comp->render_mode() == RenderMode::Detailed)
                            || (comp->render_mode() == RenderMode::DetailedNoSubstrate);
         bool hideSubstrate  = (comp->render_mode() == RenderMode::DetailedNoSubstrate);
-        if (isDetailedMode && m_layerGeometry.count(id)) {
+        const bool drawsLayers = isDetailedMode && m_layerGeometry.count(id);
+
+        // A face-down die's layer geometry is mirrored (componentTransform),
+        // which reverses its triangles' winding. Its box is built in place,
+        // not mirrored, and is culled as any other box.
+        bool isFlipped = drawsLayers && comp->orientation() == Orientation::FaceDown;
+        if (isFlipped) glFrontFace(GL_CW);
+
+        if (drawsLayers) {
             auto& geometry = m_layerGeometry[id];
 
             float aspect = currentAspect();
@@ -975,10 +1041,16 @@ void AssemblyView::renderOpaquePass(const std::vector<QString>& ids)
             baseMatricesActive = false;  // per-component transform now bound
 
             const bool spreadZ = (m_layerZSpacing != 1.0f) && layerZSpacingApplicable();
+            const auto fastKeys = m_fastActive && m_shapeMode != ShapeMode::Standard
+                                      ? m_fastKeys.find(id)
+                                      : m_fastKeys.end();
             for (auto& layer : geometry.layers) {
-                if (!layer.visible) continue;
+                if (!standardMeshDrawn(layer)) continue;
                 if (hideSubstrate && layer.name == "Substrate") continue;
                 if (layer.opacity < 1.0f) continue;  // deferred to the transparent pass
+                if (fastKeys != m_fastKeys.end() && fastKeys->second.count(layer.key)) {
+                    continue;  // drawn by the fast view
+                }
                 if (spreadZ) {
                     // Spread this layer along world Y by (z_bottom * (factor-1)):
                     // gaps grow, thickness is preserved. factor==1 leaves the
@@ -1118,10 +1190,16 @@ void AssemblyView::renderTranslucentLayers()
         m_componentShader.setUniformBool("selected", id == m_selectedComponent);
 
         const bool spreadZ = (m_layerZSpacing != 1.0f) && layerZSpacingApplicable();
+        const auto fastKeys = m_fastActive && m_shapeMode != ShapeMode::Standard
+                                  ? m_fastKeys.find(id)
+                                  : m_fastKeys.end();
         for (auto& layer : geometry.layers) {
-            if (!layer.visible) continue;
+            if (!standardMeshDrawn(layer)) continue;
             if (layer.opacity >= 1.0f) continue;  // solid layers stayed in the opaque pass
             if (hideSubstrate && layer.name == "Substrate") continue;
+            if (fastKeys != m_fastKeys.end() && fastKeys->second.count(layer.key)) {
+                continue;  // drawn by the fast view
+            }
             if (spreadZ) {
                 // Match the opaque path's spread so a layer keeps its place
                 // whether it is solid or translucent.
@@ -1172,6 +1250,13 @@ void AssemblyView::renderWireframePass(const std::vector<QString>& ids)
 
 VECTOR3D AssemblyView::getComponentCenter(const QString& id) const
 {
+    // This is used by the transparent box pass: sort the consumed box, not
+    // a centre guessed from metadata whose anchor may be a GDS origin.
+    const auto mesh = m_meshes.find(id);
+    if (mesh != m_meshes.end()) {
+        const auto bounds = mesh->second.boundingBox();
+        return (bounds.mins + bounds.maxes) * 0.5f;
+    }
     if (!m_assembly) return VECTOR3D(0, 0, 0);
 
     Component* comp = m_assembly->component(id.toStdString());
@@ -1214,6 +1299,10 @@ void AssemblyView::sortBackToFront(std::vector<QString>& ids)
 
 void AssemblyView::onComponentRenderModeChanged(const QString& componentId, RenderMode newMode)
 {
+    // The strip names the components that are not Detailed. The command has
+    // already set the mode; the geometry built below is for a Detailed one,
+    // which the strip does not name.
+    emit notesChanged();
     if (!m_initialized || !m_assembly) return;
 
     if (newMode == RenderMode::Detailed || newMode == RenderMode::DetailedNoSubstrate) {
@@ -1232,6 +1321,7 @@ void AssemblyView::onComponentRenderModeChanged(const QString& componentId, Rend
                         }
                     }
                     buildLayerGeometry(*comp, lyp);
+                    readFastShapes();
                 } catch (const std::exception& e) {
                     // Fired from a HierarchyPanel signal; keep an exception from
                     // tessellation out of the Qt event loop. Also ensures
@@ -1286,7 +1376,8 @@ void AssemblyView::renderGrid()
     m_componentShader.setUniformMat4("modelView", view * model);
     m_componentShader.setUniformMat4("model", model);
     m_componentShader.setUniformMat3("normalMatrix", normalMat);
-    m_componentShader.setUniformVec3("lightDirection", QVector3D(lightDir.x, lightDir.y, lightDir.z));
+    m_componentShader.setUniformVec3("lightDirection",
+                                     lightInView(view, QVector3D(lightDir.x, lightDir.y, lightDir.z)));
     m_componentShader.setUniformFloat("Fcoef_half", m_scene.camera().fcoef() * 0.5f);
 
     // Solid white/light gray color for base plane
@@ -1346,316 +1437,41 @@ QString AssemblyView::pickComponent(int x, int y)
     return QString();
 }
 
-namespace {
-
-// Black-box / no-LYP chiplet: the fallback stackup does not model the die's
-// own layers, so LayerMeshBuilder (which drops layers absent from the stackup)
-// would render it empty. Augment a LOCAL copy of the stackup so Detailed mode
-// shows a real box instead of a flat 1 um plane:
-//   - outline (206/0) -> full component thickness, "outline" role (die body)
-//   - pads    (205/0) -> a thin flat plane (decal) on the active face, "pad" role
-// so the body height matches Transparent mode and the pads sit flush on the
-// face (flipZ moves them to the bottom for flip-chip). Unknown commercial layers
-// (no canonical 205/206) become full-thickness
-// slabs. The role names drive the black-box colors (blue body / yellow pads;
-// configs/stackups/colors/generic/blackbox.yaml, with a hardcoded fallback in
-// LayerMeshBuilder).
-void augmentStackupForBlackBox(LayerStackup& stackup,
-                               const std::map<LayerKey, LayerPolygons>& polygons,
-                               const Component& comp)
-{
-    double dieT = comp.dimensions().thickness;
-    if (dieT <= 0.0) {
-        dieT = 200.0;  // matches the Transparent-mode default thickness (um)
-    }
-    const LayerKey outlineKey(GenericLayers::OUTLINE_LAYER,
-                              GenericLayers::OUTLINE_DATATYPE);
-    const LayerKey padKey(GenericLayers::PAD_LAYER, GenericLayers::PAD_DATATYPE);
-    const bool hasOutline = polygons.find(outlineKey) != polygons.end();
-    // Pads render as a thin flat plane flush on the die's active face -- a decal,
-    // not a raised cap (1 um on a ~200 um die reads as a plane). flipZ moves it to
-    // the bottom face for flip-chip dies.
-    const double padPlaneUm = 1.0;
-    double slabTop = 0.0;
-    for (const auto& entry : polygons) {
-        const LayerKey& key = entry.first;
-        if (stackup.find(key)) {
-            continue;  // already modeled (real stackup layer) -- leave untouched
-        }
-        if (key == outlineKey) {
-            stackup.addLayer(key.layer, key.datatype, 0.0, dieT,
-                             GenericLayers::OUTLINE_ROLE);
-        } else if (key == padKey) {
-            const double z = hasOutline ? dieT : 0.0;  // flat plane on the active face, else be the body
-            const double t = hasOutline ? padPlaneUm : dieT;
-            stackup.addLayer(key.layer, key.datatype, z, t, GenericLayers::PAD_ROLE);
-        } else {
-            stackup.addLayer(key.layer, key.datatype, slabTop, dieT, "blackbox");
-            slabTop += dieT;
-        }
-    }
-}
-
-}  // namespace
-
 void AssemblyView::buildLayerGeometry(const Component& comp, const LayerPropertiesFile* lyp)
 {
 #ifdef HAVE_KLAYOUT
-    QString compId = QString::fromStdString(comp.id());
-
-    // Get the GDS layout path
-    const std::string& layoutPath = comp.layout_path();
-    if (layoutPath.empty()) {
+    const QString compId = QString::fromStdString(comp.id());
+    if (comp.layout_path().empty()) {
         qDebug() << "Component" << compId << "has no layout path, using box mode";
         return;
     }
-
-    // Extract the layer geometry directly from the GDS file.
-    qDebug() << "Building layer geometry for" << compId << "from" << QString::fromStdString(layoutPath);
-
-    // Get or create stackup for technology
-    const std::string& techId = comp.technology();
-    LayerStackup stackup;
-    LayerColorScheme colorScheme;
-    bool hasColorScheme = false;
-
-    // True when the stackup is a real PDK stackup (not the generic fallback);
-    // gates the black-box augmentation below.
-    bool usedStackup = false;
-    auto stackupIt = m_stackups.find(techId);
-    if (stackupIt != m_stackups.end()) {
-        stackup = stackupIt->second;
-        auto modeledIt = m_stackupModeled.find(techId);
-        usedStackup = (modeledIt != m_stackupModeled.end()) && modeledIt->second;
-    } else {
-
-        // Priority -1: explicit stackup YAML declared on the technology
-        // (technologies.<id>.stackup in the .chiplet). This lets an unsupported
-        // PDK ship its own stackup; it wins over the built-in
-        // BlenderGDSConfigs::stackupPath(techId) lookup. Same BlenderGDS loader,
-        // so the merge/color paths below behave identically. Fail-soft: a load
-        // failure falls through to the built-in lookup.
-        if (!usedStackup && m_assembly && !techId.empty()) {
-            Technology* tech = m_assembly->technology(techId);
-            if (tech && !tech->stackup_path().empty()) {
-                LayerStackup customStackup;
-                if (customStackup.loadFromBlenderGDS(tech->stackup_path())) {
-                    stackup = customStackup;
-                    usedStackup = true;
-                    qDebug() << "Using explicit stackup for" << QString::fromStdString(techId)
-                             << "from" << QString::fromStdString(tech->stackup_path())
-                             << "with" << stackup.layerCount() << "layers";
-                } else {
-                    qWarning() << "Explicit stackup failed to load for"
-                               << QString::fromStdString(techId) << ":"
-                               << QString::fromStdString(tech->stackup_path())
-                               << "- falling back to built-in lookup";
-                }
-            }
-        }
-
-        // Priority 0: BlenderGDS YAML stackup (accurate physical dimensions)
-        if (!usedStackup && !techId.empty()) {
-            std::string bgdsPath = BlenderGDSConfigs::stackupPath(techId);
-            if (!bgdsPath.empty()) {
-                LayerStackup bgdsStackup;
-                if (bgdsStackup.loadFromBlenderGDS(bgdsPath)) {
-                    stackup = bgdsStackup;
-                    usedStackup = true;
-                    qDebug() << "Using BlenderGDS stackup for" << QString::fromStdString(techId)
-                             << "from" << QString::fromStdString(bgdsPath)
-                             << "with" << stackup.layerCount() << "layers";
-                }
-            }
-        }
-
-        // Priority 1: derive a stackup from the technology's .lyp (default
-        // thickness). A supported PDK never reaches this -- its bundled YAML
-        // resolves at Priority 0 -- but it lets an unsupported PDK that ships
-        // only a .lyp still render with sensible per-layer z.
-        if (!usedStackup && lyp) {
-            stackup = LayerStackup::fromLayerProperties(*lyp);
-            qDebug() << "Using .lyp stackup for" << QString::fromStdString(techId)
-                     << "with" << stackup.layerCount() << "layers (default thickness)";
-        }
-
-        // Priority 2: generic last resort when there is neither a YAML stackup
-        // nor a .lyp -- a plain top-metal interposer stack so geometry still
-        // renders. (The former techfile and hardcoded-name rungs were removed:
-        // the bundled YAMLs at Priority 0 always won, so they were dead. The
-        // golden test test_stackup_order_golden.cpp guards that the surviving
-        // ladder still yields the exact same order for every bundled PDK.)
-        if (!usedStackup && !lyp) {
-            stackup = Stackups::createInterposer();
-            qDebug() << "Using default interposer stackup for" << QString::fromStdString(techId);
-        }
-
-        // Merge the interconnect PDK's 3D bodies (CuPillar/SnAgCap, or a vendor
-        // microbump) into the render stackup, mirroring
-        // Assembly::calculate_component_z. The interconnect PDK -- not the
-        // interposer stackup -- owns these bodies (500/501/502, vendor 510/511),
-        // so the layer-render path must merge the selected method's fragment to
-        // know their z/height. Additive + idempotent (addLayer overwrites by
-        // key).
-        //
-        // ONLY for the interposer's technology: the bodies physically sit on
-        // the interposer. Merging them into a die's stackup inflates
-        // totalHeight(), which is the flip-chip beolTop -- every layer of a
-        // FaceDown die would render shifted up by the whole body-stack height
-        // (die floating above its pillars by ~44 um).
-        bool interposerTech = false;
-        if (m_assembly && !techId.empty()) {
-            for (const auto& c : m_assembly->components()) {
-                if (c->type() == ComponentType::Interposer &&
-                    c->technology() == techId) {
-                    interposerTech = true;
-                    break;
-                }
-            }
-        }
-        if (interposerTech) {
-            // Shared helpers = same fragment resolution and z-reference
-            // offset as Assembly::calculate_component_z; the two cannot
-            // diverge. Render merges the UNION of the fragments of all
-            // methods the dies use (per-die connection ids are the keys);
-            // the assembly-level adapter is the legacy fallback when no
-            // method id resolves.
-            const std::vector<std::string> keys =
-                LayerStackup::resolveInterconnectKeys(
-                    m_assembly->interconnect_method_ids(),
-                    m_assembly->interconnect_adapter());
-            const size_t merged = stackup.mergeInterconnectFragments(keys);
-            if (merged > 0) {
-                QStringList keyList;
-                for (const auto& k : keys) keyList << QString::fromStdString(k);
-                qDebug() << "Merged" << merged << "interconnect body layers from"
-                         << keyList.join(", ")
-                         << "into interposer tech" << QString::fromStdString(techId);
-            }
-        }
-
-        m_stackups[techId] = stackup;
-        m_stackupModeled[techId] = usedStackup;
-    }
-
-    // Layer color comes from the technology's .lyp (the single color source for
-    // supported PDKs; resolved per layer in LayerMeshBuilder). The only scheme
-    // we still load is the generic black-box fallback for a no-.lyp die: it
-    // ships the blue body + yellow pads keyed by the canonical outline/pad
-    // roles (user-editable). LayerMeshBuilder also carries a hardcoded
-    // blue/yellow fallback if this file is missing.
-    if (!lyp) {
-        std::string gp = BlenderGDSConfigs::genericColorSchemePath();
-        if (!gp.empty() && colorScheme.loadFromYAML(gp)) {
-            hasColorScheme = true;
-        }
-    }
-
-    // Extract polygons from GDS
-    GDSLayerExtractor extractor;
-    ExtractionConfig config;
-    config.max_polygons_per_layer = 10000;  // Limit for performance
-    config.min_polygon_area = 0.1;  // Skip tiny polygons (0.1 um^2)
-
-    // Draw via/contact layers with their individual cuts, exempt from the area
-    // cull above. A via cut array (interposer Via4 = 0.19um cuts = 0.036 um^2)
-    // sits below min_polygon_area, so a normal extract would delete the whole
-    // M4<->M5 connector while the larger TopVia1/TopVia2 cuts survive -- the
-    // reported "M4 has no pillars to M5". The real cuts are drawn as-is (not
-    // fused) so the view stays faithful to the physical via array. Two
-    // mechanisms, both fed from the resolved stackup:
-    //   via_layers    proactive: classify connectors by name (contains "via"
-    //                 or "con" -- covers Via*/TopVia*/Cont/Contact/mcon/licon
-    //                 across the bundled PDKs).
-    //   modeled_layers backstop: every modeled layer. If min_polygon_area ever
-    //                 empties one the name rule missed, the extractor draws its
-    //                 cuts anyway, so no modeled connector can vanish whatever a
-    //                 future PDK names it.
-    for (const auto& elev : stackup.sortedLayers()) {
-        config.modeled_layers.insert(elev.key());
-        std::string ln = elev.name;
-        std::transform(ln.begin(), ln.end(), ln.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-        if (ln.find("via") != std::string::npos ||
-            ln.find("con") != std::string::npos) {
-            config.via_layers.insert(elev.key());
-        }
-    }
-
-    extractor.setConfig(config);
-
-    // Pass the component's top_cell to extract from the correct cell
-    auto polygons = extractor.extractFromFile(layoutPath, comp.top_cell());
-
-    if (polygons.empty()) {
-        qWarning() << "No polygons extracted from" << QString::fromStdString(layoutPath)
-                   << "(top_cell:" << QString::fromStdString(comp.top_cell()) << ")";
+    if (!m_assembly) {
         return;
     }
 
-    qDebug() << "Extracted" << extractor.lastLayerCount() << "layers,"
-             << extractor.lastPolygonCount() << "polygons from" << compId;
-
-    // Cache polygon data for shape filtering (avoids re-extracting from GDS)
-    m_polygonCache[compId] = polygons;
-    m_areaStats[compId] = ShapeFilter::computeStatistics(polygons);
-
-    // Apply active per-component shape filter (if the user previously set one
-    // for this component, e.g. .chiplet reload preserves the slider value).
-    double compFilter = shapeFilterPercent(compId);
-    if (compFilter > 0.0 && m_areaStats[compId].total_polygons > 0) {
-        double threshold = ShapeFilter::thresholdFromPercentage(
-            compFilter, m_areaStats[compId]);
-        polygons = ShapeFilter::filter(polygons, threshold);
+    const RenderStackup& render =
+        cachedRenderStackup(m_stackups, *m_assembly, comp.technology(), lyp);
+    auto loaded = loadStandardComponent(comp, lyp, render, shapeFilterPercent(compId));
+    if (loaded) {
+        adoptStandardComponent(compId, std::move(*loaded));
     }
+#else
+    Q_UNUSED(comp);
+    Q_UNUSED(lyp);
+#endif
+}
 
-    // Black-box / no-LYP chiplet (commercial / closed PDK node): the fallback
-    // stackup does not model this die's layers, so LayerMeshBuilder would skip
-    // them and the component would render empty in 3D. Augment a LOCAL copy of
-    // the stackup (the cached one is untouched) so the die body + pads render
-    // with sensible height and role-based colors. See augmentStackupForBlackBox.
-    //
-    // Only for a genuine black box: when a real PDK stackup was resolved
-    // (usedStackup -- e.g. a supported-PDK import that carries no .lyp), the
-    // die's real layers already render at correct elevations and unmodeled
-    // auxiliary layers (fillers, text, recognition) must be skipped, NOT turned
-    // into stacked full-thickness slabs that explode the stack vertically.
-    if (!lyp && !usedStackup) {
-        augmentStackupForBlackBox(stackup, polygons, comp);
+void AssemblyView::adoptStandardComponent(const QString& compId, StandardComponent&& loaded)
+{
+    m_polygonCache[compId] = std::move(loaded.polygons);
+    m_areaStats[compId] = loaded.areaStats;
+    if (!loaded.note.empty()) {
+        m_componentNotes[compId] = std::move(loaded.note);
     }
+    m_shapeCounts[compId] = std::move(loaded.counts);
+    m_fastSources[compId] = std::move(loaded.fast);
 
-    // Build 3D geometry from polygons
-    // For flip-chip (FaceDown) dies, invert layer z-positions so that
-    // the topmost metal (e.g. TopMetal2) sits at z=0 and lower metals
-    // stack upward, matching the physical face-down orientation.
-    bool flipZ = (comp.orientation() == Orientation::FaceDown);
-    double beolTop = flipZ ? stackup.totalHeight() : 0.0;
-    // Mesh anchor convention is now schema-driven (per
-    // coord_frame_contract.md §2): each component declares
-    // `anchor: gds_origin` or `anchor: bbox_center`. Legacy files
-    // without the field default to BboxCenter (the parser warns).
-    Anchor anchor = comp.anchor();
-
-    LayerMeshBuilder meshBuilder;
-    Component3DGeometry geometry = meshBuilder.build(
-        polygons, stackup, lyp,
-        hasColorScheme ? &colorScheme : nullptr,
-        1.0, flipZ, beolTop, anchor);
-
-    // Set component ID and apply transform
-    geometry.componentId = compId;
-
-    // Apply component position as transform
-    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z -> 3D Y
-    const auto& pos = comp.position();
-    geometry.transform.setToIdentity();
-    const ScenePosition scenePos = sceneFromChiplet(pos);
-    geometry.transform.translate(scenePos.x, scenePos.y, scenePos.z);
-    // Flip-chip: mirror X for face-down dies
-    if (comp.orientation() == Orientation::FaceDown) {
-        geometry.transform.scale(-1.0f, 1.0f, 1.0f);
-    }
-
+    Component3DGeometry& geometry = loaded.geometry;
     // Upload layer meshes to GPU
     for (auto& layer : geometry.layers) {
         layer.mesh.upload();
@@ -1667,10 +1483,6 @@ void AssemblyView::buildLayerGeometry(const Component& comp, const LayerProperti
     qDebug() << "Built layer geometry for" << compId << ":"
              << m_layerGeometry[compId].layerCount() << "layers,"
              << m_layerGeometry[compId].totalTriangles() << "triangles";
-#else
-    Q_UNUSED(comp);
-    Q_UNUSED(lyp);
-#endif
 }
 
 void AssemblyView::setShapeFilterPercent(const QString& componentId, double percent)
@@ -1750,38 +1562,12 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
 
     const std::string& techId = comp->technology();
 
-    // Get cached stackup
-    LayerStackup stackup;
+    // The cached stackup, and whether it came from a stackup file: the
+    // black-box layers are added under the same rule as the first build.
+    RenderStackup render;
     auto stackupIt = m_stackups.find(techId);
     if (stackupIt != m_stackups.end()) {
-        stackup = stackupIt->second;
-    }
-
-    // Get layer properties
-    const LayerPropertiesFile* lyp = nullptr;
-    if (!techId.empty()) {
-        auto it = m_layerProps.find(techId);
-        if (it != m_layerProps.end()) {
-            lyp = &(it->second);
-        }
-    }
-
-    // Black-box (no .lyp): the cached stackup doesn't model this die's layers;
-    // augment the local copy so it still renders on shape-filter rebuilds,
-    // consistent with the initial buildLayerGeometry().
-    if (!lyp) {
-        augmentStackupForBlackBox(stackup, polygons, *comp);
-    }
-
-    // Color: the .lyp when present, else the generic black-box scheme (see the
-    // matching block in buildLayerGeometry). No per-PDK realistic scheme.
-    LayerColorScheme colorScheme;
-    bool hasColorScheme = false;
-    if (!lyp) {
-        std::string gp = BlenderGDSConfigs::genericColorSchemePath();
-        if (!gp.empty() && colorScheme.loadFromYAML(gp)) {
-            hasColorScheme = true;
-        }
+        render = stackupIt->second;
     }
 
     // Preserve transform from existing geometry
@@ -1791,19 +1577,9 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
         transform = geomIt->second.transform;
     }
 
-    // Rebuild mesh (preserve flip-chip z-inversion from initial build).
-    // Anchor is schema-driven per coord_frame_contract.md §2.
-    bool flipZ = (comp->orientation() == Orientation::FaceDown);
-    double beolTop = flipZ ? stackup.totalHeight() : 0.0;
-    Anchor anchor = comp->anchor();
-
-    LayerMeshBuilder meshBuilder;
-    Component3DGeometry geometry = meshBuilder.build(
-        polygons, stackup, lyp,
-        hasColorScheme ? &colorScheme : nullptr,
-        1.0, flipZ, beolTop, anchor);
-
-    geometry.componentId = compId;
+    StandardBuild built = buildStandardGeometry(*comp, polygons,
+                                                findSheet(m_layerProps, techId), render);
+    Component3DGeometry& geometry = built.geometry;
     geometry.transform = transform;
 
     // Upload to GPU
@@ -1820,73 +1596,15 @@ void AssemblyView::rebuildFilteredGeometry(const QString& compId)
 
 void AssemblyView::updateSceneBounds()
 {
-    AA_BOUNDING_BOX sceneBounds;
-    bool first = true;
-
-    // Include layer geometry bounds (for Layer mode rendering)
-    // This is checked FIRST because layer mode is the default and most common
-    if (!m_layerGeometry.empty()) {
-        for (const auto& [compId, geom] : m_layerGeometry) {
-            for (const auto& layer : geom.layers) {
-                AA_BOUNDING_BOX localBounds = layer.mesh.boundingBox();
-
-                // Transform all 8 corners of the local bounding box to world space.
-                // This correctly handles scale(-1,1,1) for flip-chip components,
-                // where extracting only the translation column produces wrong bounds.
-                QVector3D corners[8] = {
-                    {localBounds.mins.x,  localBounds.mins.y,  localBounds.mins.z},
-                    {localBounds.maxes.x, localBounds.mins.y,  localBounds.mins.z},
-                    {localBounds.mins.x,  localBounds.maxes.y, localBounds.mins.z},
-                    {localBounds.maxes.x, localBounds.maxes.y, localBounds.mins.z},
-                    {localBounds.mins.x,  localBounds.mins.y,  localBounds.maxes.z},
-                    {localBounds.maxes.x, localBounds.mins.y,  localBounds.maxes.z},
-                    {localBounds.mins.x,  localBounds.maxes.y, localBounds.maxes.z},
-                    {localBounds.maxes.x, localBounds.maxes.y, localBounds.maxes.z},
-                };
-
-                QVector3D wc = geom.transform.map(corners[0]);
-                VECTOR3D wMins(wc.x(), wc.y(), wc.z());
-                VECTOR3D wMaxes = wMins;
-
-                for (int i = 1; i < 8; ++i) {
-                    wc = geom.transform.map(corners[i]);
-                    if (wc.x() < wMins.x) wMins.x = wc.x();
-                    if (wc.y() < wMins.y) wMins.y = wc.y();
-                    if (wc.z() < wMins.z) wMins.z = wc.z();
-                    if (wc.x() > wMaxes.x) wMaxes.x = wc.x();
-                    if (wc.y() > wMaxes.y) wMaxes.y = wc.y();
-                    if (wc.z() > wMaxes.z) wMaxes.z = wc.z();
-                }
-
-                AA_BOUNDING_BOX worldBounds;
-                worldBounds.SetFromMinsMaxes(wMins, wMaxes);
-
-                if (first) {
-                    sceneBounds = worldBounds;
-                    first = false;
-                } else {
-                    sceneBounds.AddBounds(worldBounds);
-                }
-            }
-        }
+    SceneBounds bounds;
+    for (const auto& [compId, geom] : m_layerGeometry) {
+        bounds.add(geom);
     }
-
     // Also include non-instanced meshes (fallback meshes for components without GDS)
     for (const auto& [id, mesh] : m_meshes) {
-        if (first) {
-            sceneBounds = mesh.boundingBox();
-            first = false;
-        } else {
-            sceneBounds.AddBounds(mesh.boundingBox());
-        }
+        bounds.add(mesh);
     }
-
-    // If no geometry at all, set default bounds
-    if (first) {
-        VECTOR3D mins(-50, -50, -10);
-        VECTOR3D maxes(50, 50, 10);
-        sceneBounds.SetFromMinsMaxes(mins, maxes);
-    }
+    const AA_BOUNDING_BOX sceneBounds = bounds.box();
 
     qDebug() << "updateSceneBounds: mins=(" << sceneBounds.mins.x << "," << sceneBounds.mins.y << "," << sceneBounds.mins.z
              << ") maxes=(" << sceneBounds.maxes.x << "," << sceneBounds.maxes.y << "," << sceneBounds.maxes.z << ")";
@@ -2144,6 +1862,287 @@ void AssemblyView::zoomToRect(const QRect& rect)
     cam.setDistance(cam.distance() * scale);
     emit cameraChanged();
     update();
+}
+
+// ---------------------------------------------------------------------------
+// Fast and Every shape
+
+void AssemblyView::setShapeMode(ShapeMode mode)
+{
+    if (mode == m_shapeMode) {
+        return;
+    }
+    m_shapeMode = mode;
+    dropFastFrame();
+    m_everyFrameSeconds = -1.0;
+    readFastShapes();
+    emit notesChanged();
+    emit layerRowsChanged();
+    update();
+}
+
+bool AssemblyView::shapesPrepared() const
+{
+    if (m_shapeMode == ShapeMode::Standard) {
+        return false;
+    }
+    for (const auto& [id, source] : m_fastSources) {
+        auto f = m_fast.find(id);
+        if (f == m_fast.end() || f->second.fillOnly) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool AssemblyView::fillPrepared() const
+{
+    if (!m_assembly) return true;
+    for (const auto& comp : m_assembly->components()) {
+        const QString id = QString::fromStdString(comp->id());
+        auto source = m_fastSources.find(id);
+        if (source == m_fastSources.end() || m_fast.count(id)) continue;
+        if (layersDrawn(*comp) && !fillSource(source->second).layers.empty()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void AssemblyView::setCamera(const Camera& camera)
+{
+    m_scene.camera() = camera;
+    emit cameraChanged();
+    update();
+}
+
+void AssemblyView::readFastShapes()
+{
+    // Standard reads fill alone, and only with fill on. Fast and Every read
+    // every placed layer, and replace a fill-only read, giving back its share
+    // of the budget.
+    const bool fillOnly = m_shapeMode == ShapeMode::Standard;
+    if (m_fastReading || !m_assembly || (fillOnly && !m_showFill)) {
+        return;
+    }
+    if (!fillOnly) {
+        bool dropped = false;
+        for (auto it = m_fast.begin(); it != m_fast.end();) {
+            if (!it->second.fillOnly) {
+                ++it;
+                continue;
+            }
+            for (const FastLayer& l : it->second.layers) m_fastBudget += l.tiles.records();
+            m_fastKeys.erase(it->first);
+            it = m_fast.erase(it);
+            dropped = true;
+        }
+        if (dropped) {
+            dropFastFrame();
+            m_fastUploaded = false;
+        }
+    }
+    // In assembly order, as studio-viewcount spends the budget.
+    std::vector<FastSource> todo;
+    for (const auto& comp : m_assembly->components()) {
+        const QString id = QString::fromStdString(comp->id());
+        auto source = m_fastSources.find(id);
+        if (source == m_fastSources.end() || m_fast.count(id)) continue;
+        if (fillOnly && fillSource(source->second).layers.empty()) continue;
+        todo.push_back(source->second);
+    }
+    if (todo.empty()) {
+        return;
+    }
+    m_fastReading = true;
+    const int generation = m_fastGeneration;
+    const std::size_t budget = m_fastBudget;
+    // Only copies go to the worker; it touches neither the view nor the
+    // assembly. Each read opens its own layout.
+    m_fastWatcher->setFuture(QtConcurrent::run([todo = std::move(todo), generation, budget,
+                                                fillOnly]() {
+        auto read = std::make_shared<FastRead>();
+        read->generation = generation;
+        read->budget = budget;
+        for (const FastSource& source : todo) {
+            FastComponent c;
+            try {
+                c = fillOnly ? loadFillTiles(source, read->budget)
+                             : loadFastComponent(source, read->budget);
+            } catch (const std::exception& e) {
+                c = FastComponent{};
+                c.componentId = source.componentId;
+                c.notes.push_back(fastReadFailedNote(source.componentId, e.what()));
+            } catch (...) {
+                c = FastComponent{};
+                c.componentId = source.componentId;
+                c.notes.push_back(fastReadFailedNote(source.componentId, "unknown error"));
+            }
+            c.fillOnly = fillOnly;
+            read->components.emplace(QString::fromStdString(source.componentId), std::move(c));
+        }
+        return read;
+    }));
+}
+
+void AssemblyView::onFastRead()
+{
+    m_fastReading = false;
+    const std::shared_ptr<FastRead> read = m_fastWatcher->result();
+    if (read && read->generation == m_fastGeneration) {
+        dropFastFrame();
+        for (auto& [id, c] : read->components) {
+            std::set<LayerKey> keys;
+            for (const FastLayer& l : c.layers) keys.insert(l.key);
+            m_fastKeys[id] = std::move(keys);
+            m_fast[id] = std::move(c);
+        }
+        m_fastBudget = read->budget;
+        m_fastUploaded = false;
+    }
+    // A newer assembly, or a component built since, may still need reading.
+    readFastShapes();
+    if (shapesPrepared()) {
+        emit shapesRead();
+    }
+    emit notesChanged();
+    emit layerRowsChanged();
+    update();
+}
+
+void AssemblyView::dropFastFrame()
+{
+    if (m_settleTimer) m_settleTimer->stop();
+    m_fastActive = false;
+    m_fastFrame = FastFrame{};
+    m_fastChoice = TileChoice{};
+    m_fastDraws.clear();
+    m_tileMemory = TileChoiceMemory{};
+    m_settledBuckets.clear();
+    m_settledCoverage.clear();
+    m_settledRows.clear();
+    m_settledNotes.clear();
+}
+
+void AssemblyView::prepareFastFrame()
+{
+    m_fastActive = false;
+    m_fastDraws.clear();
+    // Standard draws a frame of fill alone, once it is read.
+    const bool fillFrame = m_shapeMode == ShapeMode::Standard;
+    if (!m_assembly || !m_fastGL.initialized()
+        || !(fillFrame ? m_showFill && fillPrepared() : shapesPrepared())) {
+        return;
+    }
+    const qreal dpr = devicePixelRatioF();
+    const int w = m_renderWidth > 0 ? m_renderWidth : static_cast<int>(width() * dpr);
+    const int h = m_renderHeight > 0 ? m_renderHeight : static_cast<int>(height() * dpr);
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    if (!m_fastUploaded) {
+        std::vector<const FastLayer*> layers;
+        for (const auto& [id, c] : m_fast) {
+            for (const FastLayer& l : c.layers) layers.push_back(&l);
+        }
+        m_fastGL.upload(this, layers);
+        m_fastUploaded = true;
+    }
+
+    std::vector<FastFramePart> parts;
+    for (const auto& comp : m_assembly->components()) {
+        const QString id = QString::fromStdString(comp->id());
+        auto f = m_fast.find(id);
+        auto g = m_layerGeometry.find(id);
+        if (f == m_fast.end() || g == m_layerGeometry.end()) continue;
+        parts.push_back({&f->second, &g->second, layersDrawn(*comp),
+                         comp->render_mode() == RenderMode::DetailedNoSubstrate});
+    }
+    const float spread = layerZSpacingApplicable() ? m_layerZSpacing : 1.0f;
+    m_fastFrame = fastFrame(
+        parts,
+        [this, fillFrame](const std::string& id, const FastLayer& l) {
+            return (!fillFrame || l.place.fill)
+                && isLayerVisible(QString::fromStdString(id), l.key.layer, l.key.datatype);
+        },
+        spread);
+    m_fastChoice = chooseTiles(m_fastFrame.inputs, tileCamera(m_scene.camera(), w, h),
+                               tileChoiceParams(m_shapeMode), m_tileMemory);
+
+    for (std::size_t i = 0; i < m_fastFrame.refs.size(); ++i) {
+        if (!m_fastFrame.inputs[i].visible) continue;
+        const FastFrameLayer& ref = m_fastFrame.refs[i];
+        const QString id = QString::fromStdString(ref.componentId);
+        const Component* comp = m_assembly->component(ref.componentId);
+        const LayerKey& key = ref.layer->key;
+        FastDrawLayer d;
+        d.layer = ref.layer;
+        d.choiceIndex = i;
+        std::copy(m_fastFrame.inputs[i].model.begin(), m_fastFrame.inputs[i].model.end(),
+                  d.model.data());
+        const QColor& c = ref.layer->place.color;
+        d.color = QVector4D(c.redF(), c.greenF(), c.blueF(),
+                            layerOpacity(id, key.layer, key.datatype));
+        d.selected = id == m_selectedComponent;
+        d.mirrored = comp && comp->orientation() == Orientation::FaceDown;
+        d.coverRank = m_fastFrame.coverRanks[i];
+        m_fastDraws.push_back(d);
+    }
+    m_fastActive = true;
+}
+
+void AssemblyView::drawFastLayers(bool translucent)
+{
+    if (!m_fastActive || m_fastDraws.empty()) {
+        return;
+    }
+    const MATRIX4X4 viewMat = m_scene.camera().viewMatrix();
+    const MATRIX4X4 projMat = m_scene.camera().projectionMatrix(currentAspect());
+    FastFrameMatrices m;
+    for (int i = 0; i < 16; ++i) {
+        m.view.data()[i] = viewMat.GetEntry(i);
+        m.projection.data()[i] = projMat.GetEntry(i);
+    }
+    const VECTOR3D light = m_scene.lightDirection();
+    m.lightDirection = QVector3D(light.x, light.y, light.z);
+    m.fcoefHalf = m_scene.camera().fcoef() * 0.5f;
+    // As the standard translucent layers: both sides, no depth write (the
+    // caller's).
+    if (translucent) glDisable(GL_CULL_FACE);
+    m_fastGL.draw(this, m_fastDraws, m_fastChoice, m, translucent);
+    if (translucent) glEnable(GL_CULL_FACE);
+}
+
+void AssemblyView::settleFast()
+{
+    if (!m_fastActive) {
+        return;
+    }
+    m_settledBuckets.clear();
+    std::vector<std::string> rows;
+    for (std::size_t i = 0; i < m_fastFrame.refs.size() && i < m_fastChoice.layers.size(); ++i) {
+        const FastFrameLayer& ref = m_fastFrame.refs[i];
+        const LayerBuckets& b = m_fastChoice.layers[i];
+        const LayerKey& key = ref.layer->key;
+        m_settledBuckets[QString::fromStdString(ref.componentId)][key] = b;
+        rows.push_back(ref.componentId + " " + std::to_string(key.layer) + "/"
+                       + std::to_string(key.datatype) + " "
+                       + fastRowLabel(ref.layer->tiles.inGds, b) + (b.coverage ? " +" : ""));
+    }
+    m_settledCoverage = m_shapeMode == ShapeMode::Standard
+                          ? fillCoverageNotes(m_fastFrame.refs, m_fastChoice)
+                          : coverageNotes(m_fastFrame.refs, m_fastChoice);
+    // Only what changed: a notes strip that resizes the view repaints it,
+    // and the repaint settles again.
+    if (rows != m_settledRows) {
+        m_settledRows = std::move(rows);
+        emit layerRowsChanged();
+    }
+    const QStringList n = notes();
+    if (n != m_settledNotes) {
+        m_settledNotes = n;
+        emit notesChanged();
+    }
 }
 
 } // namespace chiplet

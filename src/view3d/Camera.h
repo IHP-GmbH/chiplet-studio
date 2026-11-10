@@ -27,7 +27,9 @@ public:
     void zoom(float delta);
 
     // Fit camera to view a bounding box
-    void fitToBox(const AA_BOUNDING_BOX& box);
+    void fitToBox(const AA_BOUNDING_BOX& box, float aspectRatio = 1.0f);
+    // Resize follows the last explicit fit only until deliberate navigation.
+    void setViewportAspect(float aspectRatio);
 
     // Reset to default view
     void reset();
@@ -52,8 +54,13 @@ public:
     void setTarget(const VECTOR3D& target);
     void setDistance(float distance);
     void setFov(float fov) { m_fov = fov; }
+    // Look from yaw and pitch (degrees) at the same target and distance.
+    void setOrientation(float yaw, float pitch);
 
 private:
+    AA_BOUNDING_BOX m_fittedBox;
+    bool m_followFit = false;
+    float m_viewportAspect = 1.0f;
     void updateClipPlanes();
     void clampPitch();
 

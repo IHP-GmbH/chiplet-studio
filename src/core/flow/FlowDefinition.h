@@ -24,7 +24,13 @@ struct FlowDefinition {
     std::string working_directory;
     std::map<std::string, std::string> environment;
 
-    bool empty() const { return steps.empty(); }
+    // Empty means the author declared no flow content AT ALL, not merely no
+    // steps. A block carrying only an environment or only a working_directory
+    // is a legal thing to write and this predicate gates whether it is written
+    // back: when it answered steps.empty(), saving deleted such a block.
+    bool empty() const {
+        return steps.empty() && environment.empty() && working_directory.empty();
+    }
     size_t step_count() const { return steps.size(); }
 };
 

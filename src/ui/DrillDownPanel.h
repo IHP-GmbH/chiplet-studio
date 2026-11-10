@@ -13,7 +13,10 @@
 
 #include <QWidget>
 #include <QString>
+#include <QList>
 #include <memory>
+
+#include "view2d/AssemblySheet.h"
 
 class QLabel;
 class QComboBox;
@@ -67,8 +70,13 @@ public:
      *        because no merged/complete assembly GDS was found; the panel then
      *        labels the view so the user knows the dies are not included.
      */
-    void setAssemblyGds(const QString& gdsPath, const QString& lypPath,
+    void setAssemblyGds(const QString& gdsPath, const LoadSpec& spec,
                         const Assembly& assembly, bool interposerOnly = false);
+
+    /**
+     * @brief Show or hide every fill layer and update the boxes to match
+     */
+    void setFillVisible(bool visible);
 
     /**
      * @brief Return to assembly view from drill-down
@@ -177,6 +185,8 @@ private:
     void updateSidePanels();
     void populateCellCombo();
     void populateLayerList();
+    QList<QTreeWidgetItem*> layerRows() const;  // every layer row, headings excluded
+    static constexpr int kFillRole = Qt::UserRole + 1;
 
     // Overview navigator (corner mini-map)
     void positionOverview();          // pin to the 2D view's bottom-right corner
@@ -198,7 +208,7 @@ private:
     // Overview navigator (corner mini-map, child overlay of m_view2d)
     OverviewNavigator* m_overview = nullptr;
     QTimer* m_overviewRefreshTimer = nullptr;
-    bool m_overviewVisible = true;
+    bool m_overviewVisible = false;
 
     // Side panels
     QWidget* m_layerContainer = nullptr;
@@ -221,7 +231,7 @@ private:
     // Assembly mode state
     PanelMode m_panelMode = PanelMode::Empty;
     QString m_assemblyGdsPath;
-    QString m_assemblyLypPath;
+    LoadSpec m_assemblySpec;
     QString m_assemblyTopCell;
     QString m_assemblyContextText;  // label shown in assembly mode (set on load)
     std::unique_ptr<CellComponentMapper> m_cellMapper;

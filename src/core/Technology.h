@@ -80,6 +80,16 @@ public:
     void set_stackup_source(const string_type& path);
     const string_type& stackup_source() const;
 
+    // Why a declared layer_properties / stackup path did not resolve (e.g.
+    // "${CHIPLET_FLOW_TECH} is not set"). Empty when it resolved or was not
+    // declared. These two fields are viewing aids: a failure leaves the path
+    // empty and the source intact, and the views fall back and say so.
+    void set_layer_properties_problem(const string_type& why);
+    const string_type& layer_properties_problem() const;
+
+    void set_stackup_problem(const string_type& why);
+    const string_type& stackup_problem() const;
+
     void set_dbu(double dbu);
     double dbu() const;
 
@@ -151,6 +161,8 @@ private:
     string_type m_layerPropertiesSource;  // verbatim ${VAR}/relative path from the file
     string_type m_stackupPath;            // resolved absolute stackup YAML path
     string_type m_stackupSource;          // verbatim ${VAR}/relative path from the file
+    string_type m_layerPropertiesProblem;
+    string_type m_stackupProblem;
     double m_dbu = 0.001;  // Default: 1nm
 
     // GDS3D process definition

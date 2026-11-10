@@ -6,7 +6,7 @@ include(FetchContent)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
+    GIT_TAG f8d7d77c06936315286eb55f8de22cd23c188571 # v1.14.0
 )
 
 # For Windows: Prevent overriding the parent project's compiler/linker settings
@@ -21,6 +21,9 @@ enable_testing()
 add_executable(chiplet_tests
     test_main.cpp  # Custom main with early Python initialization
     test_chiplet_format.cpp
+    test_document_preservation.cpp
+    test_recovery_checkpoint.cpp
+    test_recovery_dialog.cpp
     test_chiplet_format_io_pads.cpp
     test_interfaces.cpp
     test_netlist.cpp
@@ -59,7 +62,25 @@ add_executable(chiplet_tests
     test_path_contract.cpp
     test_chiplet_synth.cpp
     test_stackup_order_golden.cpp
+    test_assembly_const.cpp
+    test_flow_fidelity.cpp
+    test_gds_placement.cpp
+    test_2d_hierarchy_palette.cpp
+    test_mesh_lifecycle.cpp
+    test_camera_fit.cpp
+    test_shortcut_policy.cpp
+    test_dock_width_policy.cpp
+    test_tech_resolve.cpp
+    test_assembly_sheet.cpp
+    test_fill_and_notes.cpp
+    test_shape_counts.cpp
+    test_shape_tiles.cpp
+    test_scene_load.cpp
+    test_panel_wiring.cpp
+    test_box_mesh.cpp
 )
+
+target_compile_options(chiplet_tests PRIVATE ${CHIPLET_SWITCH_GUARD})
 
 target_include_directories(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -79,6 +100,7 @@ target_link_libraries(chiplet_tests
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::OpenGLWidgets
     Qt6::Core5Compat
     Qt6::Test
     Qt6::Concurrent
@@ -87,6 +109,8 @@ target_link_libraries(chiplet_tests
 
 # Link core sources (we need them for testing)
 target_sources(chiplet_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/view3d/Camera.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/SceneManager.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Assembly.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Component.cpp
@@ -95,8 +119,12 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/Netlist.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Technology.cpp
     ${CMAKE_SOURCE_DIR}/src/core/LayerStackup.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/TechResolve.cpp
     ${CMAKE_SOURCE_DIR}/src/core/CommandProcessor.cpp
     ${CMAKE_SOURCE_DIR}/src/core/CommandJournal.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/RecoveryCheckpoint.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/CrashRecoveryDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/ImportGdsDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/core/CommandFactory.cpp
     ${CMAKE_SOURCE_DIR}/src/core/commands/CmdMoveComponent.cpp
     ${CMAKE_SOURCE_DIR}/src/core/commands/CmdRenameComponent.cpp
@@ -107,6 +135,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayoutBridge.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/LayerProperties.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/KLayout2DView.cpp
+    ${CMAKE_SOURCE_DIR}/src/view2d/AssemblySheet.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/OverviewNavigator.cpp
     ${CMAKE_SOURCE_DIR}/src/view2d/EmbeddedDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/math/VECTOR3D.cpp
@@ -121,11 +150,20 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui/UnitConverter.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/PropertiesPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/DrillDownPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/ViewingNotesBar.cpp
     ${CMAKE_SOURCE_DIR}/src/scripting/ScriptEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/LayerMeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/GDSLayerExtractor.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/ComponentMesh.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/MeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/ShapeFilter.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/SceneLoad.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/ShapeTiles.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/TileChoice.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/ViewCount.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/ShaderProgram.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/FastShapesGL.cpp
+    ${CMAKE_SOURCE_DIR}/src/view3d/AssemblyView.cpp
     ${CMAKE_SOURCE_DIR}/src/core/flow/FlowEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/flow/FlowConfig.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/FlowPanel.cpp
@@ -224,3 +262,15 @@ if(HAVE_PYTHON)
         ENVIRONMENT "CHIPLET_PYTHON_MODULE_DIR=${CMAKE_BINARY_DIR}/python"
         TIMEOUT 300)
 endif()
+
+# The cross-reader check, registered UNCONDITIONALLY and deliberately not behind
+# an if(). It is the only test here that reads the writer's output with a YAML
+# implementation other than the writer's own, so it is precisely the test whose
+# silent absence would matter, and a guard would let a stale image delete it
+# while the gate stayed green. Missing interpreter, missing PyYAML, wrong PyYAML
+# version or missing bindings are all red, each with a message saying which.
+add_test(NAME chiplet_cross_reader
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_cross_reader_check.sh)
+set_tests_properties(chiplet_cross_reader PROPERTIES
+    ENVIRONMENT "CHIPLET_PYTHON_MODULE_DIR=${CMAKE_BINARY_DIR}/python"
+    TIMEOUT 300)

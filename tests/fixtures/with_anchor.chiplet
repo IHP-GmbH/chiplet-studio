@@ -9,7 +9,10 @@ components:
   - id: interposer
     type: interposer
     anchor: bbox_center
-    dimensions: {width: 1000, height: 1000, thickness: 13.83}
+    dimensions: {width: 1000, height: 1000, thickness: 10.8103}
+    # Case data: no technology, so no attach plane; set to its thickness,
+    # the plane Studio used while the file declared none.
+    attachment_surface_z: 10.8103
     position: {x: 500, y: 500, z: 0}
 
   - id: U1

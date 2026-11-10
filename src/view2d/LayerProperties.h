@@ -129,7 +129,11 @@ private:
 
 // Utility functions
 LayerColor parse_hex_color(const std::string& hex);
+// A source is "[name] layer/datatype[@cellview]": "40/0", "1/25@1", or, as
+// the gf180mcu sheet writes them, "Metal1_Dummy 34/4@1".
 LayerKey parse_layer_source(const std::string& source);
+// The name in front of the layer/datatype, empty when there is none.
+std::string layer_source_name(const std::string& source);
 
 } // namespace chiplet
 

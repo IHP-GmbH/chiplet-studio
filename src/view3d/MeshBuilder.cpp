@@ -140,12 +140,14 @@ ComponentMesh MeshBuilder::buildBox(float width, float height, float depth,
         {{offsetX - hw, offsetY + hh, offsetZ}, {-1, 0, 0}},
     };
 
-    // Indices for 12 triangles (6 faces, 2 triangles each)
+    // Indices for 12 triangles (6 faces, 2 triangles each), counter-clockwise
+    // seen from outside, the side the face's normal points to: back faces are
+    // culled, so a face wound the other way shows only from inside the box.
     std::vector<GLuint> indices = {
-        0, 1, 2, 0, 2, 3,       // Front
-        4, 5, 6, 4, 6, 7,       // Back
-        8, 9, 10, 8, 10, 11,    // Top
-        12, 13, 14, 12, 14, 15, // Bottom
+        0, 2, 1, 0, 3, 2,       // Front
+        4, 6, 5, 4, 7, 6,       // Back
+        8, 10, 9, 8, 11, 10,    // Top
+        12, 14, 13, 12, 15, 14, // Bottom
         16, 17, 18, 16, 18, 19, // Right
         20, 21, 22, 20, 22, 23  // Left
     };

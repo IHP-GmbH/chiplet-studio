@@ -12,6 +12,9 @@
 #include "EmbeddedDispatcher.h"
 
 #include <QLabel>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QScreen>
 
@@ -24,11 +27,15 @@
 #include "dbBox.h"
 #include "dbPoint.h"
 #include "dbLoadLayoutOptions.h"
+#include "dbCommonReader.h"
+#include "dbRecursiveShapeIterator.h"
+#include "dbStreamLayers.h"
 #include "tlColor.h"
 #include "tlException.h"
 #include "tlObject.h"
 #include <algorithm>
 #include <cmath>
+#include <set>
 #endif
 
 namespace chiplet {
@@ -61,6 +68,72 @@ private:
     KLayout2DView* m_parent;
 };
 #endif
+
+// The carrier fill of a composed load: where to read it, the rows it gets,
+// and whether the read was tried. Rows are styled from the carrier sheet at
+// load time, since the sheets are read then.
+struct KLayout2DView::CarrierFill {
+    std::string path;
+    LayerNum boundary{-1, -1};  // the carrier sheet's prBoundary; checks the frame
+    struct Row {
+        LayerNum key;
+        std::string group;
+        std::string name;
+#ifdef HAVE_KLAYOUT
+        lay::LayerPropertiesNode node;
+        bool styled = false;
+#endif
+    };
+    std::vector<Row> rows;
+    bool tried = false;
+};
+
+namespace {
+
+#ifdef HAVE_KLAYOUT
+int cellviewOf(const lay::ParsedLayerSource& src)
+{
+    // No index means the first cellview (LayerProperties::do_realize).
+    return src.cv_index() < 0 ? 0 : src.cv_index();
+}
+
+// The single top cell, or none when there are several or none.
+bool soleTop(const db::Layout& layout, db::cell_index_type& top)
+{
+    int count = 0;
+    for (auto t = layout.begin_top_down(); t != layout.end_top_cells(); ++t) {
+        top = *t;
+        ++count;
+    }
+    return count == 1;
+}
+
+// The box of `cell`'s own shapes on one layer; empty if the layer is absent.
+db::Box ownBox(const db::Layout& layout, db::cell_index_type cell, const LayerNum& key)
+{
+    for (auto l = layout.begin_layers(); l != layout.end_layers(); ++l) {
+        const db::LayerProperties& p = *(*l).second;
+        if (p.layer == key.first && p.datatype == key.second) {
+            return layout.cell(cell).shapes((*l).first).bbox();
+        }
+    }
+    return db::Box();
+}
+
+long peakResidentMiB()
+{
+    QFile status("/proc/self/status");
+    if (!status.open(QIODevice::ReadOnly)) return -1;
+    for (const QByteArray& line : status.readAll().split('\n')) {
+        if (line.startsWith("VmHWM:")) {
+            return line.mid(6).trimmed().split(' ').first().toLong() / 1024;
+        }
+    }
+    return -1;
+}
+#endif
+
+} // namespace
 
 KLayout2DView::KLayout2DView(QWidget* parent)
     : QWidget(parent)
@@ -218,6 +291,9 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
 
     lay::LayoutView* view = m_viewWidget->view();
     if (!view) return false;
+    m_notes.clear();
+    m_rowMeta.clear();
+    m_carrierFill.reset();
 
     try {
         // Block cellNavigated during load to prevent spurious events
@@ -258,6 +334,27 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
             view->text_color(tl::Color(255, 255, 255));
         }
 
+        // Preserve palette styles/visibility; add default-styled entries only
+        // for actual geometry layers it omits, such as die projections.
+        std::set<std::string> paletteSources;
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            if (!it->has_children()) paletteSources.insert(it->source_string(true));
+        }
+        view->add_missing_layers();
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            if (!it->has_children() && !paletteSources.count(it->source_string(true))) {
+                lay::LayerPropertiesNode props(*it);
+                props.set_name(it->source_string(true) + " (default styling)");
+                view->replace_layer_node(it, props);
+            }
+        }
+        // Embedded views bypass KLayout MainWindow's initial-depth setup.
+        // Level zero shows frames; level one includes the cell's own shapes.
+        const auto& loaded = view->cellview(0);
+        if (loaded.is_valid() && loaded.cell()) {
+            view->set_hier_levels(std::make_pair(0, int(loaded.cell()->hierarchy_levels()) + 1));
+        }
+
         // Zoom to fit
         view->zoom_fit();
 
@@ -286,6 +383,374 @@ bool KLayout2DView::loadLayout(const QString& path, const QString& lypPath)
 #endif
 }
 
+bool KLayout2DView::loadComposedLayout(const QString& path, const LoadSpec& spec)
+{
+#ifdef HAVE_KLAYOUT
+    m_notes.clear();
+    m_rowMeta.clear();
+    m_carrierFill.reset();
+    if (!ensureViewWidget()) {
+        qWarning("KLayout2DView::loadComposedLayout: View not available");
+        return false;
+    }
+    lay::LayoutView* view = m_viewWidget->view();
+    if (!view) return false;
+
+    try {
+        m_blockCellNavigation = true;
+        while (view->cellviews() > 0) {
+            view->erase_cellview(0);
+        }
+        db::LoadLayoutOptions options;
+        view->load_layout(path.toStdString(), options, true /*add_cellview*/);
+
+        Occupancy occupancy;
+        const lay::CellView& cv = view->cellview(0);
+        if (cv.is_valid() && cv.cell()) {
+            occupancy = measureOccupancy(cv->layout(), cv.cell_index(), spec.dies);
+        }
+        const QString file = QFileInfo(path).fileName();
+        for (const auto& id : occupancy.unmatchedDies) {
+            const QString comp = QString::fromStdString(id);
+            m_notes << QString("2D: no cell in %1 is named %2_..., so whatever %2 "
+                               "draws there is listed with the carrier.").arg(file, comp);
+        }
+
+        // Each sheet is read by KLayout itself, which owns custom dither
+        // patterns and line styles: a load merges them into the view's tables
+        // and remaps the sheet onto them, so a node harvested here keeps valid
+        // indices after the next sheet loads.
+        std::map<std::string, SheetTech> sheets;
+        std::map<std::string, std::map<LayerNum, lay::LayerPropertiesNode>> styles;
+        bool anySheet = false;
+        for (const SheetSpec& sheetSpec : spec.sheets) {
+            SheetTech& tech = sheets[sheetSpec.techId];
+            tech.fill = sheetSpec.fill;
+            if (sheetSpec.lypPath.empty()) continue;
+            try {
+                view->load_layer_props(sheetSpec.lypPath);
+            } catch (const tl::Exception& e) {
+                m_notes << QString("%1 layer sheet could not be read (%2: %3). 2D uses "
+                                   "default styling for its layers.")
+                               .arg(QString::fromStdString(sheetSpec.techId),
+                                    QString::fromStdString(sheetSpec.lypPath),
+                                    QString::fromStdString(e.msg()));
+                continue;
+            }
+            anySheet = true;
+            auto& nodes = styles[sheetSpec.techId];
+            for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+                if (it->has_children()) continue;
+                const lay::ParsedLayerSource& src = it->source(true);
+                if (src.layer() < 0 || src.datatype() < 0) continue;
+                const LayerNum key(src.layer(), src.datatype());
+                if (tech.names.count(key)) continue;  // the first entry for a number wins
+                tech.order.push_back(key);
+                tech.names[key] = it->name();
+                tech.visible[key] = it->visible(true);
+                nodes.emplace(key, it->flat());
+            }
+        }
+
+        lay::LayerPropertiesList list;
+        list.set_dither_pattern(view->dither_pattern());
+        list.set_line_styles(view->line_styles());
+        for (const ComposedGroup& group : composeAssemblySheet(occupancy.uses,
+                                                               spec.carrierTechs, sheets)) {
+            lay::LayerPropertiesNode heading;
+            heading.set_name(group.title);
+            for (const ComposedRow& row : group.rows) {
+                lay::LayerPropertiesNode leaf;
+                auto techIt = styles.find(row.styleTech);
+                if (techIt != styles.end() && techIt->second.count(row.key)) {
+                    leaf = techIt->second.at(row.key);
+                } else {
+                    lay::LayerProperties props;
+                    props.set_source(lay::ParsedLayerSource(row.key.first, row.key.second, 0));
+                    view->init_layer_properties(props);
+                    leaf = lay::LayerPropertiesNode(props);
+                }
+                leaf.set_name(row.name);
+                leaf.set_visible(row.visible);
+                heading.add_child(leaf);
+                m_rowMeta[{0, row.key}] = RowMeta{QString::fromStdString(group.title), row.fill};
+            }
+            list.push_back(heading);
+        }
+        view->set_properties(list);
+
+        // The carrier fill the shown layout leaves out, read on the first Show
+        // Fill. Not when the layout already draws carrier fill: that would be
+        // drawn twice.
+        if (!spec.carrierFillPath.empty()) {
+            std::set<LayerNum> carrierDrawn;
+            for (const LayerUse& use : occupancy.uses) {
+                if (use.carrier) carrierDrawn.insert(use.key);
+            }
+            auto fill = std::make_unique<CarrierFill>();
+            fill->path = spec.carrierFillPath;
+            bool drawn = false;
+            for (const auto& techId : spec.carrierTechs) {
+                auto sheet = sheets.find(techId);
+                if (sheet == sheets.end()) continue;
+                for (const auto& entry : sheet->second.names) {
+                    if (fill->boundary.first < 0 && entry.second.rfind("prBoundary", 0) == 0) {
+                        fill->boundary = entry.first;
+                    }
+                }
+                for (const LayerNum& key : sheet->second.fill) {
+                    if (carrierDrawn.count(key)) drawn = true;
+                    if (std::any_of(fill->rows.begin(), fill->rows.end(),
+                                    [&](const CarrierFill::Row& r) { return r.key == key; })) {
+                        continue;
+                    }
+                    // Styled and listed by the first carrier sheet naming it,
+                    // as composeAssemblySheet does for carrier layers.
+                    CarrierFill::Row row;
+                    row.key = key;
+                    row.group = spec.carrierTechs.front();
+                    for (const auto& styleTech : spec.carrierTechs) {
+                        auto s = sheets.find(styleTech);
+                        if (s == sheets.end() || !s->second.names.count(key)) continue;
+                        row.group = styleTech;
+                        row.name = s->second.names.at(key);
+                        auto st = styles.find(styleTech);
+                        if (st != styles.end() && st->second.count(key)) {
+                            row.node = st->second.at(key);
+                            row.styled = true;
+                        }
+                        break;
+                    }
+                    fill->rows.push_back(std::move(row));
+                }
+            }
+            if (!drawn && !fill->rows.empty()) {
+                std::sort(fill->rows.begin(), fill->rows.end(),
+                          [](const CarrierFill::Row& a, const CarrierFill::Row& b) {
+                              return a.key < b.key;
+                          });
+                m_carrierFill = std::move(fill);
+            }
+        }
+
+        if (!anySheet) {
+            // Same as the single-sheet load with no sheet: pad names are GDS
+            // text, and they are often all a black-box die has to say.
+            view->text_visible(true);
+            view->text_lazy_rendering(false);
+            view->text_color(tl::Color(255, 255, 255));
+        }
+
+        const auto& loaded = view->cellview(0);
+        if (loaded.is_valid() && loaded.cell()) {
+            view->set_hier_levels(std::make_pair(0, int(loaded.cell()->hierarchy_levels()) + 1));
+        }
+        view->zoom_fit();
+
+        m_blockCellNavigation = false;
+        m_currentPath = path;
+        emit layoutChanged(true);
+        return true;
+
+    } catch (const tl::Exception& e) {
+        m_blockCellNavigation = false;
+        qWarning("KLayout2DView::loadComposedLayout failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        m_blockCellNavigation = false;
+        qWarning("KLayout2DView::loadComposedLayout failed: %s", e.what());
+    }
+    m_currentPath.clear();
+    emit layoutChanged(false);
+    return false;
+#else
+    Q_UNUSED(path);
+    Q_UNUSED(spec);
+    return false;
+#endif
+}
+
+void KLayout2DView::setFillVisible(bool visible)
+{
+#ifdef HAVE_KLAYOUT
+    if (!m_viewWidget || !m_viewWidget->view()) {
+        return;
+    }
+    try {
+        lay::LayoutView* view = m_viewWidget->view();
+        if (visible && m_carrierFill && !m_carrierFill->tried) {
+            addCarrierFill();
+        }
+        for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            if (it->has_children()) continue;
+            const lay::ParsedLayerSource& src = it->source(true);
+            auto meta = m_rowMeta.find({cellviewOf(src), LayerNum(src.layer(), src.datatype())});
+            if (meta == m_rowMeta.end() || !meta->second.fill) continue;
+            lay::LayerPropertiesNode props(*it);
+            props.set_visible(visible);
+            view->replace_layer_node(it, props);
+        }
+    } catch (const tl::Exception& e) {
+        qWarning("KLayout2DView::setFillVisible failed: %s", e.msg().c_str());
+    } catch (const std::exception& e) {
+        qWarning("KLayout2DView::setFillVisible failed: %s", e.what());
+    }
+#else
+    Q_UNUSED(visible);
+#endif
+}
+
+bool KLayout2DView::addCarrierFill()
+{
+#ifdef HAVE_KLAYOUT
+    CarrierFill& fill = *m_carrierFill;
+    fill.tried = true;
+    lay::LayoutView* view = m_viewWidget ? m_viewWidget->view() : nullptr;
+    if (!view || view->cellviews() == 0) return false;
+
+    const QString file = QFileInfo(QString::fromStdString(fill.path)).fileName();
+    const QString shown = QFileInfo(m_currentPath).fileName();
+    auto refuse = [&](const QString& why) {
+        m_notes << QString("2D: carrier fill not drawn: %1").arg(why);
+        qInfo("2D: carrier fill not drawn: %s", qPrintable(why));
+        emit notesChanged();
+        return false;
+    };
+    if (fill.boundary.first < 0) {
+        return refuse(QString("no carrier sheet names a prBoundary layer to check that %1 "
+                              "and %2 share the carrier frame").arg(file, shown));
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    db::LoadLayoutOptions options;
+    auto& common = options.get_options<db::CommonReaderOptions>();
+    common.create_other_layers = false;
+    common.enable_text_objects = false;
+    common.enable_properties = false;
+    unsigned int logical = 0;
+    for (const auto& row : fill.rows) {
+        common.layer_map.map(db::LDPair(row.key.first, row.key.second), logical++);
+    }
+    common.layer_map.map(db::LDPair(fill.boundary.first, fill.boundary.second), logical++);
+
+    // Owned here until add_layout hands it to a cellview.
+    auto* handle = new lay::LayoutHandle(new db::Layout(false), fill.path);
+    handle->add_ref();
+    auto release = [&]() {
+        if (handle) handle->remove_ref();
+        handle = nullptr;
+    };
+    try {
+        handle->load(options, std::string());
+    } catch (const tl::Exception& e) {
+        release();
+        return refuse(QString("%1 could not be read (%2)").arg(file, QString::fromStdString(e.msg())));
+    } catch (const std::exception& e) {
+        release();
+        return refuse(QString("%1 could not be read (%2)").arg(file, e.what()));
+    }
+
+    // Same frame: one top cell each, the same name and dbu, and the same
+    // carrier outline in each top cell. A bounding box is no test, since a die
+    // overhanging the outline widens the shown layout.
+    const db::Layout& shownLayout = view->cellview(0)->layout();
+    const db::Layout& read = handle->layout();
+    db::cell_index_type shownTop = 0, readTop = 0;
+    const bool tops = soleTop(shownLayout, shownTop) && soleTop(read, readTop);
+    const db::Box shownBoundary = tops ? ownBox(shownLayout, shownTop, fill.boundary) : db::Box();
+    const db::Box readBoundary = tops ? ownBox(read, readTop, fill.boundary) : db::Box();
+    if (!tops || std::string(shownLayout.cell_name(shownTop)) != read.cell_name(readTop)
+        || std::fabs(shownLayout.dbu() - read.dbu()) > 1e-12
+        || shownBoundary.empty() || shownBoundary != readBoundary) {
+        release();
+        return refuse(QString("%1 and %2 do not share the carrier frame (top cell, dbu or "
+                              "%3/%4 outline differ)")
+                          .arg(file, shown).arg(fill.boundary.first).arg(fill.boundary.second));
+    }
+
+    size_t shapes = 0;
+    for (auto l = read.begin_layers(); l != read.end_layers(); ++l) {
+        const db::LayerProperties& p = *(*l).second;
+        if (LayerNum(p.layer, p.datatype) == fill.boundary) continue;
+        for (db::RecursiveShapeIterator it(read, read.cell(readTop), (*l).first); !it.at_end(); ++it) {
+            ++shapes;
+        }
+    }
+
+    // add_layout makes the new cellview active and zooms to fit; the shown
+    // layout stays the active one and the view stays where it was.
+    const db::DBox box = view->box();
+    const std::pair<int, int> levels = view->get_hier_levels();
+    const int active = view->active_cellview_index();
+    lay::LayerPropertiesList list = view->get_properties();
+    const bool wasBlocked = m_blockCellNavigation;
+    m_blockCellNavigation = true;
+    int cv = -1;
+    try {
+        cv = int(view->add_layout(handle, true /*add_cellview*/, false /*initialize_layers*/));
+        release();  // the cellview holds its own reference now
+        view->set_active_cellview_index(active);
+        view->zoom_box_and_set_hier_levels(box, levels);
+    } catch (const tl::Exception& e) {
+        m_blockCellNavigation = wasBlocked;
+        release();
+        return refuse(QString("%1 could not be shown (%2)").arg(file, QString::fromStdString(e.msg())));
+    }
+    m_blockCellNavigation = wasBlocked;
+
+    // The rows go after every existing row, under their own heading. KLayout
+    // offsets each layer's stipple by its place in the list (stipple-offset),
+    // so a row inserted earlier would shift the hatch of every layer after it,
+    // for as long as the row stays in the list, hidden or not.
+    std::vector<lay::LayerPropertiesNode> headings;
+    for (const auto& row : fill.rows) {
+        lay::LayerPropertiesNode leaf;
+        if (row.styled) {
+            leaf = row.node;
+        } else {
+            lay::LayerProperties props;
+            props.set_source(lay::ParsedLayerSource(row.key.first, row.key.second, cv));
+            view->init_layer_properties(props);
+            leaf = lay::LayerPropertiesNode(props);
+        }
+        lay::ParsedLayerSource src(row.key.first, row.key.second, cv);
+        leaf.set_source(src);
+        leaf.set_name((row.name.empty() ? std::string("(default styling)") : row.name) + " (fill)");
+        leaf.set_visible(true);
+        const std::string group = row.group + " (carrier fill)";
+        auto heading = headings.begin();
+        for (; heading != headings.end(); ++heading) {
+            if (heading->name() == group) break;
+        }
+        if (heading == headings.end()) {
+            headings.emplace_back();
+            heading = headings.end() - 1;
+            heading->set_name(group);
+        }
+        heading->add_child(leaf);
+        m_rowMeta[{cv, row.key}] = RowMeta{QString::fromStdString(group), true};
+    }
+    for (const auto& heading : headings) {
+        list.push_back(heading);
+    }
+    view->set_properties(list);
+
+    qInfo("2D: carrier fill read from %s: %zu shapes, %lld ms, VmHWM %ld MiB",
+          qPrintable(file), shapes, static_cast<long long>(timer.elapsed()), peakResidentMiB());
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool KLayout2DView::hasFill() const
+{
+    for (const auto& entry : m_rowMeta) {
+        if (entry.second.fill) return true;
+    }
+    return false;
+}
+
 void KLayout2DView::clearLayout()
 {
 #ifdef HAVE_KLAYOUT
@@ -297,6 +762,9 @@ void KLayout2DView::clearLayout()
     }
 #endif
     m_currentPath.clear();
+    m_notes.clear();
+    m_rowMeta.clear();
+    m_carrierFill.reset();
     emit layoutChanged(false);
 }
 
@@ -324,6 +792,26 @@ int KLayout2DView::maxHierLevels() const
 #ifdef HAVE_KLAYOUT
     if (m_viewWidget && m_viewWidget->view()) {
         return m_viewWidget->view()->get_max_hier_levels();
+    }
+#endif
+    return -1;
+}
+
+int KLayout2DView::currentCellHierarchyDepth() const
+{
+#ifdef HAVE_KLAYOUT
+    if (m_viewWidget && m_viewWidget->view()) {
+        try {
+            auto* view = m_viewWidget->view();
+            if (view->cellviews() > 0) {
+                const auto& cv = view->cellview(0);
+                if (cv.is_valid() && cv.cell()) return int(cv.cell()->hierarchy_levels());
+            }
+        } catch (const tl::Exception& e) {
+            qWarning("KLayout2DView::currentCellHierarchyDepth failed: %s", e.msg().c_str());
+        } catch (const std::exception& e) {
+            qWarning("KLayout2DView::currentCellHierarchyDepth failed: %s", e.what());
+        }
     }
 #endif
     return -1;
@@ -444,6 +932,9 @@ bool KLayout2DView::setCurrentCell(const QString& name)
         m_blockCellNavigation = true;
         lay::CellViewRef cvRef = view->cellview_ref(0);
         cvRef.set_cell(name.toStdString());
+        if (cvRef.is_valid() && cvRef.cell()) {
+            view->set_hier_levels(std::make_pair(0, int(cvRef.cell()->hierarchy_levels()) + 1));
+        }
         view->zoom_fit();
         m_blockCellNavigation = false;
         emit cellChanged(name);
@@ -490,8 +981,11 @@ void KLayout2DView::setAllLayersVisible(bool visible)
         return;
     }
     try {
+        // Layers only. A heading left hidden would hide every row under it
+        // whatever that row's own box says.
         lay::LayoutView* view = m_viewWidget->view();
         for (auto it = view->begin_layers(); !it.at_end(); ++it) {
+            if (it->has_children()) continue;
             lay::LayerPropertiesNode props(*it);
             props.set_visible(visible);
             view->replace_layer_node(it, props);
@@ -549,6 +1043,13 @@ QVector<LayerInfo> KLayout2DView::layerInfos() const
             LayerInfo info;
             info.index = index;
             info.visible = it->visible(true);
+            info.isGroup = it->has_children();
+            if (!it.at_top()) {
+                const auto parent = it.parent();
+                if (!parent.is_null()) {
+                    info.group = QString::fromStdString(parent->name());
+                }
+            }
 
             // Get display name
             std::string name = it->name();
@@ -566,6 +1067,11 @@ QVector<LayerInfo> KLayout2DView::layerInfos() const
                 const lay::ParsedLayerSource& src = it->source(true);
                 info.layer = src.layer();
                 info.datatype = src.datatype();
+                if (!info.isGroup) {
+                    auto meta = m_rowMeta.find({cellviewOf(src),
+                                                LayerNum(info.layer, info.datatype)});
+                    info.fill = meta != m_rowMeta.end() && meta->second.fill;
+                }
             }
 
             if (info.name.isEmpty()) {

@@ -1,0 +1,136 @@
+# Cross-reader fixture: every string-typed path this studio's WRITER emits.
+#
+# Scope is deliberate and is stated in cross_reader_classification.json, which
+# is derived from the schema rather than remembered: 89 addressable paths, of
+# which 46 are emitted and 2 canonicalized. Those 48 are what this file has to
+# exercise. The 11 the writer cannot emit (3dblox_ref, cdxml_ref, _metadata,
+# interposer.adapter) are absent on purpose, because making them appear would
+# mean adding model support to satisfy a test, and the gate must not drive the
+# model. The remaining 30 are numbers, booleans, an undeclared-value-type map
+# and the opaque flow block, none of which this check speaks to.
+#
+# Values are YAML 1.1 type traps wherever the field's vocabulary allows one.
+# Read by PyYAML with the quotes gone, each of these stops being a string:
+# 0755 -> 493 and 012 -> 10 and 010 -> 8 (octal), 0x1A -> 26 and 0x1F -> 31,
+# 0b101 -> 5, 1.5e3 -> float, 1:30 -> 90 (sexagesimal, 1*60+30),
+# yes/no/on/off/true -> bool, null and ~ -> None, 2026-09-05 -> a date.
+# That is the whole point: the writer quotes them, so a conforming reader on the
+# other side must hand back the string.
+#
+# One value is an escaping trap rather than a type trap. technologies.tech_a
+# .description carries U+2028, a line break in YAML 1.1 and an ordinary
+# character in 1.2. Quoting alone does not save it: inside a double-quoted
+# scalar a raw U+2028 folds to a space for a 1.1 reader, so the writer has to
+# escape it. That class is invisible to the in-repo quoting test, which scans
+# lines for an opening quote and would see this value as quoted either way.
+#
+format_version: "1.0"
+
+assembly:
+  name: "0755"
+  description: "yes"
+  author: "1.0"
+  created: "2026-09-05"
+  modified: "1:30"
+  units: "um"
+  assembly_gds: "0x1A"
+  io_technology: "null"
+
+technologies:
+  tech_a:
+    description: "Cross-reader\u2028technology"
+    layer_properties: "0x1F"
+    stackup: "012"
+    dbu: 0.001
+
+interconnect:
+  adapter: "vendorx_microbump"
+  technology:
+    description: "no"
+    layer_properties: "./cross_reader.lyp"
+    stackup: "./cross_reader_stackup.yaml"
+    dbu: 0.001
+
+# NOTE: the id here is deliberately ordinary. A trap value would have to be the
+# connection_stacks MAPPING KEY as well, and map keys are not schema paths, so
+# they are outside the 48 this check covers. Whether the writer quotes its map
+# keys is a separate question; see the open observation in
+# tests/CROSS_READER_CHECK.md.
+connection_stacks:
+  cupillar_opt1:
+    description: "off"
+    layers:
+      - {name: "true", material: "010", height: 28.0, diameter: 44.0}
+
+components:
+  - id: interposer
+    type: interposer
+    anchor: bbox_center
+    technology: tech_a
+    dimensions: {width: 10000.0, height: 10000.0, thickness: 100.0}
+    # Case data: tech_a has no attach plane; set to its thickness,
+    # the plane Studio used while the file declared none.
+    attachment_surface_z: 100.0
+    position: {x: 0.0, y: 0.0, z: 0.0}
+    io_pads:
+      - id: "0755"
+        io_class: wire_bond
+        net: "on"
+        position: {x: -1500.0, y: 1200.0}
+        size: {x: 100.0, y: 100.0}
+        layer: TopMetal2
+
+  - id: "12345"
+    type: die
+    anchor: bbox_center
+    technology: tech_a
+    connection: "cupillar_opt1"
+    layout: "1.5e3"
+    top_cell: "no"
+    # flip_chip, not R0. The writer emits `orientation` ONLY for a face-down
+    # component and always as the literal "flip_chip" (ChipletFormat.cpp:1045);
+    # an unknown token warns and is treated as face_up, and face_up is never
+    # written. So R0 here would have made the key ABSENT from the output and the
+    # expectation would have failed for a reason unrelated to cross-reader
+    # quoting. Caught on the host before spending a container run.
+    orientation: flip_chip
+    dimensions: {width: 2000.0, height: 2000.0, thickness: 50.0}
+    position: {x: 1000.0, y: 1000.0, z: 100.0}
+    array:
+      pattern: "0b11"
+      count: {x: 2, y: 2}
+      pitch: {x: 2500.0, y: 2500.0}
+      start_position: {x: 1000.0, y: 1000.0}
+
+  - id: die_b
+    type: die
+    anchor: bbox_center
+    technology: tech_a
+    cells: ["cell_one", "cell_two"]
+    dimensions: {width: 2000.0, height: 2000.0, thickness: 50.0}
+    position: {x: 5000.0, y: 1000.0, z: 100.0}
+
+interfaces:
+  - id: "~"
+    type: micro_bump
+    from:
+      component: "12345"
+      surface: bottom
+      port_layer: Metal1
+    to:
+      component: interposer
+      surface: top
+      port_layer: Metal1
+    physical:
+      pitch: 55.0
+      diameter: 25.0
+      height: 30.0
+
+netlist:
+  nets:
+    - name: "0b101"
+      class: power
+      connections:
+        - {component: "12345", pin: "0755", layer: TopMetal2}
+        - {component: interposer, pin: vdd_pad, layer: TopMetal2}
+  external_netlist: "cross_reader_netlist.csv"

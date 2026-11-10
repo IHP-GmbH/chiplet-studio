@@ -41,6 +41,9 @@ components:
       width: 1000.0
       height: 800.0
       thickness: 10.0
+    # Case data: demo_interposer has no attach plane; set to its thickness,
+    # the plane Studio used while the file declared none.
+    attachment_surface_z: 10.0
     position:
       x: 500.0
       y: 400.0

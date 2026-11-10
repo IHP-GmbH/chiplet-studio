@@ -28,6 +28,11 @@ components:
     top_cell: "INTERPOSER_TOP"
     position: {x: 0, y: 0, z: 500}
     dimensions: {width: 8000, height: 8000, thickness: 100}
+    # Case data: test_tech has no attach plane; set to its thickness,
+    # the plane Studio used while the file declared none. The plane is
+    # interposer-local: with the interposer at z 500 its top is at 600.
+    # No die has a connection, so no die is seated from it.
+    attachment_surface_z: 100
 
   - id: logic_die
     type: die

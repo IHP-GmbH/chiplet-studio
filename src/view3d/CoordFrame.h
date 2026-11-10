@@ -5,7 +5,8 @@
  * CoordFrame.h - Single source of truth for the chiplet(um) -> 3D scene(mm)
  * base transform.
  *
- * Mapping (see docs/coord_frame_contract.md): chiplet X -> scene X,
+ * Mapping (see docs/coord_frame_contract.md in IHP-GmbH/chiplet-system-spec):
+ * chiplet X -> scene X,
  * chiplet Z (elevation) -> scene Y (up), chiplet Y -> scene -Z; micrometres
  * to millimetres. Several render paths used to restate this by hand, which is
  * how it could silently drift between them; they are now all routed through

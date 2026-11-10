@@ -25,6 +25,7 @@ components:
     technology: intm4tm2
     position: {x: 1000, y: 1000, z: 0}
     dimensions: {width: 10000, height: 10000, thickness: 100}
+    attachment_surface_z: 10.8103
 
   - id: die_0
     type: die

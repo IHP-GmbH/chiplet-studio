@@ -43,14 +43,14 @@ TEST(CellComponentMapper, BuildWithMatchingCells)
 {
     auto assembly = makeTestAssembly();
     QStringList cells = {"INTERPOSER", "INTERPOSER_ROUTING", "CUPILLARS_U1",
-                         "U1_Interposer_ANT", "U2_FMD_QNC", "U3_SystemLevel"};
+                         "U1_INTERPOSER_A", "U2_DIE_A", "U3_SystemLevel"};
 
     CellComponentMapper mapper;
     mapper.build(*assembly, cells);
 
     EXPECT_TRUE(mapper.hasMapping());
-    EXPECT_EQ(mapper.componentForCell("U1_Interposer_ANT"), "U1");
-    EXPECT_EQ(mapper.componentForCell("U2_FMD_QNC"), "U2");
+    EXPECT_EQ(mapper.componentForCell("U1_INTERPOSER_A"), "U1");
+    EXPECT_EQ(mapper.componentForCell("U2_DIE_A"), "U2");
     EXPECT_EQ(mapper.componentForCell("U3_SystemLevel"), "U3");
 }
 
@@ -58,7 +58,7 @@ TEST(CellComponentMapper, UnmappedCellsReturnEmpty)
 {
     auto assembly = makeTestAssembly();
     QStringList cells = {"INTERPOSER", "INTERPOSER_ROUTING", "CUPILLARS_U1",
-                         "U1_Interposer_ANT"};
+                         "U1_INTERPOSER_A"};
 
     CellComponentMapper mapper;
     mapper.build(*assembly, cells);
@@ -82,7 +82,7 @@ TEST(CellComponentMapper, EmptyCellList)
 TEST(CellComponentMapper, ClearResetsMapping)
 {
     auto assembly = makeTestAssembly();
-    QStringList cells = {"U1_Interposer_ANT"};
+    QStringList cells = {"U1_INTERPOSER_A"};
 
     CellComponentMapper mapper;
     mapper.build(*assembly, cells);
@@ -90,19 +90,19 @@ TEST(CellComponentMapper, ClearResetsMapping)
 
     mapper.clear();
     EXPECT_FALSE(mapper.hasMapping());
-    EXPECT_EQ(mapper.componentForCell("U1_Interposer_ANT"), "");
+    EXPECT_EQ(mapper.componentForCell("U1_INTERPOSER_A"), "");
 }
 
 TEST(CellComponentMapper, ComponentToCell)
 {
     auto assembly = makeTestAssembly();
-    QStringList cells = {"U1_Interposer_ANT", "U2_FMD_QNC", "U3_SystemLevel"};
+    QStringList cells = {"U1_INTERPOSER_A", "U2_DIE_A", "U3_SystemLevel"};
 
     CellComponentMapper mapper;
     mapper.build(*assembly, cells);
 
-    EXPECT_EQ(mapper.primaryCellForComponent("U1"), "U1_Interposer_ANT");
-    EXPECT_EQ(mapper.primaryCellForComponent("U2"), "U2_FMD_QNC");
+    EXPECT_EQ(mapper.primaryCellForComponent("U1"), "U1_INTERPOSER_A");
+    EXPECT_EQ(mapper.primaryCellForComponent("U2"), "U2_DIE_A");
     EXPECT_EQ(mapper.primaryCellForComponent("U3"), "U3_SystemLevel");
     EXPECT_EQ(mapper.primaryCellForComponent("nonexistent"), "");
 }

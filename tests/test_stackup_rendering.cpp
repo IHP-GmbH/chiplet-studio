@@ -67,10 +67,17 @@ TEST_F(StackupRenderingTest, InterposerTechfile) {
     chiplet::LayerStackup stackup = tech.createStackup();
     EXPECT_EQ(stackup.layerCount(), 11) << "Interposer has 11 layers (7 routing + Passiv + 3 cu-pillar)";
 
-    // TopMetal2 (layer 134): Height 11160nm -> 11.16um
+    // TopMetal2 (layer 134): Height 7810.3nm -> 7.8103um, the PDK key's z
     const chiplet::LayerElevation* topMetal2 = stackup.find(134, 0);
     ASSERT_NE(topMetal2, nullptr);
-    EXPECT_NEAR(topMetal2->z_bottom, 11.16, 0.01);
+    EXPECT_NEAR(topMetal2->z_bottom, 7.8103, 1e-9);
+
+    // TopVia1 (layer 125): the key's 850.3 nm reads with its decimal, not
+    // as 850.
+    const chiplet::LayerElevation* topVia1 = stackup.find(125, 0);
+    ASSERT_NE(topVia1, nullptr);
+    EXPECT_NEAR(topVia1->z_bottom, 2.16, 1e-9);
+    EXPECT_NEAR(topVia1->thickness, 0.8503, 1e-9);
 }
 
 TEST_F(StackupRenderingTest, LayerColorFromTechfile) {

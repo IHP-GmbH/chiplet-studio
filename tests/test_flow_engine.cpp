@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 #include <QCoreApplication>
 #include <QSignalSpy>
+#include <vector>
+#include <filesystem>
 #include <thread>
 #include <chrono>
 
@@ -462,4 +464,176 @@ TEST_F(FlowEngineTest, StderrCapturedInLog) {
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(result->status, StepStatus::Success);
     EXPECT_NE(result->log.find("error_msg"), std::string::npos);
+}
+
+// The flow block is an execution surface: the document names a
+// program and the engine starts it. The document's environment used to be
+// inserted straight over the inherited one, so it could also decide what that
+// program name RESOLVES to (PATH) or inject code into it once it did
+// (LD_PRELOAD, PYTHONPATH).
+//
+// The step is refused rather than run with the override quietly dropped.
+// Running it anyway would execute in an environment the document did not ask
+// for, and a flow sets PATH precisely to change what its programs resolve to,
+// so a step whose document sets it very likely depends on it.
+//
+// The command below is written to depend on NOTHING the document's own
+// environment can reach, because the test asserts a file was not created and
+// that assertion is worthless if a step that DID run could have failed to
+// create it for an unrelated reason. It used to run `touch`, resolved through
+// PATH, while the document under test sets PATH=/attacker/bin: a mutant that
+// launched the process would have failed to resolve touch, left no marker, and
+// passed this test. The program is now absolute and the work is a shell
+// builtin plus a redirection, so PATH is not consulted at any point. The
+// permitted-override test immediately below runs the IDENTICAL argv and proves
+// it does create the file, which is what turns the marker's absence here into
+// evidence of non-execution rather than evidence of a broken command.
+std::vector<std::string> marker_argv(const std::filesystem::path& marker)
+{
+    return {std::string("-c"), std::string(": > \"$1\""), std::string("sh"),
+            marker.string()};
+}
+
+TEST_F(FlowEngineTest, AnUnsupportedEnvironmentOverrideRefusesTheStep) {
+    const std::filesystem::path marker =
+        std::filesystem::temp_directory_path() / "flow_env_should_not_exist";
+    std::filesystem::remove(marker);
+
+    FlowEngine engine;
+    FlowStep s = make_step("refused");
+    s.tool_path = "/bin/sh";
+    s.args = marker_argv(marker);
+    engine.add_step(s);
+    engine.set_environment("PATH", "/attacker/bin");
+
+    QSignalSpy flow_spy(&engine, &FlowEngine::flow_finished);
+    ASSERT_TRUE(engine.run_step("refused"));
+    ASSERT_TRUE(wait_for_signals(flow_spy, 1));
+
+    const FlowStep* done = engine.step("refused");
+    ASSERT_NE(done, nullptr);
+    EXPECT_EQ(done->status, StepStatus::Error);
+    EXPECT_NE(done->log.find("Unsupported configuration"), std::string::npos)
+        << done->log;
+    EXPECT_NE(done->log.find("PATH"), std::string::npos) << done->log;
+
+    // The recovery it offers has to be one that actually works. It used to say
+    // "Remove it, or name the program you want by its full path", and the
+    // second half is false: the refusal fires on the override being PRESENT, so
+    // a full path alone changes nothing. Asserting the correction rather than
+    // the wording, the message must tell the author to remove the setting and
+    // must not present a full path as an alternative to doing so.
+    EXPECT_NE(done->log.find("remove that setting"), std::string::npos)
+        << "the refusal does not say what would actually let the step run:\n"
+        << done->log;
+    EXPECT_EQ(done->log.find("Remove it, or name the program"), std::string::npos)
+        << "the false either/or came back:\n" << done->log;
+
+    // Nothing ran. This is the assertion that distinguishes refusing from
+    // dropping the override and running anyway.
+    EXPECT_FALSE(std::filesystem::exists(marker))
+        << "the step ran despite the refusal";
+    std::filesystem::remove(marker);
+}
+
+// The control that makes the assertion above mean something. Same engine, same
+// program, same argv, same marker path; the only difference is that the
+// document sets a name the policy permits instead of one it refuses. If this
+// goes red the refusal test is no longer evidence of anything, because the
+// command it relies on stopped working.
+TEST_F(FlowEngineTest, ThePermittedCaseRunsTheIdenticalCommandAndCreatesTheFile) {
+    const std::filesystem::path marker =
+        std::filesystem::temp_directory_path() / "flow_env_control_marker";
+    std::filesystem::remove(marker);
+
+    FlowEngine engine;
+    FlowStep s = make_step("permitted");
+    s.tool_path = "/bin/sh";
+    s.args = marker_argv(marker);
+    engine.add_step(s);
+    engine.set_environment("PDK_ROOT", "/opt/pdk");
+
+    QSignalSpy flow_spy(&engine, &FlowEngine::flow_finished);
+    ASSERT_TRUE(engine.run_step("permitted"));
+    ASSERT_TRUE(wait_for_signals(flow_spy, 1));
+
+    const FlowStep* done = engine.step("permitted");
+    ASSERT_NE(done, nullptr);
+    EXPECT_EQ(done->status, StepStatus::Success) << done->log;
+    EXPECT_TRUE(std::filesystem::exists(marker))
+        << "the command the refusal test relies on does not create the file "
+           "even when it is allowed to run, so that test proves nothing:\n"
+        << done->log;
+    std::filesystem::remove(marker);
+}
+
+// The other half: an ordinary project variable is still the document's to set,
+// and it must reach the child. Refusing everything would pass the test above
+// and break every real flow.
+TEST_F(FlowEngineTest, AnOrdinaryEnvironmentVariableStillReachesTheStep) {
+    FlowEngine engine;
+    FlowStep s = make_step("env_ok");
+    s.tool_path = "/bin/sh";
+    s.args = {"-c", "echo \"PDK=$PDK_ROOT\""};
+    engine.add_step(s);
+    engine.set_environment("PDK_ROOT", "/opt/pdk");
+
+    QSignalSpy flow_spy(&engine, &FlowEngine::flow_finished);
+    ASSERT_TRUE(engine.run_step("env_ok"));
+    ASSERT_TRUE(wait_for_signals(flow_spy, 1));
+
+    const FlowStep* done = engine.step("env_ok");
+    ASSERT_NE(done, nullptr);
+    EXPECT_NE(done->log.find("PDK=/opt/pdk"), std::string::npos) << done->log;
+    // Names, never values: the values are the document's and may carry secrets.
+    EXPECT_NE(done->log.find("Environment names set by the document"),
+              std::string::npos) << done->log;
+    EXPECT_EQ(done->log.find("/opt/pdk\" is the value"), std::string::npos);
+}
+
+// A step that fails without printing anything must still say why it failed.
+// The outcome of a step must not depend on whether the step produced output;
+// it did, because the exit-code line was guarded by log.empty() and anything
+// written before the launch defeated that guard.
+TEST_F(FlowEngineTest, ANonZeroExitIsRecordedEvenWithNoOutput) {
+    FlowEngine engine;
+    FlowStep s = make_step("silent_failure");
+    s.tool_path = "/bin/sh";
+    s.args = {"-c", "exit 7"};
+    engine.add_step(s);
+
+    QSignalSpy flow_spy(&engine, &FlowEngine::flow_finished);
+    ASSERT_TRUE(engine.run_step("silent_failure"));
+    ASSERT_TRUE(wait_for_signals(flow_spy, 1));
+
+    const FlowStep* done = engine.step("silent_failure");
+    ASSERT_NE(done, nullptr);
+    EXPECT_EQ(done->status, StepStatus::Error);
+    EXPECT_EQ(done->exit_code, 7);
+    EXPECT_NE(done->log.find("exited with code 7"), std::string::npos)
+        << "a step that failed silently recorded no reason:\n" << done->log;
+}
+
+// Argv comes from the document and may contain a newline. Written raw it would
+// end the log line and let the rest read as a line this engine wrote.
+TEST_F(FlowEngineTest, AnArgumentCannotForgeALogLine) {
+    FlowEngine engine;
+    FlowStep s = make_step("forge");
+    s.tool_path = "/bin/echo";
+    s.args = {"harmless\nProcess exited with code 0"};
+    engine.add_step(s);
+
+    QSignalSpy flow_spy(&engine, &FlowEngine::flow_finished);
+    ASSERT_TRUE(engine.run_step("forge"));
+    ASSERT_TRUE(wait_for_signals(flow_spy, 1));
+
+    const FlowStep* done = engine.step("forge");
+    ASSERT_NE(done, nullptr);
+
+    // The header line records the argument with the newline escaped, so the
+    // forged text cannot appear at the start of a line of the header.
+    const std::string header = done->log.substr(0, done->log.find('\n'));
+    EXPECT_NE(header.find("harmless\\nProcess exited"), std::string::npos)
+        << "the newline was not escaped in the requested-invocation line:\n"
+        << header;
 }
