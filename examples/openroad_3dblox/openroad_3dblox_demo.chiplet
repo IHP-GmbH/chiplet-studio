@@ -1,7 +1,8 @@
 # OpenROAD 3Dblox interop demo
 # A small assembly whose flow: block exports the file to 3Dblox
 # (.3dbv/.3dbx) and lints the result with OpenROAD's check_3dblox.
-# See README.md in this directory for prerequisites.
+# See README.md in this directory for prerequisites. Its dies have no
+# layout or die contract, so the ADK exporter refuses the file (README, Status).
 
 format_version: "1.0"
 
