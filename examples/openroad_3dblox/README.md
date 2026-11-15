@@ -1,7 +1,8 @@
 # OpenROAD 3Dblox flow demo
 
 Loads a small two-die assembly whose `flow:` block runs two steps from the
-Flow Pipeline panel:
+Flow Pipeline panel. Today the first step refuses this file; see Status
+below.
 
 1. **Export to 3Dblox** — converts this `.chiplet` into `.3dbv`/`.3dbx`
    (plus minimal technology LEFs) with the ADK's `chiplet2dbx` exporter.
@@ -11,6 +12,27 @@ Flow Pipeline panel:
 
 The `.chiplet` file stays the authoritative placement source; the 3Dblox
 files are derived artifacts under `build_3dblox/`, regenerated on each run.
+
+## Status: the export step refuses this demo
+
+`chiplet2dbx` places a `gds_origin` die from the GDS bounding box in its die
+contract (`--contract D1=DIR`) and refuses a die without one. On this file it
+stops with:
+
+```
+die 'D1' declares anchor gds_origin, and its outline cannot be placed
+without the die's GDS bbox; give its die contract with --contract D1=DIR
+(the contract's die.bbox_um)
+```
+
+D1 and D2 here are synthetic: the file gives them no `layout` and there is
+no die contract for either, so **Export to 3Dblox** stops with that message
+and **OpenROAD check_3dblox** has nothing to read. The demo is kept as it is,
+as a case the exporter refuses. It runs again once each die has a layout and
+a die contract: a directory holding `die-contract.json` (schema
+`die-output-contract`) bound to that layout, whose `die.bbox_um` gives the
+die's GDS bounding box. Prerequisites and Run below describe the flow for
+dies that have both.
 
 ## Prerequisites
 
@@ -31,13 +53,17 @@ files are derived artifacts under `build_3dblox/`, regenerated on each run.
 
 ## Run
 
+This section runs only once each die has a `layout:` in the file and a die
+contract (see Status); with the file as shipped, the export step fails.
+
 Open `openroad_3dblox_demo.chiplet` in Chiplet Studio; the Flow Pipeline
 dock appears automatically. Click **Run All**. Both steps also run
 headlessly from this directory:
 
 ```bash
 python3 ../../../adk/openroad/chiplet2dbx.py \
-    --chiplet openroad_3dblox_demo.chiplet --out-dir build_3dblox
+    --chiplet openroad_3dblox_demo.chiplet --out-dir build_3dblox \
+    --contract D1=<D1 contract dir> --contract D2=<D2 contract dir>
 ./run_check_3dblox.sh build_3dblox openroad_3dblox_demo
 ```
 
