@@ -148,6 +148,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_layerZSpacing = 1.0f;  // Z spread is per-import; never carry it across loads.
     m_showFill = false;      // fill is off at every open
     m_sheetNotes.clear();
+    m_boxNotes.clear();
     m_componentNotes.clear();
     m_shapeCounts.clear();
     // The setting stays; what it read was this assembly's.

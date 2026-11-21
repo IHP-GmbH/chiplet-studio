@@ -201,11 +201,19 @@ ComponentMesh placedBoxMesh(const Component& comp, const GDSBoundingBox& footpri
     const float d = static_cast<float>(thicknessUm * kUmToMm);
     const ScenePosition centre =
         gdsBoxCenter(footprint, comp.position(), comp.anchor(), comp.orientation());
-    // buildBox takes its +Z face in Z, and its centre in X.
+    // buildBox takes its centre in X and Y, and its +Z face in Z.
     ComponentMesh mesh = MeshBuilder::buildBox(
         w, d, h, centre.x, MeshBuilder::anchoredOffsetY(comp, centre.y, d), centre.z + h / 2.0f);
     mesh.setColor(MeshBuilder::colorForComponent(comp, lyp));
     return mesh;
+}
+
+// The footprint of a component no layout gives one: its dimensions box with
+// the layout's (0, 0) at its lower-left corner. Only gds_origin reads where
+// that origin is, and for it the corner is assumed; assumedOriginNote says so.
+GDSBoundingBox assumedOriginFootprint(const Dimensions3D& dims)
+{
+    return GDSBoundingBox{0.0, 0.0, dims.width, dims.height};
 }
 
 Dimensions3D drawnDimensions(const Component& comp)
@@ -249,8 +257,7 @@ std::string assumedOriginNote(const std::vector<std::string>& ids, bool layoutNa
 ComponentMesh dimensionsBoxMesh(const Component& comp, const LayerPropertiesFile* lyp)
 {
     const Dimensions3D dims = drawnDimensions(comp);
-    return placedBoxMesh(comp, GDSBoundingBox{0.0, 0.0, dims.width, dims.height},
-                         dims.thickness, lyp);
+    return placedBoxMesh(comp, assumedOriginFootprint(dims), dims.thickness, lyp);
 }
 
 BoxMeshes buildBoxMeshes(const Assembly& assembly,
@@ -284,7 +291,11 @@ BoxMeshes buildBoxMeshes(const Assembly& assembly,
             continue;
         }
         if (comp->anchor() == Anchor::GdsOrigin) {
-            (comp->layout_path().empty() ? noLayout : unread).push_back(comp->id());
+            if (comp->layout_path().empty()) {
+                noLayout.push_back(comp->id());
+            } else {
+                unread.push_back(comp->id());
+            }
         }
         out.meshes.emplace(compId, dimensionsBoxMesh(*comp, lyp));
     }

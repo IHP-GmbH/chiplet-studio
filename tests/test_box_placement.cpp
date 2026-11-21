@@ -29,6 +29,7 @@
 #include "core/Assembly.h"
 #include "core/Component.h"
 #include "view3d/AssemblyView.h"
+#include "view3d/GDSLayerExtractor.h"
 #include "view3d/SceneLoad.h"
 #include "view3d/SceneOverview.h"
 
@@ -211,6 +212,41 @@ TEST(BoxPlacement, UnreadableLayoutsShareOneNoteAndABboxCentreOneIsNotNamed)
         "lower-right corner, seen from above, for a face-down die). Fix the layout paths "
         "or the top cells, or use anchor: bbox_center, to place them exactly."};
     EXPECT_EQ(d.notes, expected);
+}
+
+// A layout that reads gives the footprint, placed the same way: gds_origin
+// puts the layout's (0, 0) at the position (mirrored in X face down), and
+// bbox_center its bbox centre. Nothing is assumed, so nothing is noted. The
+// expected rectangles come from the fixture's own bbox; what is checked is
+// where that bbox is drawn, not how it is read.
+TEST(BoxPlacement, AReadableLayoutIsPlacedByItsOwnBboxWithNoNote)
+{
+    const std::string gds = std::string(FIXTURES_DIR) + "/sample_minimal.gds";
+    const GDSBoundingBox bbox = GDSLayerExtractor::extractBoundingBox(gds, "");
+    ASSERT_TRUE(bbox.is_valid()) << "the in-repo fixture did not read: " << gds;
+    // A bbox whose origin is its centre would not tell the anchors apart.
+    ASSERT_FALSE(bbox.x_min == -bbox.x_max && bbox.y_min == -bbox.y_max);
+
+    Assembly assembly;
+    auto addLaid = [&](const char* id, Anchor anchor, Orientation orientation,
+                       double x, double y) {
+        auto comp = std::make_unique<Component>(id, ComponentType::Die);
+        comp->set_anchor(anchor);
+        comp->set_orientation(orientation);
+        comp->set_position({x, y, 0.0});
+        comp->set_dimensions({1.0, 1.0, 200.0});  // the layout's bbox wins
+        comp->set_layout_path(gds);
+        assembly.add_component(std::move(comp));
+    };
+    addLaid("L1", Anchor::GdsOrigin, Orientation::FaceDown, 5000, 2000);
+    addLaid("L2", Anchor::BboxCenter, Orientation::FaceUp, 9000, 500);
+
+    const Drawn d = drawn(assembly);
+    expectRect(d.floor, "L1", (5000 - bbox.x_max) / 1000, (5000 - bbox.x_min) / 1000,
+               (2000 + bbox.y_min) / 1000, (2000 + bbox.y_max) / 1000);
+    expectRect(d.floor, "L2", (9000 - bbox.width() / 2) / 1000, (9000 + bbox.width() / 2) / 1000,
+               (500 - bbox.height() / 2) / 1000, (500 + bbox.height() / 2) / 1000);
+    EXPECT_TRUE(d.notes.empty()) << d.notes.front();
 }
 
 // The view itself: its top view draws each component where the file places
