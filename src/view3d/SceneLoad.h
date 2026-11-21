@@ -89,9 +89,15 @@ void augmentStackupForBlackBox(LayerStackup& stackup,
 // Chiplet frame -> scene: the component's position, mirrored in X face down.
 QMatrix4x4 componentTransform(const Component& comp);
 
-// One box mesh per component, from its GDS extent where it has one.
-std::map<QString, ComponentMesh> buildBoxMeshes(const Assembly& assembly,
-                                                const std::map<std::string, LayerPropertiesFile>& sheets);
+// One box mesh per component, from its GDS extent where it has one, and the
+// notes on how the boxes were placed.
+struct BoxMeshes {
+    std::map<QString, ComponentMesh> meshes;  // by component id
+    std::vector<std::string> notes;
+};
+
+BoxMeshes buildBoxMeshes(const Assembly& assembly,
+                         const std::map<std::string, LayerPropertiesFile>& sheets);
 
 // The standard view's layer meshes for `polygons`, with what was needed to
 // place them.

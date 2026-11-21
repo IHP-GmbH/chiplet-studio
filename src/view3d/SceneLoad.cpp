@@ -188,10 +188,11 @@ QMatrix4x4 componentTransform(const Component& comp)
     return transform;
 }
 
-std::map<QString, ComponentMesh> buildBoxMeshes(const Assembly& assembly,
-                                                const std::map<std::string, LayerPropertiesFile>& sheets)
+BoxMeshes buildBoxMeshes(const Assembly& assembly,
+                         const std::map<std::string, LayerPropertiesFile>& sheets)
 {
-    std::map<QString, ComponentMesh> meshes;
+    BoxMeshes out;
+    auto& meshes = out.meshes;
     const auto& components = assembly.components();
 
     // Extract GDS bounding boxes for components with layouts.
@@ -255,7 +256,7 @@ std::map<QString, ComponentMesh> buildBoxMeshes(const Assembly& assembly,
 
     qDebug() << "Built" << meshes.size() << "box meshes ("
              << gdsBounds.size() << " from GDS extents)";
-    return meshes;
+    return out;
 }
 
 StandardBuild buildStandardGeometry(const Component& comp,
@@ -409,7 +410,7 @@ StandardScene loadStandardScene(const Assembly& assembly,
         return scene;
     }
 
-    scene.boxes = buildBoxMeshes(assembly, sheets);
+    scene.boxes = buildBoxMeshes(assembly, sheets).meshes;
 
     // Layer geometry for every component (the per-component render mode
     // then decides what is actually drawn).
