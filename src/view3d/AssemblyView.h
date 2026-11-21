@@ -276,6 +276,7 @@ private:
 
     // notes(): sheets that would not read, then per component.
     std::vector<std::string> m_sheetNotes;
+    std::vector<std::string> m_boxNotes;  // how the boxes were placed (buildBoxMeshes)
     std::map<QString, std::string> m_componentNotes;
     // Per component: what 3D draws of each placed layer against the GDS.
     std::map<QString, std::vector<ShapeCount>> m_shapeCounts;

@@ -340,9 +340,11 @@ ViewCountReport viewCount(const Assembly& assembly, const ViewCountOptions& opti
 }
 
 ViewCountReport viewCountScene(const Assembly& assembly, StandardScene scene,
-                               const std::vector<std::string>& sheetNotes,
+                               const std::vector<std::string>& sheetOnlyNotes,
                                const ViewCountOptions& options)
 {
+    std::vector<std::string> sheetNotes = sheetOnlyNotes;
+    sheetNotes.insert(sheetNotes.end(), scene.boxNotes.begin(), scene.boxNotes.end());
     ViewCountReport report;
     auto& out = report.lines;
     auto fail = [&report](std::string why) { report.failures.push_back(std::move(why)); };
