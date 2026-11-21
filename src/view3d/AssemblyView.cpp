@@ -148,6 +148,7 @@ void AssemblyView::setAssembly(Assembly* assembly)
     m_layerZSpacing = 1.0f;  // Z spread is per-import; never carry it across loads.
     m_showFill = false;      // fill is off at every open
     m_sheetNotes.clear();
+    m_boxNotes.clear();
     m_componentNotes.clear();
     m_shapeCounts.clear();
     // The setting stays; what it read was this assembly's.
@@ -483,7 +484,9 @@ QStringList AssemblyView::notes() const
     state.showFill = m_showFill;
     state.fillPrepared = fillPrepared();
     state.undetailed = undetailedParts(*m_assembly, m_layerGeometry);
-    for (const auto& n : viewNotes(state, *m_assembly, m_sheetNotes, m_componentNotes,
+    std::vector<std::string> fileNotes = m_sheetNotes;
+    fileNotes.insert(fileNotes.end(), m_boxNotes.begin(), m_boxNotes.end());
+    for (const auto& n : viewNotes(state, *m_assembly, fileNotes, m_componentNotes,
                                    m_shapeCounts, m_fast, m_settledCoverage)) {
         out << QString::fromStdString(n);
     }
@@ -571,21 +574,11 @@ void AssemblyView::fitToComponent(const QString& componentId)
         return;
     }
 
-    // Last resort: compute from component data
+    // Last resort: the box its dimensions are drawn as
     if (m_assembly) {
         Component* comp = m_assembly->component(componentId.toStdString());
         if (comp) {
-            const auto& pos = comp->position();
-            const auto& dims = comp->dimensions();
-            AA_BOUNDING_BOX box;
-            VECTOR3D mins(static_cast<float>(pos.x),
-                          static_cast<float>(pos.y),
-                          static_cast<float>(pos.z));
-            VECTOR3D maxes(static_cast<float>(pos.x + dims.width),
-                           static_cast<float>(pos.y + dims.height),
-                           static_cast<float>(pos.z + dims.thickness));
-            box.SetFromMinsMaxes(mins, maxes);
-            m_scene.camera().fitToBox(box, currentAspect());
+            m_scene.camera().fitToBox(dimensionsBoxMesh(*comp).boundingBox(), currentAspect());
             emit cameraChanged();
             update();
             return;
@@ -837,6 +830,7 @@ void AssemblyView::buildMeshes()
     m_stackups.clear();
     m_componentNotes.clear();
     m_shapeCounts.clear();
+    m_boxNotes.clear();
 
     if (!m_assembly) {
         m_needsRebuild = false;
@@ -854,6 +848,7 @@ void AssemblyView::buildMeshes()
         m_meshes.emplace(compId, std::move(mesh));
     }
     m_stackups = std::move(scene.stackups);
+    m_boxNotes = std::move(scene.boxNotes);
     for (auto& [compId, loaded] : scene.components) {
         adoptStandardComponent(compId, std::move(loaded));
     }
@@ -1262,25 +1257,9 @@ VECTOR3D AssemblyView::getComponentCenter(const QString& id) const
     Component* comp = m_assembly->component(id.toStdString());
     if (!comp) return VECTOR3D(0, 0, 0);
 
-    const auto& pos = comp->position();
-    const auto& dims = comp->dimensions();
-
-    // Centre of the component: transform (pos + dims/2) through the shared
-    // chiplet->scene mapping (see CoordFrame.h / coord_frame_contract.md).
-    Position3D center;
-    center.x = pos.x + dims.width / 2.0;
-    center.y = pos.y + dims.height / 2.0;
-    center.z = pos.z + dims.thickness / 2.0;
-    const ScenePosition scenePos = sceneFromChiplet(center);
-    // The vertical (elevation) center must track the stack-anchored box mesh
-    // (bottom-anchored die/substrate, top-anchored interposer) so the
-    // transparent back-to-front painter sort uses the mesh's real center; for a
-    // die this equals pos.z+thickness/2 (unchanged), for an interposer it drops
-    // to attachment_surface_z-thickness/2.
-    const float sceneY = MeshBuilder::anchoredOffsetY(
-        *comp, sceneFromChiplet(pos).y,
-        static_cast<float>(dims.thickness * kUmToMm));
-    return VECTOR3D(scenePos.x, sceneY, scenePos.z);
+    // No box mesh yet: the box its dimensions are drawn as.
+    const auto bounds = dimensionsBoxMesh(*comp).boundingBox();
+    return (bounds.mins + bounds.maxes) * 0.5f;
 }
 
 void AssemblyView::sortBackToFront(std::vector<QString>& ids)

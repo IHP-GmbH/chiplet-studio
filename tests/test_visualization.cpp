@@ -373,9 +373,7 @@ TEST_F(VisualizationTest, MeshBuilderCoordinateConversion) {
     // - Expected bounding box roughly: [4..6, 4.5..7.5, 0..0.1] in mm
 
     // This test verifies the component data is stored correctly
-    // The actual MeshBuilder conversion is tested via visual verification
-    // and the fix ensures instancing uses buildComponentMeshAtOrigin()
-    // with position transforms also converted to mm
+    // Where the box is drawn is tested in test_box_placement.cpp.
 }
 
 TEST_F(VisualizationTest, ComponentPositionScaleConsistency) {

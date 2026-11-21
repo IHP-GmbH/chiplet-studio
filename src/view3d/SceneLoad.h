@@ -89,9 +89,23 @@ void augmentStackupForBlackBox(LayerStackup& stackup,
 // Chiplet frame -> scene: the component's position, mirrored in X face down.
 QMatrix4x4 componentTransform(const Component& comp);
 
-// One box mesh per component, from its GDS extent where it has one.
-std::map<QString, ComponentMesh> buildBoxMeshes(const Assembly& assembly,
-                                                const std::map<std::string, LayerPropertiesFile>& sheets);
+// The box a component is drawn as when no layout gives its footprint: its
+// dimensions box, placed at `position` by its anchor. For gds_origin the
+// layout's (0, 0) is taken to be the box's lower-left corner (mirrored in X
+// face down, as a layout is), which the file does not say; buildBoxMeshes
+// notes it. The view's fallbacks read this when a component has no box mesh.
+ComponentMesh dimensionsBoxMesh(const Component& comp,
+                                const LayerPropertiesFile* lyp = nullptr);
+
+// One box mesh per component, from its GDS extent where it has one, and the
+// notes on how the boxes were placed.
+struct BoxMeshes {
+    std::map<QString, ComponentMesh> meshes;  // by component id
+    std::vector<std::string> notes;
+};
+
+BoxMeshes buildBoxMeshes(const Assembly& assembly,
+                         const std::map<std::string, LayerPropertiesFile>& sheets);
 
 // The standard view's layer meshes for `polygons`, with what was needed to
 // place them.
@@ -138,6 +152,7 @@ std::optional<StandardComponent> loadStandardComponent(const Component& comp,
 
 struct StandardScene {
     std::map<QString, ComponentMesh> boxes;
+    std::vector<std::string> boxNotes;              // BoxMeshes::notes
     std::map<std::string, RenderStackup> stackups;  // by technology id
     std::map<QString, StandardComponent> components;
 };

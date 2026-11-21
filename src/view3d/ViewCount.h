@@ -110,7 +110,8 @@ bool setRenderModes(Assembly& assembly, const std::map<std::string, std::string>
 ViewCountReport viewCount(const Assembly& assembly, const ViewCountOptions& options);
 
 // Count a scene already loaded with loadStandardScene (or put together the
-// same way); `sheetNotes` are LayerSheets::notes.
+// same way); `sheetNotes` are LayerSheets::notes. The scene's box notes follow
+// them, as in the view.
 ViewCountReport viewCountScene(const Assembly& assembly, StandardScene scene,
                                const std::vector<std::string>& sheetNotes,
                                const ViewCountOptions& options);
