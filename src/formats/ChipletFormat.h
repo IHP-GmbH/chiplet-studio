@@ -90,6 +90,13 @@ private:
  * ChipletFormat handles reading and writing .chiplet files.
  * Throws ChipletFormatException on errors.
  */
+// What load() does with a design the flow wrote before its last step
+// (_metadata.finalize_required: true).
+enum class UnfinishedDesign {
+    Refuse,          // throw, naming the command that finishes it
+    OpenReadOnly,    // load it; its persistence says read_only() and saves refuse
+};
+
 class ChipletFormat {
 public:
     // Type definitions
@@ -105,7 +112,8 @@ public:
      * @return Assembly
      * @throws ChipletFormatException on parse error
      */
-    std::unique_ptr<Assembly> load(const string_type& path);
+    std::unique_ptr<Assembly> load(const string_type& path,
+        UnfinishedDesign unfinished = UnfinishedDesign::Refuse);
 
     /**
      * Save an assembly to a .chiplet file.

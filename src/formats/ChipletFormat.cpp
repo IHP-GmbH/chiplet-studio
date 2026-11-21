@@ -264,11 +264,12 @@ const std::vector<ChipletFormat::string_type>& ChipletFormat::warnings() const
     return m_warnings;
 }
 
-std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path)
+std::unique_ptr<Assembly> ChipletFormat::load(const string_type& path,
+    UnfinishedDesign unfinished)
 {
     const auto identity = canonical_destination(path);
     const auto text = read_binary(path);
-    auto assembly = load_buffer(text, path);
+    auto assembly = load_buffer(text, path, unfinished == UnfinishedDesign::OpenReadOnly);
     auto state = assembly->document_persistence();
     state.source_path = std::filesystem::absolute(path).lexically_normal().string();
     state.primary = SaveReceipt{state.m_identity, identity, text};
@@ -351,7 +352,16 @@ std::unique_ptr<Assembly> ChipletFormat::load_buffer(
     }
 
     auto assembly = std::make_unique<Assembly>();
-    assembly->set_document_persistence(capture_context(text, path));
+    {
+        auto state = capture_context(text, path);
+        // The reader let an unfinished design through only because the caller
+        // asked to open it read-only; record what finishes it. The default is
+        // the one the reader names when it refuses such a file.
+        if (doc.metadata.finalize_required)
+            state.m_finalizer = doc.metadata.finalizer.empty()
+                ? std::string("hyp_to_gds.py --update-chiplet-file") : doc.metadata.finalizer;
+        assembly->set_document_persistence(std::move(state));
+    }
 
     // --- Assembly metadata ---
     assembly->set_name(doc.assembly.name);
@@ -1766,6 +1776,10 @@ std::string ChipletFormat::serialize(const Assembly& assembly, const string_type
 SaveReceipt ChipletFormat::save_snapshot(const Assembly& assembly,
     const string_type& path, const SaveRequest& request)
 {
+    if (assembly.document_persistence().read_only())
+        throw ChipletFormatException(path + ": this design is not finished and was opened "
+            "read-only, so it is not saved. To get the final design, run "
+            + assembly.document_persistence().finalizer() + " and open its result.");
     if (request.expected && request.expected->m_identity != assembly.document_persistence().m_identity)
         throw ChipletFormatException("Refusing a save receipt issued for another document");
     // No mutable model reference enters serialization or admission.
@@ -1940,6 +1954,8 @@ std::unique_ptr<Assembly> ChipletFormat::decode_recovery(const std::string& payl
             throw ChipletFormatException("Recovered document changed opaque root bytes");
     // Current flow is restored by load_buffer. Original bytes are never promoted
     // to the edited document, nor edited bytes to a destination baseline.
+    // A checkpoint of an unfinished design recovers as one: still read-only.
+    state.m_finalizer = currentState.m_finalizer;
     assembly->set_document_persistence(std::move(state));
     return assembly;
     } catch (const chiplet_format_io::ChipletFormatError& error) {

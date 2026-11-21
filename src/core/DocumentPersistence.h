@@ -61,8 +61,16 @@ struct DocumentPersistence {
     std::vector<PreservedRoot> roots; // Unsupported roots and source flow, in order.
     std::optional<SaveReceipt> primary;
     std::optional<SaveReceipt> autosave;
+    // An unfinished design: the file says the flow wrote it before its last
+    // step (_metadata.finalize_required). It was opened read-only, and every
+    // save of it is refused. Set only by ChipletFormat, from the file.
+    bool read_only() const { return m_finalizer.has_value(); }
+    // The command that finishes it: the file's _metadata.finalizer, or the
+    // format's default. Empty for a finished design.
+    std::string finalizer() const { return m_finalizer.value_or(std::string()); }
 private:
     friend class ChipletFormat;
+    std::optional<std::string> m_finalizer;
     // Process-local document capability, not serialized or a cryptographic key.
     std::shared_ptr<const int> m_identity = std::make_shared<const int>(0);
 };

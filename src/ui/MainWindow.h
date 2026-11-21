@@ -43,6 +43,7 @@ class FlowEngine;
 class FlowPanel;
 class NetGraphPanel;
 class ViewingNotesBar;
+class UnfinishedDesignBanner;
 
 /**
  * MainWindow is the main application window.
@@ -113,6 +114,10 @@ protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
+    // A design the flow wrote before its last step is opened read-only: the
+    // banner says so, Save and Save As are off and nothing auto-saves it.
+    // Called whenever a document is installed.
+    void applyDocumentReadOnly();
     void setupMenus();
     void setupPanels();
     void setupViewModeToolbar();
@@ -133,6 +138,9 @@ private:
 
     // What the views could not show as the file asks (above the 3D view).
     ViewingNotesBar* m_viewingNotesBar = nullptr;
+    UnfinishedDesignBanner* m_unfinishedBanner = nullptr;
+    QAction* m_saveAction = nullptr;
+    QAction* m_saveAsAction = nullptr;
     void refreshViewingNotes();
     // View > Show Fill: one switch for fill in both views, off at every open.
     QAction* m_showFillAction = nullptr;

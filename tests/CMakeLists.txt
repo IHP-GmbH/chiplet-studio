@@ -78,6 +78,7 @@ add_executable(chiplet_tests
     test_scene_load.cpp
     test_panel_wiring.cpp
     test_box_mesh.cpp
+    test_unfinished_design.cpp
 )
 
 target_compile_options(chiplet_tests PRIVATE ${CHIPLET_SWITCH_GUARD})
@@ -151,6 +152,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui/PropertiesPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/DrillDownPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/ViewingNotesBar.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/UnfinishedDesignBanner.cpp
     ${CMAKE_SOURCE_DIR}/src/scripting/ScriptEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/LayerMeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/GDSLayerExtractor.cpp
