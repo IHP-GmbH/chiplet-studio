@@ -21,6 +21,7 @@ enable_testing()
 add_executable(chiplet_tests
     test_main.cpp  # Custom main with early Python initialization
     test_chiplet_format.cpp
+    test_unfinished_design.cpp
     test_document_preservation.cpp
     test_recovery_checkpoint.cpp
     test_recovery_dialog.cpp
@@ -78,7 +79,6 @@ add_executable(chiplet_tests
     test_scene_load.cpp
     test_panel_wiring.cpp
     test_box_mesh.cpp
-    test_unfinished_design.cpp
 )
 
 target_compile_options(chiplet_tests PRIVATE ${CHIPLET_SWITCH_GUARD})

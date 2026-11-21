@@ -86,10 +86,6 @@ private:
     FailureKind m_kind;
 };
 
-/**
- * ChipletFormat handles reading and writing .chiplet files.
- * Throws ChipletFormatException on errors.
- */
 // What load() does with a design the flow wrote before its last step
 // (_metadata.finalize_required: true).
 enum class UnfinishedDesign {
@@ -97,6 +93,10 @@ enum class UnfinishedDesign {
     OpenReadOnly,    // load it; its persistence says read_only() and saves refuse
 };
 
+/**
+ * ChipletFormat handles reading and writing .chiplet files.
+ * Throws ChipletFormatException on errors.
+ */
 class ChipletFormat {
 public:
     // Type definitions

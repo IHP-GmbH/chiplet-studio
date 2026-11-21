@@ -32,7 +32,12 @@ void UnfinishedDesignBanner::showFor(const DocumentPersistence& document)
         hide();
         return;
     }
-    setText(textFor(QString::fromStdString(document.finalizer())));
+    // The command comes from the file: one line, and not so long that the
+    // banner pushes the views away.
+    QString finalizer = QString::fromStdString(document.finalizer()).simplified();
+    constexpr int kMaxFinalizer = 200;
+    if (finalizer.size() > kMaxFinalizer) finalizer = finalizer.left(kMaxFinalizer) + "...";
+    setText(textFor(finalizer));
     show();
 }
 

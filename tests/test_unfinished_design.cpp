@@ -17,6 +17,7 @@
 #include <QString>
 
 #include <filesystem>
+#include <iterator>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -88,7 +89,17 @@ TEST_F(OpenUnfinished, AFileThatNamesNoFinalizerGetsTheFormatsDefault)
     ChipletFormat format;
     auto assembly = format.load(path.string(), UnfinishedDesign::OpenReadOnly);
     EXPECT_TRUE(assembly->document_persistence().read_only());
-    EXPECT_EQ(assembly->document_persistence().finalizer(), "hyp_to_gds.py --update-chiplet-file");
+    const std::string finalizer = assembly->document_persistence().finalizer();
+    EXPECT_EQ(finalizer, "hyp_to_gds.py --update-chiplet-file");
+
+    // The same command the reader names when it refuses the same file.
+    try {
+        format.load(path.string());
+        ADD_FAILURE() << "an unfinished design opened by default";
+    } catch (const ChipletFormatException& e) {
+        EXPECT_NE(std::string(e.what()).find("run " + finalizer + " "), std::string::npos)
+            << e.what();
+    }
 }
 
 TEST_F(OpenUnfinished, AFinishedDesignOpenedTheSameWayIsNotReadOnly)
@@ -126,8 +137,8 @@ TEST_F(OpenUnfinished, EverySaveIsRefusedAndNoFileIsWritten)
     expectRefused([&] { (void)format.save(constAssembly, elsewhere.string()); }, "const save");
 
     EXPECT_EQ(readFile(path), before);
-    EXPECT_FALSE(fs::exists(elsewhere));
-    EXPECT_FALSE(fs::exists(dir / "auto.chiplet"));
+    // Nothing else either: no new file, no rejected-output sidecar.
+    EXPECT_EQ(std::distance(fs::directory_iterator(dir), fs::directory_iterator()), 1);
     EXPECT_TRUE(assembly->document_persistence().read_only());
 }
 
@@ -160,6 +171,14 @@ TEST_F(OpenUnfinished, TheBannerSaysSoInTheApprovedWordsAndIsHiddenOtherwise)
                 "positions and connections may still change. It is opened read-only; editing "
                 "and saving are off. To get the final design, run finish_it.py --in-place and "
                 "open its result."));
+
+    // A command the file gives is shown on one line, and not without end.
+    const auto longPath = withFinalizerLine("finalizer: \"step one\\n" + std::string(400, 'x') + "\"");
+    auto odd = format.load(longPath.string(), UnfinishedDesign::OpenReadOnly);
+    banner.showFor(odd->document_persistence());
+    EXPECT_FALSE(banner.text().contains('\n'));
+    EXPECT_TRUE(banner.text().contains("run step one " + QString(191, 'x') + "... and open"))
+        << banner.text().toStdString();
 
     banner.showFor(finished->document_persistence());
     EXPECT_TRUE(banner.isHidden());

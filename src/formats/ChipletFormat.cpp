@@ -356,10 +356,13 @@ std::unique_ptr<Assembly> ChipletFormat::load_buffer(
         auto state = capture_context(text, path);
         // The reader let an unfinished design through only because the caller
         // asked to open it read-only; record what finishes it. The default is
-        // the one the reader names when it refuses such a file.
+        // the one the vendored reader names when it refuses such a file
+        // (chiplet_format_io.cpp, the finalize_required checks); a test ties
+        // the two together.
+        static const std::string kDefaultFinalizer = "hyp_to_gds.py --update-chiplet-file";
         if (doc.metadata.finalize_required)
             state.m_finalizer = doc.metadata.finalizer.empty()
-                ? std::string("hyp_to_gds.py --update-chiplet-file") : doc.metadata.finalizer;
+                ? kDefaultFinalizer : doc.metadata.finalizer;
         assembly->set_document_persistence(std::move(state));
     }
 
