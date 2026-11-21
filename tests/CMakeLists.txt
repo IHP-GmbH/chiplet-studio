@@ -21,6 +21,7 @@ enable_testing()
 add_executable(chiplet_tests
     test_main.cpp  # Custom main with early Python initialization
     test_chiplet_format.cpp
+    test_unfinished_design.cpp
     test_document_preservation.cpp
     test_recovery_checkpoint.cpp
     test_recovery_dialog.cpp
@@ -151,6 +152,7 @@ target_sources(chiplet_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui/PropertiesPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/DrillDownPanel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/ViewingNotesBar.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/UnfinishedDesignBanner.cpp
     ${CMAKE_SOURCE_DIR}/src/scripting/ScriptEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/LayerMeshBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/view3d/GDSLayerExtractor.cpp

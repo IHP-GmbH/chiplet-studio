@@ -201,6 +201,7 @@ set(UI_SOURCES
     src/ui/PropertiesPanel.cpp
     src/ui/DrillDownPanel.cpp
     src/ui/ViewingNotesBar.cpp
+    src/ui/UnfinishedDesignBanner.cpp
     src/ui/ComponentStyle.cpp
     src/ui/UnitConverter.cpp
     src/ui/CrashRecoveryDialog.cpp

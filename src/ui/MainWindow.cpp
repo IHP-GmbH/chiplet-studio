@@ -17,6 +17,7 @@
 #include "CrashRecoveryDialog.h"
 #include "ExportPngDialog.h"
 #include "ViewingNotesBar.h"
+#include "UnfinishedDesignBanner.h"
 #include "ShortcutPolicy.h"
 #include "DockWidthPolicy.h"
 #include "PanelWiring.h"
@@ -115,6 +116,7 @@ void MainWindow::setupMenus()
     QAction* saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, &MainWindow::onFileSave);
+    m_saveAction = saveAction;
 
     QAction* saveAsAction = fileMenu->addAction("Save &As...");
     // SaveAs is the one standard key the generic theme left unbound in the
@@ -125,6 +127,7 @@ void MainWindow::setupMenus()
         shortcutsOrFallback(QKeySequence::keyBindings(QKeySequence::SaveAs),
                             QStringLiteral("Ctrl+Shift+S")));
     connect(saveAsAction, &QAction::triggered, this, &MainWindow::onFileSaveAs);
+    m_saveAsAction = saveAsAction;
 
     QAction* recoveryAction = fileMenu->addAction("Recovery &Checkpoints...");
     connect(recoveryAction, &QAction::triggered, this, &MainWindow::onFileRecovery);
@@ -250,6 +253,8 @@ void MainWindow::setupPanels()
         auto* centralLayout = new QVBoxLayout(central);
         centralLayout->setContentsMargins(0, 0, 0, 0);
         centralLayout->setSpacing(0);
+        m_unfinishedBanner = new UnfinishedDesignBanner(central);
+        centralLayout->addWidget(m_unfinishedBanner);
         m_viewingNotesBar = new ViewingNotesBar(central);
         centralLayout->addWidget(m_viewingNotesBar);
         centralLayout->addWidget(m_assemblyView, 1);
@@ -593,6 +598,7 @@ void MainWindow::onFileNew()
     if (m_autoSaveTimer) {
         m_autoSaveTimer->start(AUTO_SAVE_INTERVAL_MS);
     }
+    applyDocumentReadOnly();
 }
 
 void MainWindow::openFile(const QString& path)
@@ -625,7 +631,8 @@ void MainWindow::openFile(const QString& path)
         LoadResult result;
         try {
             ChipletFormat format;
-            result.assembly = format.load(path.toStdString());
+            result.assembly = format.load(path.toStdString(),
+                                          UnfinishedDesign::OpenReadOnly);
         } catch (const std::exception& e) {
             result.error = QString::fromStdString(e.what());
         }
@@ -934,6 +941,7 @@ void MainWindow::onAssemblyLoadFinished()
     if (m_autoSaveTimer) {
         m_autoSaveTimer->start(AUTO_SAVE_INTERVAL_MS);
     }
+    applyDocumentReadOnly();
 
     statusBar()->showMessage("Loaded: " + m_currentFilePath, 3000);
     emit loadingFinished();
@@ -1368,6 +1376,7 @@ void MainWindow::setRecoveredAssembly(std::unique_ptr<Assembly> assembly)
     if (m_autoSaveTimer) {
         m_autoSaveTimer->start(AUTO_SAVE_INTERVAL_MS);
     }
+    applyDocumentReadOnly();
 }
 
 void MainWindow::setupViewModeToolbar()
@@ -1759,9 +1768,22 @@ void MainWindow::setupAutoSave()
     // Timer starts when an assembly is loaded/created
 }
 
+void MainWindow::applyDocumentReadOnly()
+{
+    const bool readOnly = m_assembly && m_assembly->document_persistence().read_only();
+    if (m_unfinishedBanner) {
+        if (m_assembly) m_unfinishedBanner->showFor(m_assembly->document_persistence());
+        else m_unfinishedBanner->hide();
+    }
+    if (m_saveAction) m_saveAction->setEnabled(!readOnly);
+    if (m_saveAsAction) m_saveAsAction->setEnabled(!readOnly);
+    if (readOnly && m_autoSaveTimer) m_autoSaveTimer->stop();
+}
+
 void MainWindow::onAutoSave()
 {
-    if (!m_assembly || m_installingAssembly) {
+    if (!m_assembly || m_installingAssembly
+        || m_assembly->document_persistence().read_only()) {
         return;
     }
 
