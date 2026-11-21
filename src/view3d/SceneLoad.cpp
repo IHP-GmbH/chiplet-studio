@@ -188,74 +188,127 @@ QMatrix4x4 componentTransform(const Component& comp)
     return transform;
 }
 
-std::map<QString, ComponentMesh> buildBoxMeshes(const Assembly& assembly,
-                                                const std::map<std::string, LayerPropertiesFile>& sheets)
+namespace {
+
+// The box for `footprint`, the component's extent in its own frame in um,
+// placed as the layout path places the layout: gdsBoxCenter gives the centre
+// on the floor for the component's anchor and orientation.
+ComponentMesh placedBoxMesh(const Component& comp, const GDSBoundingBox& footprint,
+                            double thicknessUm, const LayerPropertiesFile* lyp)
 {
-    std::map<QString, ComponentMesh> meshes;
-    const auto& components = assembly.components();
+    const float w = static_cast<float>(footprint.width() * kUmToMm);
+    const float h = static_cast<float>(footprint.height() * kUmToMm);
+    const float d = static_cast<float>(thicknessUm * kUmToMm);
+    const ScenePosition centre =
+        gdsBoxCenter(footprint, comp.position(), comp.anchor(), comp.orientation());
+    // buildBox takes its centre in X and Y, and its +Z face in Z.
+    ComponentMesh mesh = MeshBuilder::buildBox(
+        w, d, h, centre.x, MeshBuilder::anchoredOffsetY(comp, centre.y, d), centre.z + h / 2.0f);
+    mesh.setColor(MeshBuilder::colorForComponent(comp, lyp));
+    return mesh;
+}
 
-    // Extract GDS bounding boxes for components with layouts.
-    // This ensures box meshes match the actual GDS footprint in all
-    // abstraction modes (Wireframe, Transparent, Solid).
-    std::map<QString, GDSBoundingBox> gdsBounds;
-    for (const auto& comp : components) {
-        if (!comp || comp->layout_path().empty()) continue;
-        GDSBoundingBox bbox = GDSLayerExtractor::extractBoundingBox(
-            comp->layout_path(), comp->top_cell());
-        if (bbox.is_valid()) {
-            gdsBounds[QString::fromStdString(comp->id())] = bbox;
-        }
+// The footprint of a component no layout gives one: its dimensions box with
+// the layout's (0, 0) at its lower-left corner. Only gds_origin reads where
+// that origin is, and for it the corner is assumed; assumedOriginNote says so.
+GDSBoundingBox assumedOriginFootprint(const Dimensions3D& dims)
+{
+    return GDSBoundingBox{0.0, 0.0, dims.width, dims.height};
+}
+
+Dimensions3D drawnDimensions(const Component& comp)
+{
+    const Dimensions3D dims = comp.dimensions();
+    if (dims.width <= 0 || dims.height <= 0 || dims.thickness <= 0) {
+        return MeshBuilder::defaultDimensions(comp.type());
     }
+    return dims;
+}
 
-    // Build non-instanced box meshes for ALL components.
-    // For components with GDS layouts, use GDS bounding box for dimensions
-    // so that all abstraction levels show the correct footprint.
-    for (const auto& comp : components) {
+// The gds_origin components drawn with an assumed origin, in one note: those
+// whose file names no layout, or (`layoutNamed`) whose layout did not read.
+std::string assumedOriginNote(const std::vector<std::string>& ids, bool layoutNamed)
+{
+    const bool one = ids.size() == 1;
+    std::string names;
+    for (const std::string& id : ids) {
+        names += (names.empty() ? "" : ", ") + id;
+    }
+    std::string note = "3D: " + names
+        + (one ? " is anchored at its GDS origin, but " : " are anchored at their GDS origin, but ");
+    if (layoutNamed) {
+        note += one ? "its layout could not be read" : "their layouts could not be read";
+    } else {
+        note += one ? "the file names no layout for it" : "the file names no layout for them";
+    }
+    note += ", so where that origin sits is assumed: the lower-left corner of ";
+    note += one ? "its box" : "each box";
+    note += " (the lower-right corner, seen from above, for a face-down die). ";
+    if (layoutNamed) {
+        note += one ? "Fix the layout path or the top cell" : "Fix the layout paths or the top cells";
+    } else {
+        note += "Name a layout";
+    }
+    return note + ", or use anchor: bbox_center, to place " + (one ? "it" : "them") + " exactly.";
+}
+
+} // namespace
+
+ComponentMesh dimensionsBoxMesh(const Component& comp, const LayerPropertiesFile* lyp)
+{
+    const Dimensions3D dims = drawnDimensions(comp);
+    return placedBoxMesh(comp, assumedOriginFootprint(dims), dims.thickness, lyp);
+}
+
+BoxMeshes buildBoxMeshes(const Assembly& assembly,
+                         const std::map<std::string, LayerPropertiesFile>& sheets)
+{
+    BoxMeshes out;
+    std::vector<std::string> noLayout;
+    std::vector<std::string> unread;
+    std::size_t fromLayout = 0;
+
+    // Every component is drawn as a box in Wireframe, Transparent and Solid,
+    // and when its layout is not drawn. Its footprint is its GDS extent when
+    // the layout reads, so every mode shows the layout's footprint, and its
+    // dimensions otherwise. Both are placed the same way.
+    for (const auto& comp : assembly.components()) {
         if (!comp) continue;
-
         const LayerPropertiesFile* lyp = findSheet(sheets, comp->technology());
+        const QString compId = QString::fromStdString(comp->id());
 
-        QString compId = QString::fromStdString(comp->id());
-        auto bboxIt = gdsBounds.find(compId);
-
-        ComponentMesh mesh;
-        if (bboxIt != gdsBounds.end()) {
-            // GDS-derived box: match the layout footprint
-            const GDSBoundingBox& bbox = bboxIt->second;
-            const auto& pos = comp->position();
-            auto dims = comp->dimensions();
-
-            // Use GDS width/height, keep thickness from component
-            if (dims.thickness <= 0) {
-                dims.thickness = 200.0;  // Default die thickness
-            }
-
-            // Convert to mm (same as MeshBuilder)
-            float w = static_cast<float>(bbox.width() / 1000.0);
-            float d = static_cast<float>(dims.thickness / 1000.0);
-            float h = static_cast<float>(bbox.height() / 1000.0);
-
-            // Match the detailed path's actual GDS origin/centre and X mirror.
-            // buildBox takes the +Z face, rather than the horizontal centre.
-            const ScenePosition scenePos = gdsBoxCenter(
-                bbox, pos, comp->anchor(), comp->orientation());
-            float offsetX = scenePos.x;
-            float offsetY = MeshBuilder::anchoredOffsetY(*comp, scenePos.y, d);  // stack-anchored elevation
-            float offsetZ = scenePos.z + h / 2.0f;
-
-            mesh = MeshBuilder::buildBox(w, d, h, offsetX, offsetY, offsetZ);
-            mesh.setColor(MeshBuilder::colorForComponent(*comp, lyp));
-        } else {
-            // No GDS: use YAML dimensions (existing behavior)
-            mesh = MeshBuilder::buildComponentMesh(*comp, lyp);
+        GDSBoundingBox bbox;
+        if (!comp->layout_path().empty()) {
+            bbox = GDSLayerExtractor::extractBoundingBox(comp->layout_path(), comp->top_cell());
         }
-
-        meshes.emplace(compId, std::move(mesh));
+        if (bbox.is_valid()) {
+            ++fromLayout;
+            double thickness = comp->dimensions().thickness;
+            if (thickness <= 0) {
+                thickness = 200.0;  // Default die thickness
+            }
+            out.meshes.emplace(compId, placedBoxMesh(*comp, bbox, thickness, lyp));
+            continue;
+        }
+        if (comp->anchor() == Anchor::GdsOrigin) {
+            if (comp->layout_path().empty()) {
+                noLayout.push_back(comp->id());
+            } else {
+                unread.push_back(comp->id());
+            }
+        }
+        out.meshes.emplace(compId, dimensionsBoxMesh(*comp, lyp));
+    }
+    if (!noLayout.empty()) {
+        out.notes.push_back(assumedOriginNote(noLayout, false));
+    }
+    if (!unread.empty()) {
+        out.notes.push_back(assumedOriginNote(unread, true));
     }
 
-    qDebug() << "Built" << meshes.size() << "box meshes ("
-             << gdsBounds.size() << " from GDS extents)";
-    return meshes;
+    qDebug() << "Built" << out.meshes.size() << "box meshes (" << fromLayout
+             << " from GDS extents)";
+    return out;
 }
 
 StandardBuild buildStandardGeometry(const Component& comp,
@@ -409,7 +462,9 @@ StandardScene loadStandardScene(const Assembly& assembly,
         return scene;
     }
 
-    scene.boxes = buildBoxMeshes(assembly, sheets);
+    BoxMeshes boxes = buildBoxMeshes(assembly, sheets);
+    scene.boxes = std::move(boxes.meshes);
+    scene.boxNotes = std::move(boxes.notes);
 
     // Layer geometry for every component (the per-component render mode
     // then decides what is actually drawn).

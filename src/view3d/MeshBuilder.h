@@ -20,17 +20,13 @@ namespace chiplet {
  */
 class MeshBuilder {
 public:
-    // Generate box mesh for a component
-    // If lyp is provided, uses layer colors from .lyp file
-    static ComponentMesh buildComponentMesh(const Component& comp,
-                                            const LayerPropertiesFile* lyp = nullptr);
+    // The dimensions (um) a component of `type` is drawn with when its own
+    // are missing or not positive.
+    static Dimensions3D defaultDimensions(ComponentType type);
 
-    // Generate box mesh for a component at origin (for instanced rendering)
-    // The position is NOT baked into geometry - use instance transform instead
-    static ComponentMesh buildComponentMeshAtOrigin(const Component& comp,
-                                                     const LayerPropertiesFile* lyp = nullptr);
-
-    // Generate a simple box mesh with given dimensions
+    // A box `width` x `height` x `depth`, centred on offsetX and offsetY. In Z
+    // it spans [offsetZ - depth, offsetZ]: offsetZ is its +Z face, not its
+    // centre.
     static ComponentMesh buildBox(float width, float height, float depth,
                                   float offsetX = 0, float offsetY = 0, float offsetZ = 0);
 

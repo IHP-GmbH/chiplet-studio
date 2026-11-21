@@ -11,8 +11,7 @@
 
 namespace chiplet {
 
-// Get default dimensions for component type (in micrometers)
-static Dimensions3D getDefaultDimensions(ComponentType type)
+Dimensions3D MeshBuilder::defaultDimensions(ComponentType type)
 {
     Dimensions3D dims;
     switch (type) {
@@ -34,61 +33,6 @@ static Dimensions3D getDefaultDimensions(ComponentType type)
             break;
     }
     return dims;
-}
-
-ComponentMesh MeshBuilder::buildComponentMesh(const Component& comp,
-                                               const LayerPropertiesFile* lyp)
-{
-    auto dims = comp.dimensions();
-    const auto& pos = comp.position();
-
-    // Use default dimensions if not specified
-    if (dims.width <= 0 || dims.height <= 0 || dims.thickness <= 0) {
-        dims = getDefaultDimensions(comp.type());
-    }
-
-    // Convert micrometers to mm for reasonable scale
-    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z (elevation) -> 3D Y
-    // This aligns the EDA X-Y plane with the 3D X-Z plane (horizontal)
-    // and maps layer elevation to the Y axis (vertical, matching camera up vector)
-    float w = static_cast<float>(dims.width / 1000.0);
-    float h = static_cast<float>(dims.height / 1000.0);
-    float d = static_cast<float>(dims.thickness / 1000.0);
-    const ScenePosition scenePos = sceneFromChiplet(pos);
-    float x = scenePos.x;
-    float y = anchoredOffsetY(comp, scenePos.y, d);  // stack-anchored elevation (bottom-anchored die/substrate, top-anchored interposer)
-    float z = scenePos.z;   // Chiplet Y -> 3D -Z (horizontal, negated for correct orientation)
-
-    // Build box with dimensions: (width, thickness, height) for (3D X, 3D Y, 3D Z)
-    // w = chiplet width -> 3D X, d = chiplet thickness -> 3D Y (vertical), h = chiplet height -> 3D Z
-    ComponentMesh mesh = buildBox(w, d, h, x, y, z);
-    mesh.setColor(colorForComponent(comp, lyp));
-
-    return mesh;
-}
-
-ComponentMesh MeshBuilder::buildComponentMeshAtOrigin(const Component& comp,
-                                                       const LayerPropertiesFile* lyp)
-{
-    auto dims = comp.dimensions();
-
-    // Use default dimensions if not specified
-    if (dims.width <= 0 || dims.height <= 0 || dims.thickness <= 0) {
-        dims = getDefaultDimensions(comp.type());
-    }
-
-    // Convert micrometers to mm for reasonable scale
-    // Position is NOT included - mesh is at origin for instanced rendering
-    // Coordinate mapping: chiplet X -> 3D X, chiplet Y -> 3D Z, chiplet Z (elevation) -> 3D Y
-    float w = static_cast<float>(dims.width / 1000.0);
-    float h = static_cast<float>(dims.height / 1000.0);
-    float d = static_cast<float>(dims.thickness / 1000.0);
-
-    // Build box with dimension swap: (width, thickness, height) for (3D X, 3D Y, 3D Z)
-    ComponentMesh mesh = buildBox(w, d, h, 0, 0, 0);
-    mesh.setColor(colorForComponent(comp, lyp));
-
-    return mesh;
 }
 
 ComponentMesh MeshBuilder::buildBox(float width, float height, float depth,
@@ -177,8 +121,7 @@ float MeshBuilder::anchoredOffsetY(const Component& comp,
 
     // Everything else (dies, die arrays, substrate, and a legacy interposer with
     // no declared surface) is BOTTOM-anchored: bottom face at position.z
-    // (baseSceneY), box grows upward. Matches the pos.z-is-bottom convention
-    // already used by getComponentCenter() and the camera-fit fallback.
+    // (baseSceneY), box grows upward.
     return baseSceneY + halfDepth;
 }
 

@@ -343,6 +343,9 @@ ViewCountReport viewCountScene(const Assembly& assembly, StandardScene scene,
                                const std::vector<std::string>& sheetNotes,
                                const ViewCountOptions& options)
 {
+    // The file's notes, as the view lists them: its sheets', then its boxes'.
+    std::vector<std::string> fileNotes = sheetNotes;
+    fileNotes.insert(fileNotes.end(), scene.boxNotes.begin(), scene.boxNotes.end());
     ViewCountReport report;
     auto& out = report.lines;
     auto fail = [&report](std::string why) { report.failures.push_back(std::move(why)); };
@@ -459,7 +462,7 @@ ViewCountReport viewCountScene(const Assembly& assembly, StandardScene scene,
         ViewNotesState state;
         state.showFill = options.fill;
         state.fillPrepared = true;
-        const std::vector<std::string> notes = viewNotes(state, assembly, sheetNotes,
+        const std::vector<std::string> notes = viewNotes(state, assembly, fileNotes,
                                                          componentNotes, counts, fill, fillCoverage);
         std::map<const FastLayer*, std::size_t> choiceIndex;
         for (std::size_t i = 0; i < refs.size(); ++i) choiceIndex[refs[i].layer] = i;
@@ -646,7 +649,7 @@ ViewCountReport viewCountScene(const Assembly& assembly, StandardScene scene,
             coverage = coverageNotes(refs, choice);
         }
         const std::vector<std::string> notes =
-            fastNotes(options.mode, assembly, sheetNotes, componentNotes, fast, coverage);
+            fastNotes(options.mode, assembly, fileNotes, componentNotes, fast, coverage);
 
         std::map<const FastLayer*, std::size_t> choiceIndex;
         for (std::size_t i = 0; i < refs.size(); ++i) choiceIndex[refs[i].layer] = i;
